@@ -1,0 +1,31 @@
+# frames 1300
+# Enter the game (mode 0) and walk right until standing just short of the
+# type-$0E entity the level places at x=895,y=159 (`data_C0B4A4`'s mode-0
+# record 4; entity_ai_none, so it never moves), then press B once while still
+# facing right to attack it.
+#
+# B is the attack button, not a jump button: `entity_apply_hit_reaction`
+# ($C0:9A61, the type-$02/player dispatch entry, docs/naming_proposals.md
+# section 4) reads $8A/$8C (joy1_held/joy1_pressed, dream_ram.h) and forces
+# entity_state to $000C the instant bit $8000 (B) is newly pressed --
+# `check_pending_player_attack` ($C0:8E8E) is the same body fed player 2's
+# $8E/$90 instead, which is what made the RAM names/bit layout legible enough
+# to spot this. State $000C selects animation id $003E
+# (`data_C0B7AE`/`entity_state_anim_table`, docs/naming_proposals.md section 7
+# for the entity-record layout the offsets come from), whose script's frame-1
+# callback is `anim_cb_hit_enemies` ($C0:B0FE, docs/handler_tables.md section
+# 2) -- it sweeps entities of type $0E-$11 within $48px in the facing
+# direction and hands any it finds to `entity_hit_react` ($C0:B171), which
+# calls `set_entity_state` ($C0:B1B1) to put the target into state $10.
+#
+# Holding Right from frame 240 puts the player within that 0x48px reach by
+# frame ~1120 (--dump-wram against $0828/$08A8 confirmed distance 68px,
+# facing bit steady); B is pressed at 1140 with a few frames of margin. Right
+# is dropped a moment later so the attack (which zeroes velocity while state
+# $0C is active) is not disturbed by further movement.
+0    none
+120  Start
+126  none
+240  Right
+1140 Right+B
+1146 Right

@@ -235,7 +235,7 @@ loc_C081A6:
     sta.b $76                              ; C081B0 m0x0
     lda.w $0C1B                            ; C081B2 m0x0
     beq loc_C081BA                         ; C081B5 m0x0
-    jsr.w sub_C091BB                       ; C081B7 m0x0
+    jsr.w cgram_palette_ramp_step          ; C081B7 m0x0
 
 loc_C081BA:
     lda.w $0C15                            ; C081BA m0x0
@@ -348,7 +348,7 @@ jtbl_C08272:
     dw nmi_scroll_title
 
 jtbl_C0827A:
-    dw sub_C08A74
+    dw mode0_camera_zone_update
     dw check_pending_player_attack
     dw check_pending_player_attack
     dw check_pending_player_attack
@@ -1083,7 +1083,7 @@ loc_C08914:
     rts                                    ; C08A59 m0x0
     incbin "../data/01.bin":$0A5A..$0A74      ; 26 bytes
 
-sub_C08A74:
+mode0_camera_zone_update:
     stz.w $0C04                            ; C08A74 m0x0
     lda.w $0C1F                            ; C08A77 m0x0
     bne loc_C08A9F                         ; C08A7A m0x0
@@ -1271,8 +1271,6 @@ loc_C08BD0:
     bcs loc_C08BE4                         ; C08BD4 m0x0
     lda.w $0C11                            ; C08BD6 m0x0
     bne loc_C08BE4                         ; C08BD9 m0x0
-
-ppu_regs_default:
     lda.w #$0097                           ; C08BDB m0x0
     sta.w $0C11                            ; C08BDE m0x0
     stz.w $0C13                            ; C08BE1 m0x0
@@ -2053,7 +2051,7 @@ loc_C091B4:
     rep.b #$20                             ; C091B8 m1x0
     rts                                    ; C091BA m0x0
 
-sub_C091BB:
+cgram_palette_ramp_step:
     bmi loc_C091D1                         ; C091BB m0x0
     lda.w $0C1D                            ; C091BD m0x0
     clc                                    ; C091C0 m0x0

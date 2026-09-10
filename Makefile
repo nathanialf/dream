@@ -10,7 +10,7 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-profile
+.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-profile app sdl3
 
 all: check
 
@@ -42,6 +42,38 @@ build/spc.bin: spc/driver.asm $(HALVES) | build
 harness:
 	cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/recomp -j
+
+# The game: an SDL3 window, sound and gamepad around the same core and the same
+# recomp routines the harness verifies. Built into build/recomp/dream.
+#
+# A system SDL3 is used when there is one. Otherwise SDL3 is built from source
+# into build/sdl3 first -- static, no system headers required: SDL's own configure
+# turns off whatever it cannot find, and the dummy video/audio drivers are enough
+# for the headless check in recomp/app/README.md.
+SDL3_PREFIX := $(CURDIR)/build/sdl3
+
+app:
+	@if cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release | grep -q '^-- SDL3 found'; then \
+	    echo "make: using an SDL3 cmake already knows about"; \
+	else \
+	    $(MAKE) sdl3 && \
+	    cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release \
+	        -DCMAKE_PREFIX_PATH=$(SDL3_PREFIX); \
+	fi
+	cmake --build build/recomp -j --target dream
+
+sdl3: build/sdl3/lib/cmake/SDL3/SDL3Config.cmake
+
+build/sdl3/lib/cmake/SDL3/SDL3Config.cmake:
+	test -d build/sdl3-src || \
+	    git clone https://github.com/libsdl-org/SDL -b release-3.2.x --depth 1 build/sdl3-src
+	cmake -S build/sdl3-src -B build/sdl3-build -DCMAKE_BUILD_TYPE=Release \
+	    -DSDL_STATIC=ON -DSDL_SHARED=OFF \
+	    -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF \
+	    -DSDL_UNIX_CONSOLE_BUILD=ON \
+	    -DCMAKE_INSTALL_PREFIX=$(SDL3_PREFIX)
+	cmake --build build/sdl3-build -j
+	cmake --install build/sdl3-build
 
 # Recomp gate: build the harness, then run every input script under
 # recomp/harness/inputs/ in lockstep with the C routines installed. Fails if any

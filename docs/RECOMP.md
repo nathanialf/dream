@@ -50,6 +50,29 @@ installed and one without, compared byte for byte after every frame.
 Build, CLI, the hook API (`recomp/include/snes_state.h`) and the lockstep protocol
 are documented in `recomp/README.md`.
 
+## Native app
+
+`recomp/app/` holds `dream`: the game itself, an SDL3 program that loads the
+user's own ROM (command line, `./baserom/DREAM.sfc`, `~/.local/share/dream/`, in
+that order; refused unless the SHA-1 matches), installs every routine the recomp
+has registered, and runs at 60.0988 Hz with picture, sound and a gamepad. No
+launcher, no menu, no settings, no config file — the mapping above is compiled in,
+and Escape quits.
+
+    make app        # builds SDL3 into build/sdl3 first if the system has none
+
+`dream` and `dream_harness` are deliberately the same machine: the same core, the
+same hook dispatcher, the same accessors and the same cycle charge, with SDL as
+the only addition. Two hidden flags keep that checkable — `--frames N --input
+SCRIPT` runs a harness input script and prints the harness's own frame line, which
+must agree field for field with `dream_harness --hooks on` over the same script.
+The picture and the sound are still produced under those flags, so the check
+covers the platform layer instead of routing around it.
+
+Build, controls and the presentation decisions (256x224 integer-scaled, DSP output
+through an SDL audio stream, clock-paced rather than vsync-paced) are documented in
+`recomp/app/README.md`.
+
 ## The port
 
 `recomp/src/` holds the C, one file per subsystem and one function per 65816

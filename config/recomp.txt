@@ -23,6 +23,7 @@ anim_update
 build_metatile_column_500
 build_metatile_column_580
 camera_follow_player
+cgram_palette_ramp_step
 cgram_upload_queue_flush
 check_pending_player_attack
 clear_sprite_table
@@ -39,6 +40,7 @@ entity_apply_velocity_x
 entity_apply_velocity_y
 entity_build_oam_frame
 entity_ground_y_lookup
+entity_hit_react
 entity_init_from_table
 entity_render_order_reset
 entity_sort_draw_order
@@ -48,10 +50,27 @@ entity_spawn_transform_c
 entity_update_tick
 entity_upload_pending_tiles
 execute_spc_sound_engine
+loc_C08012
+loc_C08042
+loc_C0805E
+loc_C08BDB
+loc_C08BE4
+loc_C08E2B
+loc_C08E39
+loc_C08E7F
+loc_C0A4E9
+loc_C0A4F5
+mode0_camera_zone_update
+mode0_level_init
 mode0_particle_draw_dispatch
+mode1_level_init
 mode1_particle_dispatch
 mode1_reset_particles_and_oam
+mode2_level_init
 mode2_particle_dispatch
+nmi
+nmi_handler_gameplay
+nmi_handler_title_fade
 nmi_scroll_mode0
 nmi_scroll_mode1
 nmi_scroll_mode2
@@ -71,11 +90,15 @@ particle_update_and_draw_mode0
 play_footstep_sound
 play_sound_effect
 play_zone_transition_sound
+ppu_init
 random_next
 read_joypads
+reset
+reset_native
 sample_uploader
 set_bg_scroll
 set_bg_scroll_prep
+set_entity_state
 sfx_command_dispatch
 sparkle_array_init
 sparkle_update_and_draw
@@ -84,6 +107,7 @@ spc_init
 spc_ipl_upload_loader
 spc_upload_driver
 sub_C0A1F3
+title_screen_init
 upload_global_samples
 upload_inline_spc_block
 upload_song_data
@@ -107,7 +131,6 @@ write_spc_command
 ;   anim_rate_3_32
 ;   anim_rate_3_8
 ;   entity_clear_anim_unused
-;   entity_hit_react
 ;   oam_emit_frame_1row
 ;   oam_emit_frame_1row_flip
-;   set_entity_state
+;   unused_vec

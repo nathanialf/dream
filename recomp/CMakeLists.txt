@@ -53,3 +53,21 @@ add_executable(dream_harness
 )
 target_include_directories(dream_harness PRIVATE include harness)
 target_link_libraries(dream_harness PRIVATE lakesnes)
+
+# --- native app (optional) ---------------------------------------------------
+# `dream` is the game: SDL3 window, sound and gamepad around the same core and the
+# same recomp routines. It is built only when SDL3 is found, so a machine with no
+# SDL (CI, this repository's own verification box) still gets dream_harness.
+#
+#   cmake -S recomp -B build/recomp -DCMAKE_PREFIX_PATH=$PWD/build/sdl3
+#
+# `make app` from the repository root does that, building SDL3 into build/sdl3
+# first if the system has none.
+find_package(SDL3 CONFIG QUIET)
+if(SDL3_FOUND)
+  add_subdirectory(app)
+  message(STATUS "SDL3 found: building the `dream` app as well as dream_harness")
+else()
+  message(STATUS "SDL3 not found: `dream` skipped, dream_harness only "
+                 "(set CMAKE_PREFIX_PATH to an SDL3 install to enable it)")
+endif()

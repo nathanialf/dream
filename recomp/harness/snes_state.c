@@ -332,11 +332,45 @@ void ss_call_long(SnesState* ss, uint8_t bank, uint16_t addr) {
 }
 
 /* ---- yielding back to the ROM ------------------------------------------- */
+/* The entry snapshots are a stack, one frame per hook in flight, because hooks
+ * nest: ss_run_callee runs the reference CPU over a callee, and a converted
+ * callee's own hook fires inside the caller's. The inner hook has to answer
+ * ss_yield_wanted() about its own entry -- it may hand its part of the routine
+ * back on its own -- and the outer hook has to get its own answer back when the
+ * callee returns, because it is still holding a routine that has to be given
+ * back at the boundary it crossed. */
+void ss_enter_hook(SnesState* ss) {
+  if(ss->depth >= SS_HOOK_DEPTH_MAX) {
+    fprintf(stderr, "snes_state: hooks nested deeper than %d; raise SS_HOOK_DEPTH_MAX\n",
+            SS_HOOK_DEPTH_MAX);
+    exit(2);
+  }
+  ss->entry[ss->depth].vblank = ss->snes->inVblank;
+  ss->entry[ss->depth].frames = ss->snes->frames;
+  ss->depth++;
+  if(ss->depth > ss->maxDepth) ss->maxDepth = ss->depth;
+}
+
+void ss_leave_hook(SnesState* ss) {
+  if(ss->depth <= 0) {
+    fprintf(stderr, "snes_state: ss_leave_hook with no hook in flight\n");
+    exit(2);
+  }
+  ss->depth--;
+}
+
+int ss_hook_depth(const SnesState* ss) { return ss->depth; }
+int ss_hook_max_depth(const SnesState* ss) { return ss->maxDepth; }
+
 bool ss_yield_wanted(const SnesState* ss) {
   const Snes* snes = ss->snes;
   if(snes->cpu->intWanted) return true;
-  if(snes->frames != ss->entryFrames) return true;
-  return snes->inVblank && !ss->entryVblank;
+  /* Outside a hook there is no routine to hand back, and no snapshot to compare
+   * against; only the latched interrupt above is meaningful. */
+  if(ss->depth <= 0) return false;
+  const SsHookEntry* e = &ss->entry[ss->depth - 1];
+  if(snes->frames != e->frames) return true;
+  return snes->inVblank && !e->vblank;
 }
 
 /* ---- DMA ---------------------------------------------------------------- */

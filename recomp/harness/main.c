@@ -153,14 +153,17 @@ typedef struct {
   int cycleCost;             /* master cycles to charge, 0 = charge nothing */
 } Installed;
 
+#define PROF_DEPTH 64
+#define PROF_STACK 8         /* bytes of its caller's stack a frame remembers */
+
 /* One in-flight routine while --profile is running. */
 typedef struct {
   unsigned idx;              /* index into Machine.hooks */
   uint16_t sp;               /* stack pointer at the routine's first instruction */
   uint64_t cycles;           /* master cycle count at that instant */
+  uint8_t above[PROF_STACK]; /* [sp+1 .. sp+PROF_STACK] as they stood then */
+  bool aboveKnown;           /* false when the frame is not in the low WRAM mirror */
 } ProfFrame;
-
-#define PROF_DEPTH 64
 
 typedef struct {
   Snes* snes;
@@ -181,6 +184,10 @@ typedef struct {
   uint64_t* profMin;
   uint64_t* profMax;
   uint8_t* profNoReturn;     /* candidate pass: the hook handed control on instead */
+  uint8_t* profRomTail;      /* reference pass: the ROM left through a tail jmp */
+  uint16_t profFrameSp;      /* the lowest sp any open frame stands at */
+  unsigned long profDropped; /* entries not measured: the frame stack was full */
+  unsigned long profOpen;    /* frames still open when the run ended */
   /* serialisation scratch */
   uint8_t vram[VRAM_BYTES];
   uint8_t cgram[CGRAM_BYTES];
@@ -214,23 +221,107 @@ static int machine_find_hook(const Machine* m, uint32_t pc24) {
   return -1;
 }
 
-/* --profile: close every frame whose routine has returned. A routine has
- * returned when the stack pointer is back above where it stood at the routine's
- * first instruction: rts/rtl pop exactly that far, while an interrupt taken
- * inside the routine pushes below it and so cannot end a frame early. The
+/* --profile, the reference pass: measure what the ROM's own code spends on a
+ * routine, from its first instruction to the moment control leaves it. The
  * cycles a nested callee costs are billed to the outer routine too, which is
- * what a hook replacing the whole call tree needs to be charged. */
-static void prof_close(Machine* m, uint16_t sp) {
-  while(m->profDepth > 0 && sp > m->profStack[m->profDepth - 1].sp) {
-    const ProfFrame* f = &m->profStack[--m->profDepth];
-    uint64_t d = m->snes->cycles - f->cycles;
-    if(getenv("DREAM_PROF_TRACE") != NULL)
-      fprintf(stderr, "rom  %-28s start=%" PRIu64 " cost=%" PRIu64 "\n",
-              m->hooks[f->idx].name, f->cycles, d);
-    m->profCycles[f->idx] += d;
-    if(m->profCalls[f->idx] == 0 || d < m->profMin[f->idx]) m->profMin[f->idx] = d;
-    if(d > m->profMax[f->idx]) m->profMax[f->idx] = d;
-    m->profCalls[f->idx]++;
+ * what a hook replacing the whole call tree needs to be charged.
+ *
+ * The stack pointer alone cannot say when control left. Three shapes in this ROM
+ * unwind their own frame and keep running:
+ *
+ *   entity_animate_only and the three entity_spawn_transform routines end
+ *   `jsl anim_update ; pla ; rts`, where the 16-bit pla drops the return address
+ *   entity_update_tick's jsr pushed so the rts leaves the whole tick: sp is
+ *   above the frame at the pla, one instruction before the routine ends.
+ *
+ *   anim_rate_store's plb pops the byte the caller's `pea $8080 ; plb` left on
+ *   the stack, three instructions before the `jsl anim_update` that is nearly
+ *   all of what the routine costs.
+ *
+ *   every OAM emitter's "table is full" exit is `pla ; jmp loc_C0A6CD`, a jump
+ *   into entity_build_oam_frame's `pea $8080 ; plb ; plb ; rtl` tail: sp is above
+ *   the frame at the jmp, and the emitter's own last instruction is that jmp.
+ *
+ * Closing on sp stopped the clock at the pla, at the plb and at the jmp. It cost
+ * the first shape its last instruction, and it cost anim_rate_store the entire
+ * jsl: 69 master cycles were measured for a routine that costs 1709. The C body
+ * models every one of those instructions, so the routine looked cheaper than the
+ * hook that replaces it -- the exact opposite of the reading --profile exists to
+ * give.
+ *
+ * So a frame closes on the *pc* instead: on the instruction the return that
+ * moved the stack pointer to where it now stands would land on, read out of the
+ * bytes that sat above the frame when the routine started. rts pops a word and
+ * adds one, rtl pops a word and a bank and adds one, rti pops flags, a word and
+ * a bank and adds nothing. sp is still the guard: a frame that is still on the
+ * stack cannot have returned.
+ *
+ * A routine that leaves through a tail jmp reaches no return target of its own,
+ * so its frame is closed when the frame it was entered from returns, and flagged
+ * (profRomTail) so its line says the two figures cover different work. */
+static bool prof_frame_returned(const ProfFrame* f, uint16_t sp, uint32_t pc24) {
+  if(sp <= f->sp) return false;                    /* the frame is still there */
+  unsigned d = (unsigned) (uint16_t) (sp - f->sp); /* bytes popped past it */
+  if(!f->aboveKnown || d > PROF_STACK) return true; /* long gone: the sp rule */
+  const uint8_t* s = f->above;                     /* s[i] is the byte at f->sp+1+i */
+  uint16_t pc = (uint16_t) pc24;
+  uint8_t pb = (uint8_t) (pc24 >> 16);
+  /* rts: the word it popped sat at [sp-1], [sp] */
+  if(d >= 2 && pc == (uint16_t) ((s[d - 2] | (s[d - 1] << 8)) + 1)) return true;
+  /* rtl: the word at [sp-2], [sp-1] and the bank at [sp] */
+  if(d >= 3 && pb == s[d - 1] &&
+     pc == (uint16_t) ((s[d - 3] | (s[d - 2] << 8)) + 1)) return true;
+  /* rti: flags at [sp-3], the word at [sp-2], [sp-1], the bank at [sp], no +1 */
+  if(d >= 4 && pb == s[d - 1] &&
+     pc == (uint16_t) (s[d - 3] | (s[d - 2] << 8))) return true;
+  return false;
+}
+
+/* The frame's own stack bytes, for the test above. The 65816 stack lives in
+ * bank 0; everything this game does is in page 1, well inside the WRAM mirror,
+ * and reading it out of snes->ram avoids the side effects a register read
+ * through snes_read() would have. A frame that is not entirely inside the mirror
+ * falls back to the plain sp rule. */
+static bool prof_capture_stack(const Machine* m, uint16_t sp, uint8_t* out) {
+  if((uint32_t) sp + PROF_STACK >= 0x2000u) return false;
+  memcpy(out, m->snes->ram + sp + 1, PROF_STACK);
+  return true;
+}
+
+static void prof_bill(Machine* m, const ProfFrame* f, bool viaTail) {
+  uint64_t d = m->snes->cycles - f->cycles;
+  if(getenv("DREAM_PROF_TRACE") != NULL)
+    fprintf(stderr, "rom  %-28s start=%" PRIu64 " cost=%" PRIu64 "%s\n",
+            m->hooks[f->idx].name, f->cycles, d, viaTail ? " (tail)" : "");
+  m->profCycles[f->idx] += d;
+  if(m->profCalls[f->idx] == 0 || d < m->profMin[f->idx]) m->profMin[f->idx] = d;
+  if(d > m->profMax[f->idx]) m->profMax[f->idx] = d;
+  m->profCalls[f->idx]++;
+  if(viaTail) m->profRomTail[f->idx] = 1;
+}
+
+/* Close the outermost frame that has returned, and with it every frame entered
+ * inside it: a routine cannot outlive the one that called it. */
+static void prof_close(Machine* m, uint16_t sp, uint32_t pc24) {
+  /* A frame can only have returned once the stack pointer is above it, so while
+   * it is at or below the lowest open frame's nothing can have, which is the
+   * case at almost every instruction. */
+  if(m->profDepth == 0 || sp <= m->profFrameSp) return;
+  int keep = m->profDepth;
+  for(int i = 0; i < m->profDepth; i++) {
+    if(prof_frame_returned(&m->profStack[i], sp, pc24)) { keep = i; break; }
+  }
+  for(int i = m->profDepth - 1; i >= keep; i--) {
+    /* Several frames can end on the same instruction: `pla ; rts` returns two
+     * levels at once, so the routine and the one that called it both close on
+     * the same return. Only a frame that reached no return target of its own
+     * left through a tail jmp. */
+    prof_bill(m, &m->profStack[i], !prof_frame_returned(&m->profStack[i], sp, pc24));
+  }
+  m->profDepth = keep;
+  m->profFrameSp = 0xffff;
+  for(int i = 0; i < m->profDepth; i++) {
+    if(m->profStack[i].sp < m->profFrameSp) m->profFrameSp = m->profStack[i].sp;
   }
 }
 
@@ -241,13 +332,19 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   if(m->hooks == NULL) return false;
 
   if(m->profiling) {
-    prof_close(m, cpu->sp);
+    prof_close(m, cpu->sp, pc24);
     int idx = machine_find_hook(m, pc24);
-    if(idx >= 0 && m->profDepth < PROF_DEPTH) {
-      m->profStack[m->profDepth].idx = (unsigned) idx;
-      m->profStack[m->profDepth].sp = cpu->sp;
-      m->profStack[m->profDepth].cycles = m->snes->cycles;
-      m->profDepth++;
+    if(idx >= 0) {
+      if(m->profDepth < PROF_DEPTH) {
+        ProfFrame* f = &m->profStack[m->profDepth++];
+        f->idx = (unsigned) idx;
+        f->sp = cpu->sp;
+        f->cycles = m->snes->cycles;
+        f->aboveKnown = prof_capture_stack(m, cpu->sp, f->above);
+        if(m->profDepth == 1 || f->sp < m->profFrameSp) m->profFrameSp = f->sp;
+      } else {
+        m->profDropped++;               /* reported, never silently dropped */
+      }
     }
     return false;
   }
@@ -258,13 +355,17 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   const Installed* h = &m->hooks[idx];
   uint64_t before = m->snes->cycles;
   uint16_t spBefore = cpu->sp;
-  m->ss.entryVblank = m->snes->inVblank;
-  m->ss.entryFrames = m->snes->frames;
+  /* One snapshot per invocation, not per machine: this hook may be running
+   * inside another hook's ss_run_callee, and that one's snapshot has to be
+   * intact when its callee returns (see harness/ss_internal.h). */
+  ss_enter_hook(&m->ss);
   if(h->fn != NULL) {
     h->fn(&m->ss);
   } else if(!h->hookFn(&m->ss)) {
+    ss_leave_hook(&m->ss);
     return false;                       /* the hook declined */
   }
+  ss_leave_hook(&m->ss);
   recomp_hook_hits[idx]++;
   if(m->measureSpend) {
     uint64_t d = m->snes->cycles - before;
@@ -335,6 +436,7 @@ static void machine_free(Machine* m) {
   free(m->profMin);
   free(m->profMax);
   free(m->profNoReturn);
+  free(m->profRomTail);
   snes_free(m->snes);
 }
 
@@ -431,6 +533,8 @@ static void usage(void) {
     "                     with hooks off and write FILE; implies --hooks off\n"
     "  --only A,B,C       install only these routines, by name (bisecting a failure)\n"
     "  --lockstep         run hooks-off vs hooks-on and compare every frame\n"
+    "  --test-nesting     self-test: a hook entered inside another hook's callee\n"
+    "                     keeps its own yield snapshot (exits 0 on pass, 1 on fail)\n"
     "  --quiet            suppress the per-frame lines\n"
     "  --help\n"
     "buttons: A B X Y L R Start Select Up Down Left Right\n");
@@ -588,6 +692,12 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
        * harness bills only a hook that returned. */
       charge = 0;
       note = " (did not always return: tail jmp or yielded)";
+    } else if(rom->profRomTail[i]) {
+      /* the ROM's copy did not always return either: it left through a tail jmp
+       * into another routine, so its frame could only be closed when the routine
+       * it was called from returned, and the figure covers that tail as well */
+      charge = 0;
+      note = " (rom side left through a tail jmp: measured to its caller's return)";
     }
     fprintf(f, "%06X %-32s %6" PRId64 " %8" PRIu64 "   ; rom %" PRIu64 " [%" PRIu64 "-%" PRIu64
             "] hook %" PRIu64 " [%" PRIu64 "-%" PRIu64 "]%s\n",
@@ -599,6 +709,153 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
   fclose(f);
   printf("profile: %u of %u routines were called -> %s\n", written, rom->hookCount, path);
   return true;
+}
+
+/* ---- --test-nesting ----------------------------------------------------
+ *
+ * The one thing a hook cannot get from the machine itself: whether the machine
+ * has moved on since *this* hook was entered. The dispatcher snapshots
+ * snes->frames and snes->inVblank, and ss_yield_wanted() compares against that
+ * snapshot, which is how a body that models the instruction stream knows to hand
+ * the rest of its routine back to the ROM at a frame boundary.
+ *
+ * Hooks nest: a converted routine reaches a converted callee through
+ * ss_run_callee / ss_call_sub, which run the reference CPU, so the callee's own
+ * entry address is dispatched again and its hook fires inside the caller's. With
+ * one snapshot per machine the inner hook's entry overwrote the outer hook's and
+ * never put it back, so an outer hook that had already crossed a frame boundary
+ * was told, for the rest of its routine, that nothing had happened.
+ *
+ * This exercises exactly that, without depending on any ROM code: two test hooks
+ * at two addresses no routine uses, entered by pointing the CPU at them.
+ *
+ *   phase 0  the outer hook is entered mid-frame, spends time until the machine
+ *            enters vblank, then calls the inner hook.
+ *   phase 1  the outer hook is entered in vblank and spends time until the frame
+ *            counter moves on, which is the other half of ss_yield_wanted().
+ *
+ * In both, the outer hook must still want to yield after the nested call.
+ */
+#define NEST_OUTER 0xc0f000u   /* two cart addresses that no routine claims; the */
+#define NEST_INNER 0xc0f010u   /* hooks answer for them, so no ROM code runs */
+
+typedef struct {
+  int phase;
+  bool ranOuter, ranInner;
+  bool outerYieldAtEntry;    /* false: a fresh hook has nothing to hand back */
+  bool crossed;              /* the boundary the outer hook waited for */
+  bool intPending;           /* must stay false: the yield has to be the boundary */
+  bool innerYieldAtEntry;    /* false: the inner hook gets its own snapshot */
+  bool outerYieldAfterCall;  /* true: the outer hook's snapshot survived */
+  int depthInInner;
+  int depthAfterCall;
+  bool spRestored;
+} NestTest;
+
+static NestTest gNest;
+
+static void nest_inner(SnesState* ss) {
+  gNest.ranInner = true;
+  gNest.depthInInner = ss_hook_depth(ss);
+  /* Entered after the boundary the outer hook crossed, so this hook -- which has
+   * only just started -- must see nothing to hand back. */
+  gNest.innerYieldAtEntry = ss_yield_wanted(ss);
+  ss_rts(ss);
+}
+
+static void nest_outer(SnesState* ss) {
+  gNest.ranOuter = true;
+  gNest.outerYieldAtEntry = ss_yield_wanted(ss);
+
+  /* Spend time the way a long routine does until the machine moves on under us.
+   * Phase 0 is entered outside vblank and stops when vblank starts; phase 1 is
+   * entered inside it and stops when the frame counter moves. */
+  unsigned long guard = 0;
+  const uint32_t frame0 = ss->snes->frames;
+  while(guard++ < 4000000ul) {
+    if(gNest.phase == 0 ? ss_yield_wanted(ss) : ss->snes->frames != frame0) break;
+    ss_idle(ss);
+  }
+  gNest.crossed = ss_yield_wanted(ss);
+  gNest.intPending = ss->snes->cpu->intWanted;
+
+  /* Now reach a second hook the way a converted routine reaches a converted
+   * callee: push a return frame and let the reference CPU dispatch it. */
+  const uint16_t spBefore = ss_sp(ss);
+  ss_call_sub(ss, (uint8_t) (NEST_INNER >> 16), (uint16_t) NEST_INNER);
+  gNest.spRestored = ss_sp(ss) == spBefore;
+  gNest.depthAfterCall = ss_hook_depth(ss);
+
+  /* The assertion. The boundary the outer hook crossed before the nested call is
+   * still its business: the rest of its routine has to go back to the ROM. */
+  gNest.outerYieldAfterCall = ss_yield_wanted(ss);
+  ss_rts(ss);
+}
+
+static bool nest_check(const char* what, bool ok) {
+  printf("  %-58s %s\n", what, ok ? "ok" : "FAIL");
+  return ok;
+}
+
+static int run_nesting_test(const uint8_t* rom, size_t romLen) {
+  Installed table[2] = {
+    { NEST_OUTER, "test_nesting_outer", NULL, nest_outer, 0 },
+    { NEST_INNER, "test_nesting_inner", NULL, nest_inner, 0 },
+  };
+  int failures = 0;
+  for(int phase = 0; phase < 2; phase++) {
+    Machine m;
+    machine_init(&m, rom, romLen, table, 2, true, false);
+    memset(&gNest, 0, sizeof gNest);
+    gNest.phase = phase;
+    /* The first opcode after a reset is the reset sequence itself: it sets the
+     * stack pointer and the pc from the vector, and dispatches no hook. */
+    cpu_runOpcode(m.snes->cpu);
+    if(phase == 1) {
+      /* start the outer hook inside vblank, so the boundary it waits for is the
+       * frame counter rather than the start of vblank */
+      while(!m.snes->inVblank) snes_cpuIdle(m.snes, false);
+    }
+    /* Enter the outer hook the way the dispatcher does: point the CPU at its
+     * address and run one opcode. The hook claims the fetch, so no ROM
+     * instruction at that address is ever executed. */
+    uint16_t sp0 = m.snes->cpu->sp;
+    m.snes->cpu->k = (uint8_t) (NEST_OUTER >> 16);
+    m.snes->cpu->pc = (uint16_t) NEST_OUTER;
+    ss_push16(&m.ss, (uint16_t) 0x1234);          /* a return frame for the outer */
+    cpu_runOpcode(m.snes->cpu);
+
+    printf("test-nesting phase %d (%s):\n", phase,
+           phase == 0 ? "outer entered mid-frame, vblank starts inside it"
+                      : "outer entered in vblank, the frame counter moves inside it");
+    int bad = 0;
+    bad += !nest_check("outer hook ran", gNest.ranOuter);
+    bad += !nest_check("outer hook had nothing to yield at entry", !gNest.outerYieldAtEntry);
+    bad += !nest_check("the machine crossed a boundary inside the outer hook",
+                       gNest.crossed);
+    bad += !nest_check("the crossing was a frame boundary, not a latched interrupt",
+                       !gNest.intPending);
+    bad += !nest_check("inner hook ran, nested inside the outer", gNest.ranInner);
+    bad += !nest_check("inner hook was two hooks deep", gNest.depthInInner == 2);
+    bad += !nest_check("inner hook had nothing to yield at its own entry",
+                       !gNest.innerYieldAtEntry);
+    bad += !nest_check("the nested call left the stack where it found it",
+                       gNest.spRestored);
+    bad += !nest_check("outer hook is one hook deep again after it",
+                       gNest.depthAfterCall == 1);
+    bad += !nest_check("OUTER HOOK STILL WANTS TO YIELD AFTER THE NESTED CALL",
+                       gNest.outerYieldAfterCall);
+    bad += !nest_check("the dispatcher unwound to no hook in flight",
+                       ss_hook_depth(&m.ss) == 0);
+    bad += !nest_check("the outer hook returned to its own frame",
+                       m.snes->cpu->sp == sp0);
+    bad += !nest_check("the snapshot stack reached depth 2",
+                       ss_hook_max_depth(&m.ss) == 2);
+    failures += bad;
+    machine_free(&m);
+  }
+  printf("test-nesting: %s\n", failures == 0 ? "PASS" : "FAIL");
+  return failures == 0 ? 0 : 1;
 }
 
 static void print_frame_line(int frame, Machine* m, const Region* r) {
@@ -632,6 +889,7 @@ int main(int argc, char** argv) {
   bool hooksOn = false;
   bool lockstep = false;
   bool quiet = false;
+  bool testNesting = false;
   const char* tableName = "all";
 
   for(int i = 1; i < argc; i++) {
@@ -659,6 +917,7 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--cycles") == 0 && hasNext) cyclesPath = argv[++i];
     else if(strcmp(a, "--only") == 0 && hasNext) onlyList = argv[++i];
     else if(strcmp(a, "--lockstep") == 0) lockstep = true;
+    else if(strcmp(a, "--test-nesting") == 0) testNesting = true;
     else if(strcmp(a, "--quiet") == 0) quiet = true;
     else if(strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) { usage(); return 0; }
     else { fprintf(stderr, "dream_harness: unknown option %s\n", a); usage(); return 2; }
@@ -671,6 +930,13 @@ int main(int argc, char** argv) {
   size_t romLen = 0;
   uint8_t* rom = read_file(romPath, &romLen);
   if(rom == NULL) return 2;
+
+  if(testNesting) {
+    int rc = run_nesting_test(rom, romLen);
+    free(rom);
+    free(script.ev);
+    return rc;
+  }
 
   unsigned tableCount = 0;
   Installed* table = build_table(tableName, &tableCount);
@@ -711,12 +977,14 @@ int main(int argc, char** argv) {
     ref.profMin = calloc(n, sizeof(uint64_t));
     ref.profMax = calloc(n, sizeof(uint64_t));
     ref.profNoReturn = calloc(n, 1);
+    ref.profRomTail = calloc(n, 1);
     cand.measureSpend = true;
     cand.profCycles = calloc(n, sizeof(uint64_t));
     cand.profCalls = calloc(n, sizeof(uint64_t));
     cand.profMin = calloc(n, sizeof(uint64_t));
     cand.profMax = calloc(n, sizeof(uint64_t));
     cand.profNoReturn = calloc(n, 1);
+    cand.profRomTail = calloc(n, 1);
   }
   free(rom);
 
@@ -789,7 +1057,16 @@ int main(int argc, char** argv) {
 
   if(tracePath != NULL && !trace_write(&ref, tracePath)) status = 2;
   if(profilePath != NULL) {
-    prof_close(&ref, 0xffff);           /* bill whatever is still on the stack */
+    /* A frame still open when the run ended never returned, so there is nothing
+     * to measure: billing it would invent a sample out of a routine the run cut
+     * in half. Report the count instead. */
+    ref.profOpen += (unsigned long) ref.profDepth;
+    ref.profDepth = 0;
+    if(ref.profOpen != 0 || ref.profDropped != 0)
+      printf("profile: %lu routine%s still running when the run ended (not billed)"
+             ", %lu entr%s not measured (frame stack full)\n",
+             ref.profOpen, ref.profOpen == 1 ? "" : "s",
+             ref.profDropped, ref.profDropped == 1 ? "y" : "ies");
     if(!profile_write(&ref, &cand, profilePath)) status = 2;
   }
 
@@ -802,6 +1079,11 @@ int main(int argc, char** argv) {
     else printf("lockstep: FAILED after %d frames\n", ranFrames);
   }
   if(lockstep || hooksOn) {
+    /* Hooks nest, and the depth is worth reporting: it is the number of entry
+     * snapshots that have to be kept apart at once (harness/ss_internal.h). */
+    printf("hook nesting: max %d hook%s in flight at once\n",
+           ss_hook_max_depth(twin ? &cand.ss : &ref.ss),
+           ss_hook_max_depth(twin ? &cand.ss : &ref.ss) == 1 ? "" : "s");
     for(unsigned i = 0; i < tableCount; i++) {
       printf("hook %06X %-32s %lu call%s\n", table[i].addr, table[i].name,
              recomp_hook_hits[i], recomp_hook_hits[i] == 1 ? "" : "s");

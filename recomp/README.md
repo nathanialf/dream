@@ -91,6 +91,8 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
                                 config/recomp_cycles.txt; 'none' disables it)
       --profile FILE            measure the charge and write FILE (see below)
       --lockstep                run hooks-off vs hooks-on, compare every frame
+      --test-nesting            self-test: a hook entered inside another hook's
+                                callee keeps its own yield snapshot (see below)
       --quiet                   suppress the per-frame lines
       --help
 
@@ -255,11 +257,11 @@ from them costs the emulator exactly what the routine cost, to the master cycle,
 and `--profile` confirms it.
 
 The other is the charge `--profile` measures, for a routine where modelling is not
-worth doing. It runs two
-machines side by side over the same input: the reference with hooks off, measuring
-what the ROM's own code spends between a routine's first instruction and the return
-that pops its frame, and the candidate with hooks on, measuring what the C body
-spends on its own. It writes `config/recomp_cycles.txt`:
+worth doing. It runs two machines side by side over the same input: the reference with hooks off, measuring
+what the ROM's own code spends between a routine's first instruction and the
+return that leaves it (see below -- that is not the same thing as the return that
+pops its frame), and the candidate with hooks on, measuring what the C body spends
+on its own. It writes `config/recomp_cycles.txt`:
 
     C09246 particle_table_clear    0    2   ; rom 3789 [3464-4114] hook 3789 [3464-4114]
 
@@ -274,6 +276,45 @@ routine costs what it always did. Every routine in this batch is in that state, 
 the file is all zeros; it exists for the next one that is not.
 
     make recomp-profile        # rewrite config/recomp_cycles.txt
+
+#### When the ROM's side of the measurement stops
+
+The reference side has to decide when the ROM's own code is finished with a
+routine. The stack pointer alone cannot say: three shapes in this ROM unwind
+their own frame and keep running, so the frame is already gone before the routine
+is.
+
+* `entity_animate_only` and the three `entity_spawn_transform` routines end
+  `jsl anim_update ; pla ; rts`, where the 16-bit `pla` drops the return address
+  `entity_update_tick`'s `jsr` pushed so that the `rts` leaves the whole tick.
+* the animation-rate handlers run into `anim_rate_store`, whose `plb` pops the
+  byte the caller's `pea $8080 ; plb` left on the stack -- three instructions
+  before the `jsl anim_update` that is nearly all of the routine's cost.
+* every OAM emitter's "table is full" exit is `pla ; jmp loc_C0A6CD`, a jump into
+  `entity_build_oam_frame`'s `pea $8080 ; plb ; plb ; rtl` tail.
+
+Closing on the stack pointer stopped the clock at the `pla`, at the `plb` and at
+the `jmp`. It cost the `pla ; rts` routines their last instruction, and it cost
+`anim_rate_store` the entire `jsl anim_update`: it was billed 69 master cycles for
+a routine that costs 1709.
+
+A frame closes on the *pc* instead. At the routine's first instruction the
+harness remembers the eight stack bytes above the frame; a frame is closed when
+the pc is the instruction a return that moved the stack pointer to where it now
+stands would land on, read back out of those bytes -- `rts` pops a word and adds
+one, `rtl` pops a word and a bank and adds one, `rti` pops flags, a word and a
+bank and adds nothing. The stack pointer is still the guard: a frame that is
+still on the stack cannot have returned. With that, `entity_spawn_transform_b`
+and `_c` report the ROM and the hook covering the same interval to the master
+cycle, which is the reading that says a body is exact.
+
+The limitation that remains: a routine that leaves through a tail `jmp` reaches
+no return of its own, so its frame can only be closed when the routine it was
+called from returns, and its figure then covers that tail as well. Those lines
+say so -- `(rom side left through a tail jmp: measured to its caller's return)` --
+and are never charged. Frames still open when the run ends are reported and
+dropped rather than billed, and an entry that could not be measured because 64
+routines were already in flight is counted in the same line.
 
 Some entries carry a note instead of a charge. A routine the ROM only reaches by
 falling through from the one above it is never entered as a hook, so there is
@@ -315,6 +356,44 @@ pushed is the routine's real return address, so the callee's own `rtl` lands whe
 the ROM expects. Without that, the animation-rate handlers would be atomic across
 `anim_update`, which can reach a VRAM block upload two hundred thousand cycles
 long, and the long input scripts catch it within a couple of thousand frames.
+
+#### One snapshot per invocation
+
+"Since this hook began" is the whole of that mechanism, and hooks nest. A
+converted routine reaches a converted callee through `ss_run_callee`, which runs
+the reference CPU over it: the callee's entry address is dispatched again and its
+own hook fires *inside* the caller's. The chain the ROM builds every frame is
+`nmi_handler -> entity_update_tick -> an animation-rate handler -> anim_update ->
+an animation callback`, and the gate's own scripts reach six hooks in flight at
+once (the run report prints the high-water mark).
+
+The dispatcher therefore keeps a *stack* of entry snapshots, one frame per hook in
+flight (`harness/ss_internal.h`), pushed by `ss_enter_hook()` and popped by
+`ss_leave_hook()` on every path out, the declining `harness/hooks.c` wrappers
+included. `ss_yield_wanted()` answers from the innermost frame, so the inner hook
+is asked about its own entry and the outer hook gets its own answer back when the
+callee returns. Overflowing the stack is a fatal error, not a wrong answer.
+
+A single slot per machine looks like it works -- `ss_run_callee` checks before
+every opcode, so the inner hook is normally entered at an instant the outer hook
+has just approved -- but it is only true while every path into a nested hook is
+one of those checks. `ss_call_sub` / `ss_call_long` / `ss_run_until_return` run a
+callee with no check at all, and a hook entered from inside one of those, after
+the machine crossed a frame boundary, would leave the outer hook holding a
+snapshot from the wrong side of the boundary: the outer hook would then finish its
+routine atomically across the boundary the reference run stops at.
+
+`--test-nesting` is that case, built out of two hooks at addresses no routine
+uses, so it needs no ROM code and no input script:
+
+    ./build/recomp/dream_harness --test-nesting
+
+The outer hook is entered, spends cycles until the machine moves on under it
+(vblank starts in phase 0, the frame counter moves in phase 1), then calls the
+inner hook the way a converted routine reaches a converted callee. The inner hook
+must see nothing to hand back -- it has only just started -- and the outer hook
+must *still* want to yield afterwards. It exits 0 on pass, 1 on fail, and prints
+one line per check.
 
 ## Lockstep protocol
 
@@ -408,6 +487,7 @@ located.
 
     make harness
     make recomp-check                       # the gate: every script, every routine
+    ./build/recomp/dream_harness --test-nesting   # the nested-hook snapshot test
     ./build/recomp/dream_harness --frames 600
     ./build/recomp/dream_harness --frames 600 --input recomp/harness/inputs/title_start_right.txt
     ./build/recomp/dream_harness --lockstep --hooks on --frames 900 --quiet \

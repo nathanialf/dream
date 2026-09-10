@@ -24,11 +24,11 @@ C0A385 ppu_init               ; writes most $21xx regs, NMITIMEN, clears OAM/VRA
 C0A2DE read_joypads           ; JOYSER0/1 + JOY1..4
 C0A4A8 set_bg_scroll          ; writes BGxHOFS/VOFS, returns with M=16
 C0A500 clear_sprite_table     ; zeroes $0400..$041E, $94=$0200
-C08152 wait_and_enable_nmi    ; INIDISP + NMITIMEN setup
-C08BDB ppu_regs_default
+; C08152 (was wait_and_enable_nmi) lands mid-instruction inside nmi_handler_gameplay; not a routine
+; C08BDB is not a routine: it is the fall-through second half of mode0_camera_zone_update (see recomp/src/top_level.c)
 data C0826A game_mode_table        ; jsr (table,X) with X = game_mode*2
 
-data C0814C alt_mode_table
+; C0814C (was alt_mode_table) mid-instruction inside nmi_handler_gameplay; stale-image artefact
 data C20000 spc_loader_image  ; 0x88-byte SPC700 loader uploaded by IPL
 data C20088 spc_driver_blocks ; block list uploaded by spc_upload_driver
 
@@ -216,3 +216,6 @@ ram 0098 layer_parallax_mode
 ram 009A camera_y_lookahead
 ram 0070 walk_cycle_timer
 ram 0072 walk_cycle_parity
+; ---- from the mode-init recomp batch (behaviour read from the C transcription) ----
+C08A74 mode0_camera_zone_update   ; per-frame mode-0 arm: 180-frame effect cycle, camera_x zone ladder selecting HDMA layer masks
+C091BB cgram_palette_ramp_step    ; steps $0C1D by $80 toward the sign of $0C1B and queues a 32-colour CGRAM record from $C4:7103
