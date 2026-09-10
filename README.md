@@ -2,7 +2,7 @@
 
 <!-- progress:begin -->
 ![code progress](https://img.shields.io/badge/code-24.32%20%25-orange.svg)
-![sound_iface progress](https://img.shields.io/badge/sound%20iface-32.00%20%25-yellow.svg)
+![sound_iface progress](https://img.shields.io/badge/sound%20iface-55.43%20%25-yellowgreen.svg)
 ![spc700 progress](https://img.shields.io/badge/spc700-82.93%20%25-green.svg)
 ![sprites progress](https://img.shields.io/badge/sprites-0.00%20%25-red.svg)
 ![tiles progress](https://img.shields.io/badge/tiles-0.00%20%25-red.svg)

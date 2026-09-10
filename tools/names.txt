@@ -15,8 +15,8 @@ data C00000 stale_build_image     ; low half of bank $C0: older build leftover, 
 C18000 spc_init               ; jsl target: IPL handshake, upload loader + driver from $C2:0000
 C1805A spc_ipl_upload_loader  ; uploads 0x88 bytes from $C2:0000 to SPC $04D8 via IPL protocol
 C1809F spc_upload_driver      ; src ptr $04/$06 = $C2:0088, streams blocks via custom loader
-C1830A spc_upload_block       ; block header at [$04]: word dest, word count, then words
-C18324 spc_send_words
+C1830A upload_inline_spc_block ; block header at [$04]: word dest, word count, then words (name: p4plus2 DKC2 bank_B5)
+C18324 upload_spc_block        ; (name: p4plus2 DKC2 bank_B5)
 C183CE spc_command            ; jsl target, A = command (0 at boot, 1/2 from reset)
 
 ; ---- core ----
@@ -39,7 +39,7 @@ ram 0007 spc_dest_addr
 ram 0009 spc_word_count
 ram 0034 nmitimen_shadow
 ram 0046 spc_port0_counter
-ram 0094 sprite_count
+ram 0094 oam_write_ptr         ; live pointer into oam_buffer ($0200), not a count (see docs/dkc_crossref.md 4.3)
 ram 009C init_magic_AA55
 ram 009E init_magic_FFFF
 ram 00A4 game_mode            ; index into game_mode_table
@@ -83,3 +83,15 @@ C0B0FE anim_cb_hit_enemies m0x0
 C0B1AE anim_cb_reset_state m0x0
 ; unreferenced fragment (optional)
 C0B1FE entity_clear_anim_unused m0x0
+
+; ---- adopted from p4plus2's DKC2-disassembly bank_B5.asm (byte-identical sound interface; see docs/dkc_crossref.md) ----
+C180C1 upload_global_samples
+C180FF write_spc_command       ; X = packed param:cmd word
+C18119 upload_song_data        ; A = song number
+C1813D upload_song_sound_effects ; A = song number
+C18392 upload_song_sample_set  ; A = song number
+C1803E execute_spc_sound_engine
+data C1804C unused_spc_execute ; dead twin of execute_spc_sound_engine (present in DKC2 and KI too)
+; ---- RAM adopted from Yoshifanatic1's DKC2 RAM map, justified by the shared clear_sprite_table ----
+ram 0200 oam_buffer            ; 128 x 4-byte sprite entries
+ram 0400 oam_buffer_upper      ; high OAM table

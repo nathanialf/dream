@@ -55,7 +55,7 @@ only 424 labels, so its output was discarded in favour of the tracer.
   `docs/handler_tables.md`. A third dispatcher at `$9206` reads a table that no longer holds
   code and is dead.
 - Sound: `spc_init` (`$81:8000`) does the IPL handshake, uploads the loader from
-  `$C2:0000`, then streams the driver with a custom protocol (`spc_send_words`).
+  `$C2:0000`, then streams the driver with a custom protocol (`upload_spc_block`).
   `spc_command` (`$81:83CE`) is the runtime entry, called with A = command.
 
 ## Data formats

@@ -17,21 +17,23 @@ spc_init:
     stz.w spc_port0_counter                ; C1801D m0x0
     jsr.w spc_ipl_upload_loader            ; C18020 m0x0
     jsr.w spc_upload_driver                ; C18023 m0x0
-    jsr.w sub_C180C1                       ; C18026 m0x0
+    jsr.w upload_global_samples            ; C18026 m0x0
     lda.w #$2E5C                           ; C18029 m0x0
     sta.l $000004                          ; C1802C m0x0
     lda.w #$00C2                           ; C18030 m0x0
     sta.l $000006                          ; C18033 m0x0
-    jsr.w spc_upload_block                 ; C18037 m0x0
-    jsr.w sub_C1803E                       ; C1803A m0x0
+    jsr.w upload_inline_spc_block          ; C18037 m0x0
+    jsr.w execute_spc_sound_engine         ; C1803A m0x0
     rtl                                    ; C1803D m0x0
 
-sub_C1803E:
+execute_spc_sound_engine:
     lda.w #$0672                           ; C1803E m0x0
     sta.l $000007                          ; C18041 m0x0
     stz.w spc_word_count                   ; C18045 m0x0
-    jsr.w spc_send_words                   ; C18048 m0x0
+    jsr.w upload_spc_block                 ; C18048 m0x0
     rts                                    ; C1804B m0x0
+
+unused_spc_execute:
     incbin "../data/03.bin":$004C..$005A      ; 14 bytes
 
 spc_ipl_upload_loader:
@@ -86,10 +88,10 @@ spc_upload_driver:
     sta.l $000007                          ; C180B2 m0x0
     lda.w #$0699                           ; C180B6 m0x0
     sta.l $000009                          ; C180B9 m0x0
-    jsr.w spc_send_words                   ; C180BD m0x0
+    jsr.w upload_spc_block                 ; C180BD m0x0
     rts                                    ; C180C0 m0x0
 
-sub_C180C1:
+upload_global_samples:
     lda.w #$1109                           ; C180C1 m0x0
     sta.l $000042                          ; C180C4 m0x0
     lda.w #$00C2                           ; C180C8 m0x0
@@ -109,7 +111,7 @@ sub_C180C1:
     sta.l $000040                          ; C180FA m0x0
     rts                                    ; C180FE m0x0
 
-sub_C180FF:
+write_spc_command:
     rep.b #$30                             ; C180FF m0x0
     txa                                    ; C18101 m0x0
     sep.b #$10                             ; C18102 m0x0
@@ -125,7 +127,7 @@ loc_C18107:
     rep.b #$30                             ; C18116 m0x1
     rts                                    ; C18118 m0x0
 
-sub_C18119:
+upload_song_data:
     lda.l $000048                          ; C18119 m0x0
     clc                                    ; C1811D m0x0
     asl                                    ; C1811E m0x0
@@ -137,10 +139,10 @@ sub_C18119:
     sta.l $000004                          ; C1812D m0x0
     lda.l data_C210BB,x                    ; C18131 m0x0
     sta.l $000006                          ; C18135 m0x0
-    jsr.w spc_upload_block                 ; C18139 m0x0
+    jsr.w upload_inline_spc_block          ; C18139 m0x0
     rts                                    ; C1813C m0x0
 
-sub_C1813D:
+upload_song_sound_effects:
     lda.l $000048                          ; C1813D m0x0
     clc                                    ; C18141 m0x0
     adc.l $000048                          ; C18142 m0x0
@@ -150,7 +152,7 @@ sub_C1813D:
     sta.l $000004                          ; C1814F m0x0
     lda.l data_C210F0,x                    ; C18153 m0x0
     sta.l $000006                          ; C18157 m0x0
-    jsr.w spc_upload_block                 ; C1815B m0x0
+    jsr.w upload_inline_spc_block          ; C1815B m0x0
     rts                                    ; C1815E m0x0
 
 sub_C1815F:
@@ -220,7 +222,7 @@ loc_C181F0:
     inc                                    ; C1820F m0x0
     lsr                                    ; C18210 m0x0
     sta.l $000009                          ; C18211 m0x0
-    jsr.w spc_send_words                   ; C18215 m0x0
+    jsr.w upload_spc_block                 ; C18215 m0x0
     lda.w #$1109                           ; C18218 m0x0
     sta.l $000010                          ; C1821B m0x0
     lda.w #$00C2                           ; C1821F m0x0
@@ -275,7 +277,7 @@ loc_C18288:
     sta.l $000007                          ; C18299 m0x0
     lda.w #$0080                           ; C1829D m0x0
     sta.l $000009                          ; C182A0 m0x0
-    jsr.w spc_send_words                   ; C182A4 m0x0
+    jsr.w upload_spc_block                 ; C182A4 m0x0
 
 loc_C182A7:
     lda.l $000016                          ; C182A7 m0x0
@@ -310,13 +312,13 @@ loc_C182AF:
     lsr.w spc_word_count                   ; C182FB m0x0
     inc.w ptr_04                           ; C182FE m0x0
     inc.w ptr_04                           ; C18301 m0x0
-    jsr.w spc_send_words                   ; C18304 m0x0
+    jsr.w upload_spc_block                 ; C18304 m0x0
     bra loc_C182AF                         ; C18307 m0x0
 
 loc_C18309:
     rts                                    ; C18309 m0x0
 
-spc_upload_block:
+upload_inline_spc_block:
     lda.b [ptr_04]                         ; C1830A m0x0
     sta.l $000007                          ; C1830C m0x0
     inc.w ptr_04                           ; C18310 m0x0
@@ -325,9 +327,9 @@ spc_upload_block:
     sta.l $000009                          ; C18318 m0x0
     inc.w ptr_04                           ; C1831C m0x0
     inc.w ptr_04                           ; C1831F m0x0
-    bra spc_send_words                     ; C18322 m0x0
+    bra upload_spc_block                   ; C18322 m0x0
 
-spc_send_words:
+upload_spc_block:
     sep.b #$10                             ; C18324 m0x0
     ldx.w spc_port0_counter                ; C18326 m0x1
 
@@ -389,7 +391,7 @@ loc_C1838B:
     ldy.b #$00                             ; C1838E m0x1
     bra loc_C1835B                         ; C18390 m0x1
 
-sub_C18392:
+upload_song_sample_set:
     lda.l $000048                          ; C18392 m0x0
     clc                                    ; C18396 m0x0
     asl                                    ; C18397 m0x0
@@ -417,13 +419,13 @@ spc_command:
     txa                                    ; C183D6 m0x0
     ora.w #$00FF                           ; C183D7 m0x0
     tax                                    ; C183DA m0x0
-    jsr.w sub_C180FF                       ; C183DB m0x0
-    jsr.w sub_C18392                       ; C183DE m0x0
-    jsr.w sub_C18119                       ; C183E1 m0x0
-    jsr.w sub_C1813D                       ; C183E4 m0x0
-    jsr.w sub_C1803E                       ; C183E7 m0x0
+    jsr.w write_spc_command                ; C183DB m0x0
+    jsr.w upload_song_sample_set           ; C183DE m0x0
+    jsr.w upload_song_data                 ; C183E1 m0x0
+    jsr.w upload_song_sound_effects        ; C183E4 m0x0
+    jsr.w execute_spc_sound_engine         ; C183E7 m0x0
     ldx.w #$00FE                           ; C183EA m0x0
-    jsr.w sub_C180FF                       ; C183ED m0x0
+    jsr.w write_spc_command                ; C183ED m0x0
     rtl                                    ; C183F0 m0x0
 
 orphan_C183F1:
@@ -431,14 +433,14 @@ orphan_C183F1:
     and.w #$FF00                           ; C183F2 m0x0
     ora.w #$00F9                           ; C183F5 m0x0
     tax                                    ; C183F8 m0x0
-    jsr.w sub_C180FF                       ; C183F9 m0x0
+    jsr.w write_spc_command                ; C183F9 m0x0
     ldx.w #$00FE                           ; C183FC m0x0
-    jsr.w sub_C180FF                       ; C183FF m0x0
+    jsr.w write_spc_command                ; C183FF m0x0
     rtl                                    ; C18402 m0x0
     incbin "../data/03.bin":$0403..$0415      ; 18 bytes
 
 sub_C18415:
     tax                                    ; C18415 m0x0
-    jsr.w sub_C180FF                       ; C18416 m0x0
+    jsr.w write_spc_command                ; C18416 m0x0
     rtl                                    ; C18419 m0x0
     incbin "../data/03.bin":$041A..$8000      ; 31718 bytes

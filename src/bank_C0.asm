@@ -2252,7 +2252,7 @@ sub_C09331:
     adc.w #$00F0                           ; C0933E m0x0
     sta.b $1C                              ; C09341 m0x0
     ldx.w #$004E                           ; C09343 m0x0
-    ldy.b sprite_count                     ; C09346 m0x0
+    ldy.b oam_write_ptr                    ; C09346 m0x0
 
 loc_C09348:
     lda.l $7F0906,x                        ; C09348 m0x0
@@ -2335,7 +2335,7 @@ loc_C093ED:
     jmp.w loc_C09348                       ; C093F1 m0x0
 
 loc_C093F4:
-    sty.b sprite_count                     ; C093F4 m0x0
+    sty.b oam_write_ptr                    ; C093F4 m0x0
     lda.b $18                              ; C093F6 m0x0
     tcs                                    ; C093F8 m0x0
     rts                                    ; C093F9 m0x0
@@ -2446,7 +2446,7 @@ loc_C094D7:
     jmp.w loc_C09348                       ; C094DB m0x0
 
 loc_C094DE:
-    sty.b sprite_count                     ; C094DE m0x0
+    sty.b oam_write_ptr                    ; C094DE m0x0
     lda.b $18                              ; C094E0 m0x0
     tcs                                    ; C094E2 m0x0
     rts                                    ; C094E3 m0x0
@@ -2483,7 +2483,7 @@ loc_C09515:
     rts                                    ; C09520 m0x0
 
 sub_C09521:
-    ldy.b sprite_count                     ; C09521 m0x0
+    ldy.b oam_write_ptr                    ; C09521 m0x0
     cpy.w #$0400                           ; C09523 m0x0
     bcc loc_C09529                         ; C09526 m0x0
     rts                                    ; C09528 m0x0
@@ -2581,7 +2581,7 @@ loc_C095D1:
     jmp.w loc_C0952C                       ; C095DD m0x0
 
 loc_C095E0:
-    sty.b sprite_count                     ; C095E0 m0x0
+    sty.b oam_write_ptr                    ; C095E0 m0x0
     rts                                    ; C095E2 m0x0
 
 sub_C095E3:
@@ -2660,7 +2660,7 @@ loc_C09677:
     rts                                    ; C09678 m0x0
 
 loc_C09679:
-    lda.b sprite_count                     ; C09679 m0x0
+    lda.b oam_write_ptr                    ; C09679 m0x0
     tay                                    ; C0967B m0x0
     sec                                    ; C0967C m0x0
     sbc.w #$0400                           ; C0967D m0x0
@@ -2782,7 +2782,7 @@ loc_C09777:
     jmp.w loc_C09691                       ; C0977B m0x0
 
 loc_C0977E:
-    sty.b sprite_count                     ; C0977E m0x0
+    sty.b oam_write_ptr                    ; C0977E m0x0
     rts                                    ; C09780 m0x0
 
 sub_C09781:
@@ -2821,7 +2821,7 @@ loc_C0978A:
     rts                                    ; C097DC m0x0
 
 loc_C097DD:
-    lda.b sprite_count                     ; C097DD m0x0
+    lda.b oam_write_ptr                    ; C097DD m0x0
     tay                                    ; C097DF m0x0
     sec                                    ; C097E0 m0x0
     sbc.w #$0400                           ; C097E1 m0x0
@@ -2935,7 +2935,7 @@ loc_C098D0:
     jmp.w loc_C097FC                       ; C098D4 m0x0
 
 loc_C098D7:
-    sty.b sprite_count                     ; C098D7 m0x0
+    sty.b oam_write_ptr                    ; C098D7 m0x0
     rts                                    ; C098D9 m0x0
 
 sub_C098DA:
@@ -4624,7 +4624,7 @@ loc_C0A4FD:
     bra loc_C0A4FD                         ; C0A4FE m1x1
 
 clear_sprite_table:
-    stz.w $0400                            ; C0A500 m0x0
+    stz.w oam_buffer_upper                 ; C0A500 m0x0
     stz.w $0402                            ; C0A503 m0x0
     stz.w $0404                            ; C0A506 m0x0
     stz.w $0406                            ; C0A509 m0x0
@@ -4641,7 +4641,7 @@ clear_sprite_table:
     stz.w $041C                            ; C0A52A m0x0
     stz.w $041E                            ; C0A52D m0x0
     lda.w #$0200                           ; C0A530 m0x0
-    sta.b sprite_count                     ; C0A533 m0x0
+    sta.b oam_write_ptr                    ; C0A533 m0x0
     stz.b $96                              ; C0A535 m0x0
     rts                                    ; C0A537 m0x0
 
@@ -4650,7 +4650,7 @@ sub_C0A538:
     sta.b $54                              ; C0A53B m0x0
 
 loc_C0A53D:
-    lda.b sprite_count                     ; C0A53D m0x0
+    lda.b oam_write_ptr                    ; C0A53D m0x0
     cmp.w #$0400                           ; C0A53F m0x0
     bne loc_C0A553                         ; C0A542 m0x0
     sep.b #$20                             ; C0A544 m0x0
@@ -4911,7 +4911,7 @@ sub_C0A772:
     ldy.w #$0008                           ; C0A78E m0x0
 
 loc_C0A791:
-    lda.b sprite_count                     ; C0A791 m0x0
+    lda.b oam_write_ptr                    ; C0A791 m0x0
     lsr                                    ; C0A793 m0x0
     lsr                                    ; C0A794 m0x0
     sep.b #$20                             ; C0A795 m0x0
@@ -4933,7 +4933,7 @@ loc_C0A7A2:
     tax                                    ; C0A7AC m1x0
     lda.w data_C0A6D3,x                    ; C0A7AD m1x0
     sta.b $24                              ; C0A7B0 m1x0
-    ldx.b sprite_count                     ; C0A7B2 m1x0
+    ldx.b oam_write_ptr                    ; C0A7B2 m1x0
     clc                                    ; C0A7B4 m1x0
 
 loc_C0A7B5:
@@ -5007,7 +5007,7 @@ loc_C0A813:
     adc.b $1D                              ; C0A81A m1x0
     bmi loc_C0A826                         ; C0A81C m1x0
     rep.b #$20                             ; C0A81E m1x0
-    stx.b sprite_count                     ; C0A820 m0x0
+    stx.b oam_write_ptr                    ; C0A820 m0x0
     pla                                    ; C0A822 m0x0
     jmp.w loc_C0A6CD                       ; C0A823 m0x0
 
@@ -5078,7 +5078,7 @@ loc_C0A882:
     adc.b $1F                              ; C0A889 m1x0
     bmi loc_C0A895                         ; C0A88B m1x0
     rep.b #$20                             ; C0A88D m1x0
-    stx.b sprite_count                     ; C0A88F m0x0
+    stx.b oam_write_ptr                    ; C0A88F m0x0
     pla                                    ; C0A891 m0x0
     jmp.w loc_C0A6CD                       ; C0A892 m0x0
 
@@ -5142,7 +5142,7 @@ loc_C0A8E9:
 
 loc_C0A8F1:
     rep.b #$20                             ; C0A8F1 m1x0
-    stx.b sprite_count                     ; C0A8F3 m0x0
+    stx.b oam_write_ptr                    ; C0A8F3 m0x0
     rts                                    ; C0A8F5 m0x0
 
 sub_C0A8F6:
@@ -5174,7 +5174,7 @@ sub_C0A911:
     ldy.w #$0008                           ; C0A92D m0x0
 
 loc_C0A930:
-    lda.b sprite_count                     ; C0A930 m0x0
+    lda.b oam_write_ptr                    ; C0A930 m0x0
     lsr                                    ; C0A932 m0x0
     lsr                                    ; C0A933 m0x0
     sep.b #$20                             ; C0A934 m0x0
@@ -5196,7 +5196,7 @@ loc_C0A941:
     tax                                    ; C0A94B m1x0
     lda.w data_C0A6D3,x                    ; C0A94C m1x0
     sta.b $24                              ; C0A94F m1x0
-    ldx.b sprite_count                     ; C0A951 m1x0
+    ldx.b oam_write_ptr                    ; C0A951 m1x0
     clc                                    ; C0A953 m1x0
 
 loc_C0A954:
@@ -5271,7 +5271,7 @@ loc_C0A9B5:
     adc.b $1D                              ; C0A9BC m1x0
     bmi loc_C0A9C8                         ; C0A9BE m1x0
     rep.b #$20                             ; C0A9C0 m1x0
-    stx.b sprite_count                     ; C0A9C2 m0x0
+    stx.b oam_write_ptr                    ; C0A9C2 m0x0
     pla                                    ; C0A9C4 m0x0
     jmp.w loc_C0A6CD                       ; C0A9C5 m0x0
 
@@ -5349,7 +5349,7 @@ loc_C0AA33:
     adc.b $1F                              ; C0AA3A m1x0
     bmi loc_C0AA46                         ; C0AA3C m1x0
     rep.b #$20                             ; C0AA3E m1x0
-    stx.b sprite_count                     ; C0AA40 m0x0
+    stx.b oam_write_ptr                    ; C0AA40 m0x0
     pla                                    ; C0AA42 m0x0
     jmp.w loc_C0A6CD                       ; C0AA43 m0x0
 
@@ -5414,7 +5414,7 @@ loc_C0AA9D:
 
 loc_C0AAA5:
     rep.b #$20                             ; C0AAA5 m1x0
-    stx.b sprite_count                     ; C0AAA7 m0x0
+    stx.b oam_write_ptr                    ; C0AAA7 m0x0
     rts                                    ; C0AAA9 m0x0
 
 sub_C0AAAA:
@@ -5431,7 +5431,7 @@ sub_C0AAAA:
     lda.b [$26],y                          ; C0AAC2 m0x0
     sta.b $22                              ; C0AAC4 m0x0
     ldy.w #$0008                           ; C0AAC6 m0x0
-    lda.b sprite_count                     ; C0AAC9 m0x0
+    lda.b oam_write_ptr                    ; C0AAC9 m0x0
     lsr                                    ; C0AACB m0x0
     lsr                                    ; C0AACC m0x0
     sep.b #$20                             ; C0AACD m0x0
@@ -5453,7 +5453,7 @@ loc_C0AADA:
     tax                                    ; C0AAE4 m1x0
     lda.w data_C0A6D3,x                    ; C0AAE5 m1x0
     sta.b $24                              ; C0AAE8 m1x0
-    ldx.b sprite_count                     ; C0AAEA m1x0
+    ldx.b oam_write_ptr                    ; C0AAEA m1x0
     clc                                    ; C0AAEC m1x0
 
 loc_C0AAED:
@@ -5528,7 +5528,7 @@ loc_C0AB4D:
     adc.b $1D                              ; C0AB54 m1x0
     bmi loc_C0AB60                         ; C0AB56 m1x0
     rep.b #$20                             ; C0AB58 m1x0
-    stx.b sprite_count                     ; C0AB5A m0x0
+    stx.b oam_write_ptr                    ; C0AB5A m0x0
     pla                                    ; C0AB5C m0x0
     jmp.w loc_C0A6CD                       ; C0AB5D m0x0
 
@@ -5606,7 +5606,7 @@ loc_C0ABCA:
     adc.b $1F                              ; C0ABD1 m1x0
     bmi loc_C0ABDD                         ; C0ABD3 m1x0
     rep.b #$20                             ; C0ABD5 m1x0
-    stx.b sprite_count                     ; C0ABD7 m0x0
+    stx.b oam_write_ptr                    ; C0ABD7 m0x0
     pla                                    ; C0ABD9 m0x0
     jmp.w loc_C0A6CD                       ; C0ABDA m0x0
 
@@ -5671,7 +5671,7 @@ loc_C0AC33:
 
 loc_C0AC3B:
     rep.b #$20                             ; C0AC3B m1x0
-    stx.b sprite_count                     ; C0AC3D m0x0
+    stx.b oam_write_ptr                    ; C0AC3D m0x0
     rts                                    ; C0AC3F m0x0
 
 sub_C0AC40:
@@ -5688,7 +5688,7 @@ sub_C0AC40:
     lda.b [$26],y                          ; C0AC58 m0x0
     sta.b $22                              ; C0AC5A m0x0
     ldy.w #$0008                           ; C0AC5C m0x0
-    lda.b sprite_count                     ; C0AC5F m0x0
+    lda.b oam_write_ptr                    ; C0AC5F m0x0
     lsr                                    ; C0AC61 m0x0
     lsr                                    ; C0AC62 m0x0
     sep.b #$20                             ; C0AC63 m0x0
@@ -5710,7 +5710,7 @@ loc_C0AC70:
     tax                                    ; C0AC7A m1x0
     lda.w data_C0A6D3,x                    ; C0AC7B m1x0
     sta.b $24                              ; C0AC7E m1x0
-    ldx.b sprite_count                     ; C0AC80 m1x0
+    ldx.b oam_write_ptr                    ; C0AC80 m1x0
     clc                                    ; C0AC82 m1x0
 
 loc_C0AC83:
@@ -5786,7 +5786,7 @@ loc_C0ACE6:
     adc.b $1D                              ; C0ACED m1x0
     bmi loc_C0ACF9                         ; C0ACEF m1x0
     rep.b #$20                             ; C0ACF1 m1x0
-    stx.b sprite_count                     ; C0ACF3 m0x0
+    stx.b oam_write_ptr                    ; C0ACF3 m0x0
     pla                                    ; C0ACF5 m0x0
     jmp.w loc_C0A6CD                       ; C0ACF6 m0x0
 
@@ -5869,7 +5869,7 @@ loc_C0AD6E:
     adc.b $1F                              ; C0AD75 m1x0
     bmi loc_C0AD81                         ; C0AD77 m1x0
     rep.b #$20                             ; C0AD79 m1x0
-    stx.b sprite_count                     ; C0AD7B m0x0
+    stx.b oam_write_ptr                    ; C0AD7B m0x0
     pla                                    ; C0AD7D m0x0
     jmp.w loc_C0A6CD                       ; C0AD7E m0x0
 
@@ -5935,11 +5935,11 @@ loc_C0ADDA:
 
 loc_C0ADE2:
     rep.b #$20                             ; C0ADE2 m1x0
-    stx.b sprite_count                     ; C0ADE4 m0x0
+    stx.b oam_write_ptr                    ; C0ADE4 m0x0
     rts                                    ; C0ADE6 m0x0
 
 sub_C0ADE7:
-    ldx.b sprite_count                     ; C0ADE7 m0x0
+    ldx.b oam_write_ptr                    ; C0ADE7 m0x0
     cpx.w #$0400                           ; C0ADE9 m0x0
     beq loc_C0ADFC                         ; C0ADEC m0x0
     lda.w #$F0FF                           ; C0ADEE m0x0
