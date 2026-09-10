@@ -143,14 +143,44 @@ static uint16_t input_state_at(const InputScript* s, int frame) {
 
 /* ---- machine ---------------------------------------------------------- */
 
+/* One installed routine. Exactly one of hookFn (a declining hook from
+ * recomp_hooks[]) and fn (a registry routine from recomp/src) is set. */
+typedef struct {
+  uint32_t addr;
+  const char* name;
+  RecompHookFn hookFn;
+  RecompFn fn;
+  int cycleCost;             /* master cycles to charge, 0 = charge nothing */
+} Installed;
+
+/* One in-flight routine while --profile is running. */
+typedef struct {
+  unsigned idx;              /* index into Machine.hooks */
+  uint16_t sp;               /* stack pointer at the routine's first instruction */
+  uint64_t cycles;           /* master cycle count at that instant */
+} ProfFrame;
+
+#define PROF_DEPTH 64
+
 typedef struct {
   Snes* snes;
   SnesState ss;
-  const RecompHook* hooks;   /* NULL when --hooks off */
+  Installed* hooks;          /* NULL when nothing is installed */
   unsigned hookCount;
+  bool hooksActive;          /* false for the profile pass and --hooks off */
   uint8_t* cov;              /* NULL when not tracing */
   uint64_t covNonRom;        /* PCs seen outside the cart map */
   uint64_t instructions;
+  /* profiling */
+  bool profiling;            /* reference pass: measure the ROM's cost */
+  bool measureSpend;         /* candidate pass: measure what the hook itself costs */
+  ProfFrame profStack[PROF_DEPTH];
+  int profDepth;
+  uint64_t* profCycles;      /* per hook entry */
+  uint64_t* profCalls;
+  uint64_t* profMin;
+  uint64_t* profMax;
+  uint8_t* profNoReturn;     /* candidate pass: the hook handed control on instead */
   /* serialisation scratch */
   uint8_t vram[VRAM_BYTES];
   uint8_t cgram[CGRAM_BYTES];
@@ -172,25 +202,96 @@ static bool canon_rom_addr(uint32_t pc24, uint32_t* out) {
   return false;
 }
 
+static int machine_find_hook(const Machine* m, uint32_t pc24) {
+  /* Hook addresses are written in the disassembly's canonical $C0:0000+offset
+   * form; this ROM runs most of its code through the $80/$81 mirror banks, so
+   * fold the PC before matching. */
+  uint32_t key = pc24;
+  if(!canon_rom_addr(pc24, &key)) key = pc24;
+  for(unsigned i = 0; i < m->hookCount; i++) {
+    if(m->hooks[i].addr == key) return (int) i;
+  }
+  return -1;
+}
+
+/* --profile: close every frame whose routine has returned. A routine has
+ * returned when the stack pointer is back above where it stood at the routine's
+ * first instruction: rts/rtl pop exactly that far, while an interrupt taken
+ * inside the routine pushes below it and so cannot end a frame early. The
+ * cycles a nested callee costs are billed to the outer routine too, which is
+ * what a hook replacing the whole call tree needs to be charged. */
+static void prof_close(Machine* m, uint16_t sp) {
+  while(m->profDepth > 0 && sp > m->profStack[m->profDepth - 1].sp) {
+    const ProfFrame* f = &m->profStack[--m->profDepth];
+    uint64_t d = m->snes->cycles - f->cycles;
+    if(getenv("DREAM_PROF_TRACE") != NULL)
+      fprintf(stderr, "rom  %-28s start=%" PRIu64 " cost=%" PRIu64 "\n",
+              m->hooks[f->idx].name, f->cycles, d);
+    m->profCycles[f->idx] += d;
+    if(m->profCalls[f->idx] == 0 || d < m->profMin[f->idx]) m->profMin[f->idx] = d;
+    if(d > m->profMax[f->idx]) m->profMax[f->idx] = d;
+    m->profCalls[f->idx]++;
+  }
+}
+
 static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   Machine* m = (Machine*) ctx;
   m->instructions++;
   if(m->cov != NULL) m->cov[pc24 >> 3] |= (uint8_t) (1u << (pc24 & 7));
-  if(m->hooks != NULL) {
-    /* Hook addresses are written in the disassembly's canonical $C0:0000+offset
-     * form; this ROM runs most of its code through the $80/$81 mirror banks, so
-     * fold the PC before matching. */
-    uint32_t key = pc24;
-    if(!canon_rom_addr(pc24, &key)) key = pc24;
-    for(unsigned i = 0; i < m->hookCount; i++) {
-      if(m->hooks[i].addr == key) {
-        recomp_hook_hits[i]++;
-        return m->hooks[i].fn(&m->ss);
-      }
+  if(m->hooks == NULL) return false;
+
+  if(m->profiling) {
+    prof_close(m, cpu->sp);
+    int idx = machine_find_hook(m, pc24);
+    if(idx >= 0 && m->profDepth < PROF_DEPTH) {
+      m->profStack[m->profDepth].idx = (unsigned) idx;
+      m->profStack[m->profDepth].sp = cpu->sp;
+      m->profStack[m->profDepth].cycles = m->snes->cycles;
+      m->profDepth++;
     }
+    return false;
   }
-  (void) cpu;
-  return false;
+
+  if(!m->hooksActive) return false;
+  int idx = machine_find_hook(m, pc24);
+  if(idx < 0) return false;
+  const Installed* h = &m->hooks[idx];
+  uint64_t before = m->snes->cycles;
+  uint16_t spBefore = cpu->sp;
+  m->ss.entryVblank = m->snes->inVblank;
+  m->ss.entryFrames = m->snes->frames;
+  if(h->fn != NULL) {
+    h->fn(&m->ss);
+  } else if(!h->hookFn(&m->ss)) {
+    return false;                       /* the hook declined */
+  }
+  recomp_hook_hits[idx]++;
+  if(m->measureSpend) {
+    uint64_t d = m->snes->cycles - before;
+    if(getenv("DREAM_PROF_TRACE") != NULL)
+      fprintf(stderr, "hook %-28s start=%" PRIu64 " cost=%" PRIu64 "\n",
+              m->hooks[idx].name, before, d);
+    m->profCycles[idx] += d;
+    if(m->profCalls[idx] == 0 || d < m->profMin[idx]) m->profMin[idx] = d;
+    if(d > m->profMax[idx]) m->profMax[idx] = d;
+    m->profCalls[idx]++;
+    if(cpu->sp <= spBefore) m->profNoReturn[idx] = 1;
+  }
+  /* A hook that computes in C costs the emulator far less than the routine it
+   * replaces, which would move every later NMI. config/recomp_cycles.txt holds
+   * the difference: the ROM's mean cost per call minus the mean the hook pays
+   * on its own for timed register access, DMA transfers and callees that are
+   * still emulated (see --profile). So it is added, not subtracted from.
+   *
+   * Only a hook that actually returned is charged. A routine whose last
+   * instruction is a tail jmp leaves the stack where it found it and hands
+   * control to a routine that has not run yet, so the measured figure covers
+   * work the emulator is still about to do; charging it would count that work
+   * twice. The jmp itself costs a few cycles, which is what is dropped instead. */
+  if(h->cycleCost > 0 && cpu->sp > spBefore) {
+    ss_consume_cycles(&m->ss, h->cycleCost);
+  }
+  return true;
 }
 
 /* Force the cart to HiROM, 2 MiB, no SRAM.
@@ -214,12 +315,13 @@ static bool machine_load_rom(Machine* m, const uint8_t* rom, size_t len) {
 }
 
 static void machine_init(Machine* m, const uint8_t* rom, size_t len,
-                         const RecompHook* hooks, bool trace) {
+                         Installed* hooks, unsigned hookCount, bool active, bool trace) {
   memset(m, 0, sizeof(*m));
   m->snes = snes_init();
   m->ss.snes = m->snes;
   m->hooks = hooks;
-  m->hookCount = hooks != NULL ? recomp_hooks_count(hooks) : 0;
+  m->hookCount = hooks != NULL ? hookCount : 0;
+  m->hooksActive = active;
   m->cov = trace ? calloc(COV_BYTES, 1) : NULL;
   if(!machine_load_rom(m, rom, len)) exit(2);
   m->snes->cpu->hook = harness_hook;
@@ -228,6 +330,11 @@ static void machine_init(Machine* m, const uint8_t* rom, size_t len,
 
 static void machine_free(Machine* m) {
   free(m->cov);
+  free(m->profCycles);
+  free(m->profCalls);
+  free(m->profMin);
+  free(m->profMax);
+  free(m->profNoReturn);
   snes_free(m->snes);
 }
 
@@ -313,8 +420,16 @@ static void usage(void) {
     "  --input FILE       input script: lines 'frame Button+Button...'\n"
     "  --trace FILE       write the executed-PC coverage set (sorted C0XXXX)\n"
     "  --dump-wram DIR    write DIR/wram_NNNNNN.bin after every frame\n"
-    "  --hooks on|off     install recomp_hooks[] (default off)\n"
-    "  --hook-table demo|empty   which table --hooks on installs (default demo)\n"
+    "  --hooks on|off     install the recomp routines (default off)\n"
+    "  --hook-table all|demo|empty  which table to install (default all)\n"
+    "                       all   every routine registered by recomp/src\n"
+    "                       demo  the single worked example, clear_sprite_table\n"
+    "                       empty nothing\n"
+    "  --cycles FILE      per-routine cycle costs (default config/recomp_cycles.txt\n"
+    "                     when it exists; 'none' disables the charge)\n"
+    "  --profile FILE     measure mean cycles per call for every registered routine\n"
+    "                     with hooks off and write FILE; implies --hooks off\n"
+    "  --only A,B,C       install only these routines, by name (bisecting a failure)\n"
     "  --lockstep         run hooks-off vs hooks-on and compare every frame\n"
     "  --quiet            suppress the per-frame lines\n"
     "  --help\n"
@@ -342,6 +457,150 @@ static uint8_t* read_file(const char* path, size_t* lenOut) {
   return buf;
 }
 
+/* ---- installed table -------------------------------------------------- */
+
+/* Build the table --hook-table names. "all" is the registry every recomp/src
+ * file filled in from its own constructor, so adding a routine never means
+ * editing this file. */
+/* --only: keep just the named routines, for bisecting a lockstep failure. */
+static bool name_in_list(const char* list, const char* name) {
+  if(list == NULL) return true;
+  size_t len = strlen(name);
+  const char* p = list;
+  while(*p != 0) {
+    const char* q = strchr(p, ',');
+    size_t n = q != NULL ? (size_t) (q - p) : strlen(p);
+    if(n == len && strncmp(p, name, len) == 0) return true;
+    if(q == NULL) break;
+    p = q + 1;
+  }
+  return false;
+}
+
+static Installed* build_table(const char* which, unsigned* countOut) {
+  unsigned n = 0;
+  const RecompEntry* reg = recomp_registry(&n);
+  Installed* out;
+  if(strcmp(which, "all") == 0) {
+    out = calloc(n ? n : 1, sizeof(Installed));
+    for(unsigned i = 0; i < n; i++) {
+      out[i].addr = reg[i].addr;
+      out[i].name = reg[i].name;
+      out[i].fn = reg[i].fn;
+    }
+    *countOut = n;
+    return out;
+  }
+  const RecompHook* t = strcmp(which, "demo") == 0 ? recomp_hooks : recomp_hooks_empty;
+  unsigned c = recomp_hooks_count(t);
+  out = calloc(c ? c : 1, sizeof(Installed));
+  for(unsigned i = 0; i < c; i++) {
+    out[i].addr = t[i].addr;
+    out[i].name = t[i].name;
+    out[i].hookFn = t[i].fn;
+  }
+  *countOut = c;
+  return out;
+}
+
+/* config/recomp_cycles.txt: "C0XXXX name mean_cycles calls", written by
+ * --profile. Unknown addresses are ignored, missing routines cost nothing. */
+static bool load_cycles(Installed* hooks, unsigned count, const char* path, bool required) {
+  FILE* f = fopen(path, "r");
+  if(f == NULL) {
+    if(required) {
+      fprintf(stderr, "dream_harness: cannot open %s: %s\n", path, strerror(errno));
+      return false;
+    }
+    return true;
+  }
+  char line[512];
+  while(fgets(line, sizeof(line), f) != NULL) {
+    char* p = line;
+    char* hash = strchr(p, '#');
+    if(hash != NULL) *hash = 0;
+    if(*p == ';') continue;
+    uint32_t addr = 0;
+    char name[128];
+    long cycles = 0, calls = 0;
+    if(sscanf(p, "%x %127s %ld %ld", &addr, name, &cycles, &calls) < 3) continue;
+    for(unsigned i = 0; i < count; i++) {
+      if(hooks[i].addr == addr) hooks[i].cycleCost = (int) cycles;
+    }
+  }
+  fclose(f);
+  return true;
+}
+
+/* Write the per-routine cycle charge.
+ *
+ * Two passes have run side by side over the same input: `rom` with hooks off,
+ * measuring what the ROM's own code spends between a routine's first
+ * instruction and the return that pops its frame (nested callees and any
+ * interrupt serviced inside included), and `hook` with hooks on, measuring what
+ * the C body spends on its own for timed register access, DMA transfers and
+ * callees that are still emulated.
+ *
+ * The charge is the difference. Taking it this way is what makes a routine whose
+ * cost is dominated by something the hook *does* pay for come out right: a DMA
+ * upload's transfer time is in both means and cancels, leaving only the
+ * instruction overhead the C body skipped, and that overhead is the part that is
+ * the same on every call. Charging the ROM's total instead would bill the
+ * transfer twice, and would bill the mean transfer to calls that moved a
+ * hundredth of the data. */
+static bool profile_write(Machine* rom, Machine* hook, const char* path) {
+  FILE* f = fopen(path, "w");
+  if(f == NULL) {
+    fprintf(stderr, "dream_harness: cannot write %s: %s\n", path, strerror(errno));
+    return false;
+  }
+  fprintf(f, "; Master cycles a hooked routine is charged, so that replacing it with C\n"
+             "; does not move later NMIs. Written by dream_harness --profile: the ROM's\n"
+             "; mean cost per call, minus the mean the C body already pays for timed\n"
+             "; register access, DMA transfers and not-yet-converted callees.\n"
+             ";\n"
+             "; A hook that does not always return -- one ending in a tail jmp, or one\n"
+             "; that handed the rest of the routine back to the ROM at a frame boundary --\n"
+             "; still gets a line, but is never charged: the two figures then cover\n"
+             "; different work. Same for an address the ROM only reaches by falling\n"
+             "; through from the routine above it, which is never entered as a hook.\n"
+             "; addr name charge calls rom_mean hook_mean\n");
+  unsigned written = 0;
+  for(unsigned i = 0; i < rom->hookCount; i++) {
+    if(rom->profCalls[i] == 0) continue;
+    uint64_t romMean = rom->profCycles[i] / rom->profCalls[i];
+    uint64_t hookMean = hook->profCalls[i] ? hook->profCycles[i] / hook->profCalls[i] : 0;
+    /* hookMean is what the C body spent on its own, measured *before* the charge
+     * was added, so this is an absolute figure and not a correction: running
+     * --profile again on its own output reproduces it. */
+    int64_t charge = (int64_t) romMean - (int64_t) hookMean;
+    if(charge < 0) charge = 0;
+    const char* note = "";
+    if(hook->profCalls[i] == 0) {
+      /* the ROM reached this address by falling through from the routine above
+       * it, which the hook installed there absorbs; nothing to calibrate */
+      charge = 0;
+      note = " (hook not reached: fall-through entry)";
+    } else if(hook->profNoReturn[i]) {
+      /* the hook did not always return: either it ends in a tail jmp, whose
+       * callee has not run yet, or it handed the routine back to the ROM part
+       * way through. Both make the two figures cover different work, and the
+       * harness bills only a hook that returned. */
+      charge = 0;
+      note = " (did not always return: tail jmp or yielded)";
+    }
+    fprintf(f, "%06X %-32s %6" PRId64 " %8" PRIu64 "   ; rom %" PRIu64 " [%" PRIu64 "-%" PRIu64
+            "] hook %" PRIu64 " [%" PRIu64 "-%" PRIu64 "]%s\n",
+            rom->hooks[i].addr, rom->hooks[i].name, charge, rom->profCalls[i], romMean,
+            rom->profMin[i], rom->profMax[i], hookMean,
+            hook->profCalls[i] ? hook->profMin[i] : 0, hook->profMax[i], note);
+    written++;
+  }
+  fclose(f);
+  printf("profile: %u of %u routines were called -> %s\n", written, rom->hookCount, path);
+  return true;
+}
+
 static void print_frame_line(int frame, Machine* m, const Region* r) {
   const Cpu* c = m->snes->cpu;
   const Ppu* p = m->snes->ppu;
@@ -366,11 +625,14 @@ int main(int argc, char** argv) {
   const char* inputPath = NULL;
   const char* tracePath = NULL;
   const char* dumpDir = NULL;
+  const char* profilePath = NULL;
+  const char* cyclesPath = NULL;
+  const char* onlyList = NULL;
   int frames = 600;
   bool hooksOn = false;
   bool lockstep = false;
   bool quiet = false;
-  const RecompHook* table = recomp_hooks;
+  const char* tableName = "all";
 
   for(int i = 1; i < argc; i++) {
     const char* a = argv[i];
@@ -387,10 +649,15 @@ int main(int argc, char** argv) {
       else { fprintf(stderr, "dream_harness: --hooks takes on|off\n"); return 2; }
     } else if(strcmp(a, "--hook-table") == 0 && hasNext) {
       const char* v = argv[++i];
-      if(strcmp(v, "demo") == 0) table = recomp_hooks;
-      else if(strcmp(v, "empty") == 0) table = recomp_hooks_empty;
-      else { fprintf(stderr, "dream_harness: --hook-table takes demo|empty\n"); return 2; }
+      if(strcmp(v, "all") != 0 && strcmp(v, "demo") != 0 && strcmp(v, "empty") != 0) {
+        fprintf(stderr, "dream_harness: --hook-table takes all|demo|empty\n");
+        return 2;
+      }
+      tableName = v;
     }
+    else if(strcmp(a, "--profile") == 0 && hasNext) profilePath = argv[++i];
+    else if(strcmp(a, "--cycles") == 0 && hasNext) cyclesPath = argv[++i];
+    else if(strcmp(a, "--only") == 0 && hasNext) onlyList = argv[++i];
     else if(strcmp(a, "--lockstep") == 0) lockstep = true;
     else if(strcmp(a, "--quiet") == 0) quiet = true;
     else if(strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) { usage(); return 0; }
@@ -405,17 +672,63 @@ int main(int argc, char** argv) {
   uint8_t* rom = read_file(romPath, &romLen);
   if(rom == NULL) return 2;
 
+  unsigned tableCount = 0;
+  Installed* table = build_table(tableName, &tableCount);
+  if(profilePath != NULL) { lockstep = false; hooksOn = false; }
+  /* The charges are loaded for --profile too, and the measuring pass applies
+   * them. That makes --profile a refinement step rather than a measurement from
+   * scratch: an uncharged candidate drifts out of phase with the reference
+   * within a few frames, and everything measured after that is measured on a
+   * machine that is running the same code at a different point in the scanline,
+   * which shows up as spurious DRAM-refresh differences. Run it, install the
+   * result, run it again; the numbers settle. */
+  {
+    const char* cp = cyclesPath ? cyclesPath : "config/recomp_cycles.txt";
+    if(cyclesPath == NULL || strcmp(cyclesPath, "none") != 0) {
+      if(!load_cycles(table, tableCount, cp, cyclesPath != NULL)) return 2;
+    }
+  }
+
+  if(onlyList != NULL) {
+    unsigned kept = 0;
+    for(unsigned i = 0; i < tableCount; i++) {
+      if(name_in_list(onlyList, table[i].name)) table[kept++] = table[i];
+    }
+    tableCount = kept;
+  }
+
   Machine ref, cand;
-  machine_init(&ref, rom, romLen, lockstep ? NULL : (hooksOn ? table : NULL), tracePath != NULL);
-  if(lockstep) machine_init(&cand, rom, romLen, table, false);
+  /* the reference never runs hooks; it still carries the table for --profile */
+  machine_init(&ref, rom, romLen, table, tableCount, !lockstep && !profilePath && hooksOn,
+               tracePath != NULL);
+  bool twin = lockstep || profilePath != NULL;
+  if(twin) machine_init(&cand, rom, romLen, table, tableCount, true, false);
+  if(profilePath != NULL) {
+    unsigned n = tableCount ? tableCount : 1;
+    ref.profiling = true;
+    ref.profCycles = calloc(n, sizeof(uint64_t));
+    ref.profCalls = calloc(n, sizeof(uint64_t));
+    ref.profMin = calloc(n, sizeof(uint64_t));
+    ref.profMax = calloc(n, sizeof(uint64_t));
+    ref.profNoReturn = calloc(n, 1);
+    cand.measureSpend = true;
+    cand.profCycles = calloc(n, sizeof(uint64_t));
+    cand.profCalls = calloc(n, sizeof(uint64_t));
+    cand.profMin = calloc(n, sizeof(uint64_t));
+    cand.profMax = calloc(n, sizeof(uint64_t));
+    cand.profNoReturn = calloc(n, 1);
+  }
   free(rom);
 
+  int charged = 0;
+  for(unsigned i = 0; i < tableCount; i++) if(table[i].cycleCost > 0) charged++;
+
   printf("dream_harness: %s, HiROM forced, 2 MiB, no SRAM, NTSC\n", romPath);
-  printf("mode: %s, hooks %s (%u entr%s), frames %d, input %s\n",
-         lockstep ? "lockstep (reference=hooks off, candidate=hooks on)" : "single",
+  printf("mode: %s, hooks %s, table %s (%u entr%s, %d cycle-costed), frames %d, input %s\n",
+         profilePath ? "profile (hooks off, measuring)" :
+           lockstep ? "lockstep (reference=hooks off, candidate=hooks on)" : "single",
          lockstep || hooksOn ? "on" : "off",
-         lockstep || hooksOn ? recomp_hooks_count(table) : 0u,
-         (lockstep || hooksOn ? recomp_hooks_count(table) : 0u) == 1 ? "y" : "ies",
+         tableName, tableCount, tableCount == 1 ? "y" : "ies", charged,
          frames, inputPath ? inputPath : "(none)");
 
   struct timespec t0, t1;
@@ -431,18 +744,20 @@ int main(int argc, char** argv) {
     Region rr[4];
     machine_regions(&ref, rr);
 
-    if(lockstep) {
+    if(twin) {
       machine_set_input(&cand, state);
       snes_runFrame(cand.snes);
       machine_snapshot(&cand);
       Region cr[4];
       machine_regions(&cand, cr);
-      for(int k = 0; k < 4 && status == 0; k++) {
+      for(int k = 0; k < 4 && lockstep && status == 0; k++) {
         if(memcmp(rr[k].data, cr[k].data, rr[k].len) == 0) continue;
         for(size_t off = 0; off < rr[k].len; off++) {
           if(rr[k].data[off] == cr[k].data[off]) continue;
-          printf("MISMATCH frame %d region %s offset 0x%05zx expected %02X got %02X\n",
-                 frame, rr[k].name, off, rr[k].data[off], cr[k].data[off]);
+          printf("MISMATCH frame %d region %s offset 0x%05zx expected %02X got %02X"
+                 " (candidate is %+" PRId64 " master cycles)\n",
+                 frame, rr[k].name, off, rr[k].data[off], cr[k].data[off],
+                 (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles);
           break;
         }
         status = 1;
@@ -473,15 +788,22 @@ int main(int argc, char** argv) {
   double secs = (double) (t1.tv_sec - t0.tv_sec) + (double) (t1.tv_nsec - t0.tv_nsec) / 1e9;
 
   if(tracePath != NULL && !trace_write(&ref, tracePath)) status = 2;
+  if(profilePath != NULL) {
+    prof_close(&ref, 0xffff);           /* bill whatever is still on the stack */
+    if(!profile_write(&ref, &cand, profilePath)) status = 2;
+  }
 
   if(lockstep) {
-    if(status == 0) printf("lockstep: %d frames, no mismatches\n", ranFrames);
+    if(status == 0) {
+      printf("lockstep: %d frames, no mismatches (candidate ended %+" PRId64
+             " master cycles from the reference)\n", ranFrames,
+             (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles);
+    }
     else printf("lockstep: FAILED after %d frames\n", ranFrames);
   }
   if(lockstep || hooksOn) {
-    unsigned n = recomp_hooks_count(table);
-    for(unsigned i = 0; i < n; i++) {
-      printf("hook %06X %-24s %lu call%s\n", table[i].addr, table[i].name,
+    for(unsigned i = 0; i < tableCount; i++) {
+      printf("hook %06X %-32s %lu call%s\n", table[i].addr, table[i].name,
              recomp_hook_hits[i], recomp_hook_hits[i] == 1 ? "" : "s");
     }
   }
@@ -490,7 +812,8 @@ int main(int argc, char** argv) {
          secs > 0 ? (ranFrames / secs) / 60.0988 : 0.0, ref.instructions);
 
   machine_free(&ref);
-  if(lockstep) machine_free(&cand);
+  if(twin) machine_free(&cand);
+  free(table);
   free(script.ev);
   return status;
 }

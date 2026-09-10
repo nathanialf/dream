@@ -3,7 +3,9 @@
 #   1. tools/check_no_rom.sh   — IP-safety scan of tracked files
 #   2. make check              — byte-identical round trip (ROM SHA-1 + SPC700 driver),
 #                                only when staged changes can affect the build
-#   3. tools/progress.py       — refresh README badges, docs/PROGRESS.md, docs/progress.json,
+#   3. make recomp-check       — the C port's lockstep gate against the ROM,
+#                                only when staged changes touch recomp/ or config/recomp*
+#   4. tools/progress.py       — refresh README badges, docs/PROGRESS.md, docs/progress.json,
 #                                and stage them into this commit
 # Bypass with --no-verify only for commits that cannot touch the build; the pre-push
 # hook re-runs the gate on the pushed tip regardless.
@@ -12,9 +14,10 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 tools/check_no_rom.sh
 
-BUILD_SENSITIVE=$(git diff --cached --name-only -z | tr '\0' '\n' |
-    grep -E '^(src/|spc/|tools/|config/|Makefile$)' || true)
-if [[ -z "$BUILD_SENSITIVE" ]]; then
+STAGED=$(git diff --cached --name-only -z | tr '\0' '\n')
+BUILD_SENSITIVE=$(grep -E '^(src/|spc/|tools/|config/|Makefile$)' <<<"$STAGED" || true)
+RECOMP_TOUCHED=$(grep -E '^(recomp/|config/recomp|tools/recomp_verify\.py$)' <<<"$STAGED" || true)
+if [[ -z "$BUILD_SENSITIVE" && -z "$RECOMP_TOUCHED" ]]; then
     exit 0
 fi
 if [[ ! -f baserom/DREAM.sfc ]]; then
@@ -25,11 +28,23 @@ if [[ ! -x tools/bin/asar ]]; then
     echo "pre-commit: tools/bin/asar missing — build asar first (see README), skipping gate" >&2
     exit 0
 fi
-echo "pre-commit: make check (SHA-1 gate) ..."
-if ! make -s check; then
-    echo "pre-commit: BUILD FAILED — the staged changes break the byte-identical round trip." >&2
-    exit 1
+if [[ -n "$BUILD_SENSITIVE" ]]; then
+    echo "pre-commit: make check (SHA-1 gate) ..."
+    if ! make -s check; then
+        echo "pre-commit: BUILD FAILED — the staged changes break the byte-identical round trip." >&2
+        exit 1
+    fi
 fi
+# Recomp gate: only when the commit touches the port or the harness, because it
+# rebuilds the harness and replays every input script (a couple of minutes).
+if [[ -n "$RECOMP_TOUCHED" ]]; then
+    echo "pre-commit: make recomp-check (lockstep gate) ..."
+    if ! make -s recomp-check; then
+        echo "pre-commit: RECOMP CHECK FAILED — a converted routine no longer matches the ROM." >&2
+        exit 1
+    fi
+fi
+
 echo "pre-commit: refreshing progress ..."
 python3 tools/progress.py >/dev/null
 git add README.md docs/PROGRESS.md docs/progress.json

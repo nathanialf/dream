@@ -1,3 +1,4 @@
+# frames 3700
 # Enter the game, then walk/jump inside game_mode 0 to trigger footstep and
 # enemy-hit sound callbacks and sprite-frame variants, before cycling to
 # modes 1 and 2 (via the Select debug feature, see mode_cycle.txt) to

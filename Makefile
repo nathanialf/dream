@@ -10,7 +10,7 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc roundtrip harness
+.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-profile
 
 all: check
 
@@ -42,6 +42,18 @@ build/spc.bin: spc/driver.asm $(HALVES) | build
 harness:
 	cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/recomp -j
+
+# Recomp gate: build the harness, then run every input script under
+# recomp/harness/inputs/ in lockstep with the C routines installed. Fails if any
+# script mismatches; reports the per-routine hook call counts either way.
+recomp-check: harness
+	python3 tools/recomp_verify.py
+
+# Re-measure config/recomp_cycles.txt (the per-routine cycle charge). Only needed
+# when a routine is added that does not model its own timing; see recomp/README.md.
+recomp-profile: harness
+	./build/recomp/dream_harness --profile config/recomp_cycles.txt --cycles none \
+	    --frames 900 --quiet --input recomp/harness/inputs/title_start_right.txt
 
 # decode every asset with a codec into build/assets/ and re-encode; must be byte-exact
 roundtrip: $(HALVES)

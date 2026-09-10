@@ -3,8 +3,8 @@
 `dream_harness` runs the original ROM in an embedded SNES core, hashes the machine
 state after every frame, and can run two instances side by side so a C
 reimplementation of a routine can be proved equivalent to the ROM's own code. It is
-the measuring instrument for the port described in `docs/RECOMP.md`; it does not
-contain any of the port itself beyond one worked example.
+the measuring instrument for the port described in `docs/RECOMP.md`. The port
+itself lives next to it, in `recomp/src/`.
 
 Headless, deterministic, no SDL, no X, no network, no threads.
 
@@ -13,11 +13,19 @@ Headless, deterministic, no SDL, no X, no network, no threads.
     recomp/
       CMakeLists.txt              build (C11, -Wall -Wextra clean)
       include/snes_state.h        the hook API a recomped routine is written against
+      src/                        the port: one file per subsystem, one C
+        anim.c camera.c           function per 65816 routine. Each file
+        entities.c input.c        registers its own entry addresses from a
+        oam.c particles.c         constructor, so adding a routine edits no
+        ppu_dma.c                 central table, and CMake globs the directory.
+        dream_ram.h               RAM and register names (tools/names.txt)
+        dream_alu.h               65816 arithmetic with its flag side effects
+        dream_time.h              one instruction at a time: cycles and yields
       harness/
         main.c                    CLI, frame loop, hashing, tracing, lockstep
         snes_state.c              hook API implemented over the emulator core
         ss_internal.h             private glue (struct SnesState)
-        hooks.c                   recomp_hooks[] + the worked example
+        hooks.c                   the --hook-table demo/empty tables
         xxh64.c/.h                XXH64, the per-frame region digest
         compare_coverage.py       trace vs out/codemap.txt
         explore.py                search tool: builds/keeps input scripts that add coverage
@@ -73,8 +81,15 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
       --input FILE              input script (default: no buttons)
       --trace FILE              write the executed-PC coverage set
       --dump-wram DIR           write DIR/wram_NNNNNN.bin after every frame
-      --hooks on|off            install the recomp hook table (default off)
-      --hook-table demo|empty   which table --hooks on installs (default demo)
+      --hooks on|off            install the recomp routines (default off)
+      --hook-table all|demo|empty  which table to install (default all)
+                                  all   everything recomp/src registered
+                                  demo  the single worked example
+                                  empty nothing
+      --only A,B,C              install only these routines, by name
+      --cycles FILE             per-routine cycle charge (default
+                                config/recomp_cycles.txt; 'none' disables it)
+      --profile FILE            measure the charge and write FILE (see below)
       --lockstep                run hooks-off vs hooks-on, compare every frame
       --quiet                   suppress the per-frame lines
       --help
@@ -142,68 +157,171 @@ the game).
 ## Hook API
 
 A recomp hook is a C function that stands in for one 65816 routine. Before every
-instruction fetch the core calls the harness with the 24-bit PC; if an entry in
-`recomp_hooks[]` claims that address, the C function runs instead of the routine and
-is responsible for leaving the CPU where the routine would have left it.
+instruction fetch the core calls the harness with the 24-bit PC; if an installed
+entry claims that address, the C function runs instead of the routine and is
+responsible for leaving the CPU where the routine would have left it.
+
+A routine in `recomp/src/` is written against `RecompEntry` and registers itself:
 
 ```c
 #include "snes_state.h"
 
-static bool hook_my_routine(SnesState* ss) {
-  if(ss_flag_m(ss)) return false;      /* decline: let the ROM routine run */
-  ss_wram_w16(ss, 0x0400, 0);
-  ss_set_a(ss, 0x0200);
+void clear_sprite_table(SnesState* ss) {
+  ...
   ss_rts(ss);
-  return true;
 }
 
-const RecompHook recomp_hooks[] = {
-  { 0xc0a500, hook_my_routine, "my_routine" },
-  { 0, NULL, NULL }                    /* terminator */
+static const RecompEntry kOam[] = {
+  { 0xc0a500, "clear_sprite_table", clear_sprite_table },
 };
+RECOMP_REGISTER(kOam)          /* file-scope constructor -> recomp_register() */
 ```
+
+`RECOMP_REGISTER` expands to an `__attribute__((constructor))` that calls
+`recomp_register(addr, name, fn)` for each row before `main()` runs, so a new
+routine needs no edit to any central table and no change to `CMakeLists.txt`
+(the glob picks the file up). `--hook-table all`, the default for `--hooks on`,
+installs the whole registry.
+
+`harness/hooks.c` keeps the older `recomp_hooks[]` shape for `--hook-table demo`:
+its entries return `bool`, and returning `false` means "not handled", which lets a
+hook guard a precondition (CPU mode, direct page) instead of silently doing the
+wrong thing. Registry routines return `void` and always handle the call.
 
 Entry addresses are written in the canonical `$C0:0000 + offset` form; the harness
 folds the running PC through the mirror banks before matching, so one entry catches
 the routine whether the ROM reaches it as `$C0:A500` or `$80:A500`.
-
-Returning `false` means "not handled" and the original instruction executes
-normally, which is how a hook guards its preconditions (CPU mode, direct page) rather
-than silently doing the wrong thing.
 
 `include/snes_state.h` is the whole API. In outline:
 
 | group | functions |
 |-------|-----------|
 | registers | `ss_a/x/y/sp/dp/pc/db/pb/p` and `ss_set_*`, `ss_flag_e/m/x`, `ss_set_nz8/16` |
+| flags | `ss_c/z/v/n`, `ss_set_c/z/v/n` |
 | WRAM, untimed | `ss_wram_r8/r16`, `ss_wram_w8/w16` (offset into the 128 KB) |
 | bus, untimed | `ss_r8/r16`, `ss_w8/w16` (24-bit address, full memory map) |
+| direct page | `ss_dp_r8/r16`, `ss_dp_w8/w16` (offset added to DP, bank 0) |
+| data bank | `ss_db_r8/r16`, `ss_db_w8/w16` (absolute address through DB) |
+| registers, timed | `ss_reg_r8/r16`, `ss_reg_w8/w16`, `ss_dma_run` |
 | bus, timed | `ss_bus_r8`, `ss_bus_w8`, `ss_bus_w16`, `ss_fetch`, `ss_idle` |
-| control | `ss_rts`, `ss_rtl`, `ss_check_int`, `ss_int_pending` |
+| stack | `ss_push8/16`, `ss_pull8/16` |
+| callees | `ss_call_sub`, `ss_call_long`, `ss_run_callee`, `ss_run_until_return` |
+| control | `ss_rts`, `ss_rtl`, `ss_check_int`, `ss_int_pending`, `ss_yield_wanted` |
+| cycles | `ss_cycles`, `ss_consume_cycles` |
+| registry | `recomp_register`, `recomp_registry`, `RECOMP_REGISTER` |
 
 The timed accessors are the reason a hook can be cycle-exact: they go through the
 same `snes_cpuRead`/`snes_cpuWrite`/`snes_cpuIdle` entry points the CPU core itself
 uses, so they charge the same access times, run DMA and HDMA at the same points, and
 leave the same open-bus value. A hook that replays a routine's bus transactions in
 order costs the emulator exactly what the routine cost. `ss_rts`/`ss_rtl` reproduce
-the core's own 6-cycle return sequences, interrupt latch included.
+the core's own 6-cycle return sequences, interrupt latch included; note that they do
+*not* include the return opcode's own fetch, which the body supplies.
 
-### Known limitation
+Hardware registers must go through `ss_reg_*` rather than the untimed accessors: an
+untimed write to `MDMAEN` would only arm the channel instead of running the
+transfer, and an untimed read of `HVBJOY` would never change, so the joypad wait
+loop would never end.
 
-An interrupt raised part-way through a hooked routine is serviced when the hook
-returns, not between the instructions it replaced: a hook is atomic where the real
-routine is not. `ss_check_int()` keeps the *pending* state identical, so nothing is
-lost, but an NMI can be taken up to one routine-length later. For the routines a
-recomp starts with (hundreds of cycles, no interrupt interaction) this has not been
-observable — see the lockstep results below — but it is the first thing to suspect if
-a long hook drifts.
+### Calling a routine that is not converted yet
+
+`ss_call_sub` (callee ends in `rts`) and `ss_call_long` (`rtl`) push a return frame,
+point the CPU at the callee and run it on the emulator until the stack pointer is
+back above the frame, then return to C. Interrupts taken inside the callee are
+serviced normally, and any hook the callee hits still fires, so a callee that gets
+converted later needs no change at the call site. `ss_run_until_return` is the
+primitive underneath, for a body that is also modelling the calling instruction's
+own cycles and wants to build the frame itself. `ss_run_callee` is the same thing
+but it stops at a boundary inside the callee when the machine moves on, which a
+hand-built frame can afford because the address it pushed is the routine's real
+one. `src/anim.c` does exactly that for the `jsl anim_update` at the end of every
+animation-rate handler, which is what keeps that hook from being atomic across a
+routine that can reach a VRAM block upload.
+
+### Cycle cost, and `--profile`
+
+A C body costs the emulator only what its timed accesses cost, which for a routine
+that mostly computes is nothing. Running a routine in zero cycles moves every later
+NMI, and this ROM notices: the SPC upload handshake counts words in a busy-wait
+against the APU's own clock, and the joypad wait loop reads the hblank flag.
+
+There are two ways to pay the cost back.
+
+The one every routine in the port uses is to *model the instruction stream*:
+`src/dream_time.h` has one helper per 65816 access pattern (`S`/`SI`/`SEP`/`REP`
+for an instruction's opcode and operands, `t_read8/16`, `t_write8/16`, `t_index`,
+`t_branch`), written against the core's own opcode implementations. A body built
+from them costs the emulator exactly what the routine cost, to the master cycle,
+and `--profile` confirms it.
+
+The other is the charge `--profile` measures, for a routine where modelling is not
+worth doing. It runs two
+machines side by side over the same input: the reference with hooks off, measuring
+what the ROM's own code spends between a routine's first instruction and the return
+that pops its frame, and the candidate with hooks on, measuring what the C body
+spends on its own. It writes `config/recomp_cycles.txt`:
+
+    C09246 particle_table_clear    0    2   ; rom 3789 [3464-4114] hook 3789 [3464-4114]
+
+The number after the name is the charge: the difference of the two means, which the
+harness spends after the hook returns (in short steps, so the DRAM refresh lands
+where it would have). Taking the *difference* rather than the ROM's total is what
+makes a DMA routine come out right: the transfer time is in both means and cancels,
+leaving only the instruction overhead the C body skipped. The bracketed ranges are
+the per-call minimum and maximum, and they are the check that a body is exact: when
+the ROM's range and the hook's range are the same interval, the charge is 0 and the
+routine costs what it always did. Every routine in this batch is in that state, so
+the file is all zeros; it exists for the next one that is not.
+
+    make recomp-profile        # rewrite config/recomp_cycles.txt
+
+Some entries carry a note instead of a charge. A routine the ROM only reaches by
+falling through from the one above it is never entered as a hook, so there is
+nothing to calibrate. And a hook that did not always return -- one ending in a
+tail `jmp`, whose callee has not run yet, or one that handed the routine back to
+the ROM at a frame boundary -- has the two figures covering different work, so the
+harness bills only a hook that returned.
+
+### Atomicity, and yielding back to the ROM
+
+A hook is atomic where the routine it replaces is not, and that shows up twice.
+An interrupt is serviced by the 65816 between two instructions but by a hook only
+after all of them. And the frame loop stops at an instruction boundary, so a
+reference run stops in the middle of a long routine at exactly the point a hooked
+run cannot: the two are then compared at different points of the same routine.
+
+`ss_yield_wanted()` reports either condition, and a body that models the
+instruction stream can simply stop. Every register, flag and byte of memory is
+already what the 65816 would have left at that boundary, so pointing the pc at the
+address of the next instruction and returning hands the rest of the routine to the
+ROM, which finishes it.
+
+That check is folded into the step helpers, so it happens before *every*
+instruction rather than at chosen points: `S(addr, n)`, `SI(addr)`, `SEP`/`REP`
+publish the registers the body is holding in locals, offer the routine back, and
+only then fetch. A body therefore reads down the listing, one macro per
+instruction, and is never atomic over more than one of them:
+
+```c
+S(0xA1B0, 3);                        /* lda entity_x */
+a = t_read16(ss, ss_abs(ss, entity_x));
+ss_set_nz16(ss, a);
+SI(0xA1B3); ss_set_c(ss, true);      /* sec */
+```
+
+The same applies while a not-yet-converted callee is running: `ss_run_callee`
+stops at a boundary inside it and leaves it running, because the frame the hook
+pushed is the routine's real return address, so the callee's own `rtl` lands where
+the ROM expects. Without that, the animation-rate handlers would be atomic across
+`anim_update`, which can reach a VRAM block upload two hundred thousand cycles
+long, and the long input scripts catch it within a couple of thousand frames.
 
 ## Lockstep protocol
 
 `--lockstep` creates two independent emulator instances from the same ROM image:
 
 * **reference** — no hook table installed; the ROM's own code runs.
-* **candidate** — `recomp_hooks[]` installed; hooked routines run as C.
+* **candidate** — the routine table installed; hooked routines run as C.
 
 Both are driven with the same input script, one frame at a time. After every frame
 all four regions — WRAM (128 KB), VRAM (64 KB), CGRAM (512 B), OAM (544 B) — are
@@ -217,30 +335,56 @@ and exits 0. Per-hook call counts are printed at the end, so a table that never 
 cannot be mistaken for a table that passed.
 
 `--hooks` is ignored in lockstep mode: the point of the mode is precisely the
-off-versus-on comparison. `--hook-table empty` still works, and trivially passes.
+off-versus-on comparison. `--hook-table empty` still works, and trivially passes,
+and `--only NAME` narrows the table to one routine, which is how a mismatch gets
+bisected. The summary line also reports how far the candidate's master-cycle count
+has drifted from the reference's, which separates a timing problem from a
+behavioural one at a glance.
 
 ## The worked example
 
-`harness/hooks.c` reimplements `clear_sprite_table` (`$C0:A500`, called once per
+`src/oam.c` reimplements `clear_sprite_table` (`$C0:A500`, called once per
 main-loop iteration from `$C08235` and once from `$C09324`): sixteen 16-bit `stz`
-into `$0400..$041F`, then `$94 = $0200`, `$96 = 0`, then `rts`. The C body writes the
-same values through the timed accessors and models the instruction stream (three
-fetches then two writes per `stz abs`, and so on), so the routine costs the emulator
-the same master cycles it did before.
+into `$0400..$041F`, then `$94 = $0200`, `$96 = 0`, then `rts`. It is also what
+`--hook-table demo` installs, through the declining wrapper in `harness/hooks.c`
+that checks the CPU mode first.
 
-Results on this ROM, 600 frames each:
+Like every other routine in `src/`, the body writes the values through the timed
+accessors and models the instruction stream (three fetches then two writes per
+`stz abs`, and so on), so the routine costs the emulator the same master cycles it
+did before: `--profile` reports `rom 703 [658-754] hook 703 [658-754]`, the same
+interval, and therefore a charge of zero.
 
-| run | hook calls | result |
-|-----|-----------|--------|
-| no input | 0 | 600 frames, no mismatches (the routine is never reached on the title screen) |
-| `inputs/title_start_right.txt` | 412 | 600 frames, no mismatches |
+## The gate
 
-Two negative controls confirm the check has teeth: writing `01` instead of `00` in
-the hook is caught at frame 188, `wram` offset `0x408`, exit 1. Dropping one 8-cycle
-fetch per `stz` (a pure timing error, ~128 cycles per call) is *not* caught over 600
-frames — this routine's timing is not observable in the compared regions at frame
-granularity. State divergence is what lockstep proves; cycle fidelity is a discipline
-the hook author keeps, not something these four regions can always police.
+    make recomp-check          # build the harness, then tools/recomp_verify.py
+
+`tools/recomp_verify.py` runs `--lockstep --hooks on` over every script in
+`harness/inputs/`, 900 frames each unless the script carries a `# frames N` header,
+and prints per-script pass/fail plus the hook call counts summed across the scripts.
+A routine counts as verified only when every script passed *and* it was entered at
+least once; `--update` rewrites `config/recomp.txt` (which `tools/progress.py`
+credits to the `recomp` badge) from that, listing the never-entered ones separately
+as unverified rather than crediting them.
+
+`tools/hooks/pre-commit` runs the gate after `make check` when a commit touches
+`recomp/` or `config/recomp*`.
+
+Three of the thirty converted routines are listed as unverified rather than
+credited, because no script *enters* them:
+
+* `anim_rate_1_2` (`$99D3`) has no table word pointing at it anywhere in the ROM
+  (`docs/handler_tables.md` section 1 lists it as unreferenced). The only way the
+  ROM reaches it is by falling through from `$99D2`, which `anim_rate_1_4`'s hook
+  already covers, so its entry address can never fire. It is converted because it
+  is one step of that fall-through chain.
+* `anim_rate_3_8` (`$99BA`) is the same story one table entry along: it is
+  reachable in principle (entity type `$0E`), but `anim_rate_3_16` at `$99B9`
+  falls into it, so whenever the shape is used it is `$99B9` that gets entered.
+* `anim_rate_3_16` (`$99B9`) does fire, 115 times, but only past frame 900:
+  `level_walk_jump.txt` run to its full 3700 frames enters it and still matches.
+  The gate's default length is 900 frames, so it does not count yet. A
+  `# frames 3700` header on that script would make it count.
 
 ## Coverage scripts
 
@@ -263,10 +407,21 @@ located.
 ## Reproducing the reported runs
 
     make harness
+    make recomp-check                       # the gate: every script, every routine
     ./build/recomp/dream_harness --frames 600
     ./build/recomp/dream_harness --frames 600 --input recomp/harness/inputs/title_start_right.txt
-    ./build/recomp/dream_harness --lockstep --hooks on --frames 600 --quiet \
+    ./build/recomp/dream_harness --lockstep --hooks on --frames 900 --quiet \
         --input recomp/harness/inputs/title_start_right.txt
     ./build/recomp/dream_harness --frames 600 --quiet --trace /tmp/trace.txt \
         --input recomp/harness/inputs/title_start_right.txt
     python3 recomp/harness/compare_coverage.py /tmp/trace.txt
+
+To bisect a mismatch, install one routine at a time:
+
+    ./build/recomp/dream_harness --lockstep --frames 900 --quiet \
+        --only entity_sort_draw_order --input recomp/harness/inputs/mode_cycle.txt
+
+and to see whether a body is cycle-exact, compare the two intervals `--profile`
+reports for it:
+
+    make recomp-profile && cat config/recomp_cycles.txt

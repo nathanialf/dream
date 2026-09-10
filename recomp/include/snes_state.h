@@ -9,6 +9,11 @@
  *
  *   ss_r8, ss_w8, ss_wram_...  untimed. Use these when a hook does not care
  *                           about cycle fidelity (bulk work, scratch RAM).
+ *   ss_reg_...              timed *and* DMA-aware. Every access to a hardware
+ *                           register ($2100-$21FF, $4200-$44FF) must go through
+ *                           these: an untimed write to MDMAEN would leave the
+ *                           transfer pending instead of running it, and an
+ *                           untimed read of HVBJOY would never change.
  *   ss_bus_..., ss_fetch, ss_idle
  *                           timed: they charge the emulator exactly what the
  *                           corresponding 65816 bus cycle costs and let DMA/HDMA
@@ -86,6 +91,133 @@ void    ss_idle(SnesState* ss);             /* one internal (6 master cycle) cyc
 void ss_rts(SnesState* ss);   /* 6-cycle rts: pc = pop16 + 1 */
 void ss_rtl(SnesState* ss);   /* 6-cycle rtl: pc = pop16 + 1, pb = pop8 */
 
+/* ---- flags, individually ---------------------------------------------- */
+bool ss_c(const SnesState* ss);
+bool ss_z(const SnesState* ss);
+bool ss_v(const SnesState* ss);
+bool ss_n(const SnesState* ss);
+void ss_set_c(SnesState* ss, bool v);
+void ss_set_z(SnesState* ss, bool v);
+void ss_set_v(SnesState* ss, bool v);
+void ss_set_n(SnesState* ss, bool v);
+
+/* ---- addressing helpers ----------------------------------------------- */
+/* Direct page: the 65816 forms "lda $12" / "lda $12,X". The offset is added to
+ * DP and wrapped to bank 0, exactly as the CPU does with DP low byte 0. */
+uint8_t  ss_dp_r8(const SnesState* ss, uint16_t off);
+uint16_t ss_dp_r16(const SnesState* ss, uint16_t off);
+void     ss_dp_w8(SnesState* ss, uint16_t off, uint8_t v);
+void     ss_dp_w16(SnesState* ss, uint16_t off, uint16_t v);
+
+/* Data-bank-relative absolute: the 65816 forms "lda $0708" / "lda $0708,X".
+ * Goes through the full bus map, so DB = $80 reaches the WRAM mirror and DB = $C0
+ * reaches ROM, just as the routine's own addressing does. */
+uint8_t  ss_db_r8(SnesState* ss, uint16_t abs);
+uint16_t ss_db_r16(SnesState* ss, uint16_t abs);
+void     ss_db_w8(SnesState* ss, uint16_t abs, uint8_t v);
+void     ss_db_w16(SnesState* ss, uint16_t abs, uint16_t v);
+
+/* ---- hardware registers (timed, DMA-aware) ---------------------------- */
+uint8_t  ss_reg_r8(SnesState* ss, uint32_t adr24);
+uint16_t ss_reg_r16(SnesState* ss, uint32_t adr24);   /* low byte first */
+void     ss_reg_w8(SnesState* ss, uint32_t adr24, uint8_t v);
+void     ss_reg_w16(SnesState* ss, uint32_t adr24, uint16_t v); /* low byte first */
+
+/* ---- stack ------------------------------------------------------------ */
+uint8_t  ss_pull8(SnesState* ss);
+uint16_t ss_pull16(SnesState* ss);
+void     ss_push8(SnesState* ss, uint8_t v);
+void     ss_push16(SnesState* ss, uint16_t v);
+
+/* ---- calling a routine that is not converted yet ---------------------- */
+/* Run the reference CPU over a callee the recomp does not implement, then come
+ * back to C. A return address is pushed, pc/pb are set to the callee and the
+ * emulator executes instructions until the stack pointer is back above the
+ * pushed frame; NMIs taken inside the callee are serviced normally. Any hook
+ * the callee itself hits still fires, so a converted callee stays converted.
+ *   ss_call_sub  — callee ends in rts (entered with jsr)
+ *   ss_call_long — callee ends in rtl (entered with jsl)
+ * A/X/Y/DB/flags are the caller's on entry and the callee's on return, exactly
+ * as with the real jsr/jsl. */
+void ss_call_sub(SnesState* ss, uint8_t bank, uint16_t addr);
+void ss_call_long(SnesState* ss, uint8_t bank, uint16_t addr);
+
+/* The primitive underneath both, for a hook that wants to build the call frame
+ * itself because it is also modelling the caller instruction's cycles: push the
+ * return frame and set pc/pb by hand, then run until the stack pointer is back
+ * above spBefore. */
+void ss_run_until_return(SnesState* ss, uint16_t spBefore);
+
+/* The same, but it also stops when the machine moves on underneath the hook
+ * (ss_yield_wanted) and reports that by returning true. Only safe when the frame
+ * that was pushed is the routine's *real* return address, because the callee is
+ * left running: its own rts/rtl then lands where the ROM would have gone, and
+ * the ROM finishes the routine. A callee can run for a long time -- anim_update
+ * reaches a VRAM block upload -- so without this the hook would be atomic across
+ * a frame boundary that the reference run stops at. */
+bool ss_run_callee(SnesState* ss, uint16_t spBefore);
+
+/* ---- yielding back to the ROM ------------------------------------------- */
+/* True once the machine has crossed into vblank, started a new frame, or
+ * latched an interrupt since this hook began.
+ *
+ * A hook is atomic where the routine it replaces is not: the emulator's frame
+ * loop stops at an instruction boundary, and the reference run stops in the
+ * middle of a long routine where a hooked run would have to finish it first. So
+ * would an interrupt: the 65816 services it between two instructions, a hook
+ * only after all of them. Either way the two runs are then compared at different
+ * points in the same routine.
+ *
+ * A body that models the instruction stream can simply stop. Every register,
+ * flag and byte of memory is already what the 65816 would have left at that
+ * boundary, so setting the pc to the address of the next instruction and
+ * returning hands the rest of the routine to the ROM, which finishes it. The
+ * port checks this before every instruction (see recomp/src/dream_time.h), which
+ * is what keeps a hook from being atomic over more than one of them. */
+bool ss_yield_wanted(const SnesState* ss);
+
+/* ---- DMA ---------------------------------------------------------------- */
+/* Let a transfer the hook just started actually run. A write to MDMAEN only
+ * arms the channel; the emulator performs the transfer on the next bus cycle
+ * after that, which for the ROM is the instruction that follows the store. A
+ * hook that arms a channel and then reprograms it without spending any bus time
+ * in between would run the transfer with the *next* job's registers. Call this
+ * immediately after every MDMAEN write, where the ROM's next instructions are.
+ */
+void ss_dma_run(SnesState* ss);
+
+/* ---- cycle accounting ------------------------------------------------- */
+uint64_t ss_cycles(const SnesState* ss);        /* master cycles since reset */
+void     ss_consume_cycles(SnesState* ss, int cycles); /* charge n master cycles */
+
+/* ---- routine registry ------------------------------------------------- */
+/* A recomped routine: it always handles the call, and is responsible for
+ * leaving the CPU where the 65816 routine would have (ss_rts / ss_rtl / an
+ * explicit ss_set_pc for a tail jmp). */
+typedef void (*RecompFn)(SnesState* ss);
+
+typedef struct RecompEntry {
+  uint32_t addr;        /* canonical $C0:0000+offset entry address */
+  const char* name;     /* the name in out/symbols.txt */
+  RecompFn fn;
+} RecompEntry;
+
+/* Called from a file-scope constructor in each recomp/src file; --hook-table all
+ * installs everything registered this way. Registering the same address twice
+ * is a fatal error. */
+void recomp_register(uint32_t entry_addr, const char* name, RecompFn fn);
+const RecompEntry* recomp_registry(unsigned* count);
+
+/* Boilerplate for a file's static table:
+ *     static const RecompEntry kEntries[] = { { 0xc0a500, "clear_sprite_table", clear_sprite_table } };
+ *     RECOMP_REGISTER(kEntries)
+ */
+#define RECOMP_REGISTER(tbl)                                              \
+  __attribute__((constructor)) static void tbl##_recomp_register(void) {  \
+    for(unsigned i_ = 0; i_ < sizeof(tbl) / sizeof((tbl)[0]); i_++)       \
+      recomp_register((tbl)[i_].addr, (tbl)[i_].name, (tbl)[i_].fn);      \
+  }
+
 /* ---- hook table ------------------------------------------------------- */
 /* Return true if the hook ran and set pc/pb; false to let the ROM routine run. */
 typedef bool (*RecompHookFn)(SnesState* ss);
@@ -101,8 +233,10 @@ typedef struct RecompHook {
 extern const RecompHook recomp_hooks[];
 extern const RecompHook recomp_hooks_empty[];
 
-/* Per-entry invocation counters, parallel to recomp_hooks, for the run report. */
-extern unsigned long recomp_hook_hits[];
+/* Per-entry invocation counters, parallel to the installed table, for the run
+ * report. RECOMP_HOOKS_MAX bounds both the registry and the counters. */
+#define RECOMP_HOOKS_MAX 256
+extern unsigned long recomp_hook_hits[RECOMP_HOOKS_MAX];
 unsigned recomp_hooks_count(const RecompHook* table);
 
 #endif

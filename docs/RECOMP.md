@@ -48,6 +48,29 @@ installed and one without, compared byte for byte after every frame.
         --input recomp/harness/inputs/title_start_right.txt
 
 Build, CLI, the hook API (`recomp/include/snes_state.h`) and the lockstep protocol
-are documented in `recomp/README.md`. The first routine to pass the check is
-`clear_sprite_table` (`$C0:A500`), 412 hooked calls over 600 frames with no
-mismatches.
+are documented in `recomp/README.md`.
+
+## The port
+
+`recomp/src/` holds the C, one file per subsystem and one function per 65816
+routine, named as in `out/symbols.txt` and commented with the source address of
+each block so the two can be read side by side. Each file registers its own entry
+addresses from a file-scope constructor, so adding a routine touches no central
+table and no build file.
+
+Routine bodies are transliterations, not rewrites: the same branches in the same
+order, the same flag side effects, and the same bus accesses in the same order,
+because this ROM turns out to observe its own timing in two places (the SPC upload
+handshake counts words against the APU's clock, and the joypad wait loop reads the
+hblank flag). `recomp/src/dream_time.h` supplies one helper per 65816 access
+pattern for that; `--profile` measures a routine against the ROM's own per-call
+cost and reports the two as intervals, so "exact" is a thing the harness confirms
+rather than a thing the author claims.
+
+A hook is atomic where the routine it replaces is not, so every loop offers the
+ROM the chance to take the rest of the routine back (`ss_yield_wanted`) at the top
+of each iteration. That is what keeps a several-thousand-cycle routine honest when
+the frame boundary or an interrupt lands inside it.
+
+`config/recomp.txt` lists what has passed; `make recomp-check` is the gate, and
+`tools/hooks/pre-commit` runs it when a commit touches `recomp/`.

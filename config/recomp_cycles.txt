@@ -1,0 +1,39 @@
+; Master cycles a hooked routine is charged, so that replacing it with C
+; does not move later NMIs. Written by dream_harness --profile: the ROM's
+; mean cost per call, minus the mean the C body already pays for timed
+; register access, DMA transfers and not-yet-converted callees.
+;
+; A hook that does not always return -- one ending in a tail jmp, or one
+; that handed the rest of the routine back to the ROM at a frame boundary --
+; still gets a line, but is never charged: the two figures then cover
+; different work. Same for an address the ROM only reaches by falling
+; through from the routine above it, which is never entered as a hook.
+; addr name charge calls rom_mean hook_mean
+C099D1 anim_rate_1_8                         0       40   ; rom 104 [102-156] hook 1538 [1062-1954] (did not always return: tail jmp or yielded)
+C099D2 anim_rate_1_4                         0      698   ; rom 95 [90-146] hook 1498 [212-3040] (did not always return: tail jmp or yielded)
+C099D3 anim_rate_1_2                         0      698   ; rom 82 [78-134] hook 0 [0-0] (hook not reached: fall-through entry)
+C0A1B0 camera_follow_player                  0      712   ; rom 701 [666-718] hook 701 [666-718]
+C08E8E check_pending_player_attack           0      712   ; rom 606 [580-706] hook 603 [276-674] (did not always return: tail jmp or yielded)
+C09A5F entity_ai_none                        0      712   ; rom 55 [52-106] hook 55 [52-106]
+C09A61 entity_apply_hit_reaction             0      712   ; rom 583 [194-734] hook 579 [96-734] (did not always return: tail jmp or yielded)
+C09BDA entity_ground_y_lookup                0     1424   ; rom 822 [478-1112] hook 818 [12-1112] (did not always return: tail jmp or yielded)
+C0A1F3 sub_C0A1F3                            0      704   ; rom 311 [262-424] hook 311 [176-418] (did not always return: tail jmp or yielded)
+C0A232 entity_accelerate_velocity_x          0     1424   ; rom 240 [208-578] hook 239 [58-578] (did not always return: tail jmp or yielded)
+C0A26F entity_apply_velocity_x               0      704   ; rom 401 [382-496] hook 401 [382-496]
+C0A2B9 entity_apply_velocity_y               0      704   ; rom 407 [382-522] hook 393 [168-514] (did not always return: tail jmp or yielded)
+C0A2DE read_joypads                          0      747   ; rom 857 [804-900] hook 857 [804-900]
+C0A500 clear_sprite_table                    0      712   ; rom 703 [658-754] hook 703 [658-754]
+C0ADE7 oam_hide_unused_sprites               0      712   ; rom 12039 [10674-13340] hook 12039 [10674-13340]
+C0ADFD oam_dma_upload                        0      713   ; rom 339 [320-458] hook 339 [320-458]
+C0AE1F entity_sort_draw_order                0      712   ; rom 8491 [8462-9196] hook 8491 [8462-9196]
+C0AE7E entity_upload_pending_tiles           0      712   ; rom 4099 [260-21436] hook 4099 [260-21436]
+C09227 mode0_particle_draw_dispatch          0      712   ; rom 11869 [1740-21876] hook 20 [18-72] (did not always return: tail jmp or yielded)
+C09233 particle_dispatch_noop                0      712   ; rom 42 [40-120] hook 42 [40-120]
+C09246 particle_table_clear                  0        2   ; rom 3789 [3464-4114] hook 3789 [3464-4114]
+C0848C dma_setup_channel_step                0        5   ; rom 268 [260-300] hook 268 [260-300]
+C09D32 cgram_upload_queue_flush              0      712   ; rom 132 [132-132] hook 132 [132-132]
+C0A445 dma_fill_vram_zero                    0        2   ; rom 17248 [17230-17266] hook 17248 [17230-17266]
+C0A46A dma_upload_to_vram                    0        7   ; rom 54934 [17128-191722] hook 54928 [17128-191682] (did not always return: tail jmp or yielded)
+C0A483 dma_upload_to_cgram                   0        4   ; rom 1558 [622-2494] hook 1558 [622-2494]
+C0A4A6 set_bg_scroll_prep                    0        1   ; rom 416 [416-416] hook 416 [416-416]
+C0A4A8 set_bg_scroll                         0        1   ; rom 398 [398-398] hook 0 [0-0] (hook not reached: fall-through entry)

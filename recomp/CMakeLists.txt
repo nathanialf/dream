@@ -33,12 +33,23 @@ add_library(lakesnes STATIC
 )
 target_include_directories(lakesnes PUBLIC third_party/lakesnes/snes)
 
+# --- the port ----------------------------------------------------------------
+# One file per subsystem, one C function per 65816 routine. Each file registers
+# its own entry addresses from a file-scope constructor (RECOMP_REGISTER), so a
+# new routine needs no edit here and no central table: the glob picks the file
+# up and --hook-table all installs whatever registered itself.
+#
+# CONFIGURE_DEPENDS re-globs on build, so adding a file does not need a manual
+# cmake re-run.
+file(GLOB RECOMP_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
+
 # --- harness -----------------------------------------------------------------
 add_executable(dream_harness
   harness/main.c
   harness/snes_state.c
   harness/hooks.c
   harness/xxh64.c
+  ${RECOMP_SOURCES}
 )
 target_include_directories(dream_harness PRIVATE include harness)
 target_link_libraries(dream_harness PRIVATE lakesnes)
