@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Per-push SHA gate: for each pushed ref with build-sensitive changes, the working tree
+# must be at the pushed tip and `make check` must pass. Backstop against --no-verify.
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+push_failed=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [[ "$local_sha" =~ ^0+$ ]] && continue
+    if [[ "$remote_sha" =~ ^0+$ ]]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+    BUILD_SENSITIVE=$(git diff --name-only "$range" 2>/dev/null |
+        grep -E '^(src/|spc/|tools/|config/|Makefile$)' || true)
+    [[ -z "$BUILD_SENSITIVE" ]] && continue
+    if [[ ! -f baserom/DREAM.sfc || ! -x tools/bin/asar ]]; then
+        echo "pre-push: no baserom/DREAM.sfc or tools/bin/asar — cannot verify $local_ref, refusing" >&2
+        push_failed=1; continue
+    fi
+    if [[ "$(git rev-parse HEAD)" != "$local_sha" ]]; then
+        echo "pre-push: working tree HEAD is not the pushed tip of $local_ref; check it out and retry" >&2
+        push_failed=1; continue
+    fi
+    tools/check_no_rom.sh || { push_failed=1; continue; }
+    echo "pre-push: make check on $local_ref ..."
+    if ! make -s check >/dev/null; then
+        echo "pre-push: SHA-1 GATE FAILED on $local_ref — refusing push." >&2
+        push_failed=1; continue
+    fi
+    if ! python3 tools/progress.py --check >/dev/null; then
+        echo "pre-push: docs/progress.json is stale — run tools/progress.py and commit." >&2
+        push_failed=1; continue
+    fi
+    echo "pre-push: gate OK on $local_ref"
+done
+exit $push_failed

@@ -1,6 +1,35 @@
-#!/bin/sh
-# Gate: no ROM-derived content, and the round trip must still be byte-identical.
+#!/usr/bin/env bash
+# Installed via `git config core.hooksPath tools/hooks` (tools/install_hooks.sh). Runs:
+#   1. tools/check_no_rom.sh   — IP-safety scan of tracked files
+#   2. make check              — byte-identical round trip (ROM SHA-1 + SPC700 driver),
+#                                only when staged changes can affect the build
+#   3. tools/progress.py       — refresh README badges, docs/PROGRESS.md, docs/progress.json,
+#                                and stage them into this commit
+# Bypass with --no-verify only for commits that cannot touch the build; the pre-push
+# hook re-runs the gate on the pushed tip regardless.
 set -e
-cd "$(git rev-parse --show-toplevel)"
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
 tools/check_no_rom.sh
-if [ -f baserom/DREAM.sfc ]; then make -s check; else echo "pre-commit: no baserom/DREAM.sfc, skipping build gate"; fi
+
+BUILD_SENSITIVE=$(git diff --cached --name-only -z | tr '\0' '\n' |
+    grep -E '^(src/|spc/|tools/|config/|Makefile$)' || true)
+if [[ -z "$BUILD_SENSITIVE" ]]; then
+    exit 0
+fi
+if [[ ! -f baserom/DREAM.sfc ]]; then
+    echo "pre-commit: baserom/DREAM.sfc missing — cannot run the SHA-1 gate, skipping" >&2
+    exit 0
+fi
+if [[ ! -x tools/bin/asar ]]; then
+    echo "pre-commit: tools/bin/asar missing — build asar first (see README), skipping gate" >&2
+    exit 0
+fi
+echo "pre-commit: make check (SHA-1 gate) ..."
+if ! make -s check; then
+    echo "pre-commit: BUILD FAILED — the staged changes break the byte-identical round trip." >&2
+    exit 1
+fi
+echo "pre-commit: refreshing progress ..."
+python3 tools/progress.py >/dev/null
+git add README.md docs/PROGRESS.md docs/progress.json

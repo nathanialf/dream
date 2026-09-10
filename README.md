@@ -1,5 +1,23 @@
 # dream
 
+<!-- progress:begin -->
+![code progress](https://img.shields.io/badge/code-24.32%20%25-orange.svg)
+![sound_iface progress](https://img.shields.io/badge/sound%20iface-32.00%20%25-yellow.svg)
+![spc700 progress](https://img.shields.io/badge/spc700-82.93%20%25-green.svg)
+![sprites progress](https://img.shields.io/badge/sprites-0.00%20%25-red.svg)
+![tiles progress](https://img.shields.io/badge/tiles-0.00%20%25-red.svg)
+![maps progress](https://img.shields.io/badge/maps-0.00%20%25-red.svg)
+![palettes progress](https://img.shields.io/badge/palettes-0.00%20%25-red.svg)
+![brr progress](https://img.shields.io/badge/brr-0.00%20%25-red.svg)
+![music progress](https://img.shields.io/badge/music-0.00%20%25-red.svg)
+![anim progress](https://img.shields.io/badge/anim-1.76%20%25-orange.svg)
+![stale progress](https://img.shields.io/badge/stale-6.00%20%25-orange.svg)
+![filler progress](https://img.shields.io/badge/filler-0.00%20%25-red.svg)
+![unknown progress](https://img.shields.io/badge/unknown-0.00%20%25-red.svg)
+<!-- progress:end -->
+
+**[Live progress dashboard](https://nathanialf.github.io/dream/)** — per-section, per-routine and per-region status, updated on every push.
+
 A matching disassembly of the **Dream: Land of Giants** prototype (codename Project Dream), the SNES game Rare built around 1995
 that later became *Banjo-Kazooie*. `make` rebuilds the 2 MiB ROM byte-for-byte from
 the sources here plus data extracted from your own copy of the ROM.
@@ -36,8 +54,10 @@ make                                  # extract -> assemble -> verify (ROM and S
 ```
 
 `tools/extract.py` refuses a ROM whose SHA-1 does not match. Everything under
-`baserom/`, `data/`, `build/`, and `out/` is gitignored; `tools/check_no_rom.sh`
-(run by the pre-commit hook) refuses to commit ROM-derived files or inline byte runs.
+`baserom/`, `data/`, `build/`, and `out/` is gitignored. Run `tools/install_hooks.sh`
+once: the pre-commit hook runs `tools/check_no_rom.sh`, the byte-identical gate, and
+`tools/progress.py` (which rewrites the badges above, `docs/PROGRESS.md` and
+`docs/progress.json`); the pre-push hook re-runs the gate on the pushed tip.
 
 ## Workflow
 

@@ -1,0 +1,53 @@
+name: Deploy progress dashboard
+
+# Publish the SINGLE-TARGET progress dashboard (docs/index.html + docs/progress.json)
+# to GitHub Pages. Unlike the sibling ICO project, Dream has one prototype target and
+# one branch, so this workflow just uploads docs/ as-is — no multi-branch assembly step.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+
+# Allow the GITHUB_TOKEN to deploy to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; don't cancel a running one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+# Covers actions still pinned to Node 20 internally (configure-pages@v5,
+# upload-pages-artifact@v3, deploy-pages@v4) until they ship a Node-24 major.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Create the Pages site automatically if it doesn't exist yet, so the
+          # first deploy doesn't fail with "Get Pages site failed" (404).
+          enablement: true
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
