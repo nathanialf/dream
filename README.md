@@ -1,22 +1,5 @@
 # dream
 
-<!-- progress:begin -->
-![recomp progress](https://img.shields.io/badge/recomp-93.32%20%25-green.svg)
-![code progress](https://img.shields.io/badge/code-90.95%20%25-green.svg)
-![sound_iface progress](https://img.shields.io/badge/sound%20iface-96.57%20%25-green.svg)
-![spc700 progress](https://img.shields.io/badge/spc700-82.93%20%25-green.svg)
-![sprites progress](https://img.shields.io/badge/sprites-100.00%20%25-brightgreen.svg)
-![tiles progress](https://img.shields.io/badge/tiles-100.00%20%25-brightgreen.svg)
-![maps progress](https://img.shields.io/badge/maps-100.00%20%25-brightgreen.svg)
-![palettes progress](https://img.shields.io/badge/palettes-100.00%20%25-brightgreen.svg)
-![brr progress](https://img.shields.io/badge/brr-100.00%20%25-brightgreen.svg)
-![music progress](https://img.shields.io/badge/music-99.78%20%25-green.svg)
-![anim progress](https://img.shields.io/badge/anim-100.00%20%25-brightgreen.svg)
-![stale progress](https://img.shields.io/badge/stale-100.00%20%25-brightgreen.svg)
-![filler progress](https://img.shields.io/badge/filler-100.00%20%25-brightgreen.svg)
-![unknown progress](https://img.shields.io/badge/unknown-0.00%20%25-red.svg)
-<!-- progress:end -->
-
 **[Live progress dashboard](https://nathanialf.github.io/dream/)** — per-section, per-routine and per-region status, updated on every push.
 
 A matching disassembly of the **Dream: Land of Giants** prototype (codename Project Dream), the SNES game Rare built around 1995
@@ -66,8 +49,7 @@ make                                  # extract -> assemble -> verify (ROM and S
 `tools/extract.py` refuses a ROM whose SHA-1 does not match. Everything under
 `baserom/`, `data/`, `build/`, and `out/` is gitignored. Run `tools/install_hooks.sh`
 once: the pre-commit hook runs `tools/check_no_rom.sh`, the byte-identical gate, and
-`tools/progress.py` (which rewrites the badges above, `docs/PROGRESS.md` and
-`docs/progress.json`); the pre-push hook re-runs the gate on the pushed tip.
+`tools/progress.py` (which rewrites `docs/PROGRESS.md` and `docs/progress.json`); the pre-push hook re-runs the gate on the pushed tip.
 
 ## Workflow
 

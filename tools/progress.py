@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""progress.py — regenerate README.md badges, docs/PROGRESS.md and docs/progress.json.
+"""progress.py — regenerate docs/PROGRESS.md and docs/progress.json (README.md carries no badges).
 
 The ROM has no ELF, so "sections" are the ROM's own regions as declared in
 config/regions.txt (class per byte range). Two kinds of progress:
@@ -281,7 +281,7 @@ def main():
     if not ROM.exists():
         sys.exit('progress.py: baserom/DREAM.sfc missing; cannot compute progress')
     data = compute()
-    readme_new = splice(README, badges(data))
+    readme_new = README.read_text() if README.exists() else ''   # badges retired; README untouched
     explain = ('`recomp` counts traced code bytes reimplemented in C and passing the lockstep gate. Code '
                'sections count bytes inside routines that carry a human-chosen name. Data sections count '
                'bytes of assets whose kind round-trips through an editable form (`config/roundtrip.txt`); '
@@ -309,7 +309,6 @@ def main():
         print('progress: up to date' if not changed else 'progress: STALE')
         sys.exit(1 if changed else 0)
     if changed:
-        README.write_text(readme_new)
         PROGRESS_MD.write_text(progress_new)
         PROGRESS_JSON.write_text(js + '\n')
     for s in data['sections']:

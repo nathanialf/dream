@@ -47,4 +47,4 @@ fi
 
 echo "pre-commit: refreshing progress ..."
 python3 tools/progress.py >/dev/null
-git add README.md docs/PROGRESS.md docs/progress.json
+git add docs/PROGRESS.md docs/progress.json
