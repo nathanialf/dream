@@ -1,5 +1,31 @@
 ; bank $CB  (file $0B0000)
 
 org $CB0000
-    incbin "../data/16.bin":$0000..$8000      ; 32768 bytes
-    incbin "../data/17.bin":$0000..$8000      ; 32768 bytes
+    incbin "../data/maps/tilemaps_multi_b0000.bin"                        ; 16384 bytes (whole asset)
+    incbin "../data/sprites/frame_0019.bin"                        ; 2038 bytes (whole asset)
+    incbin "../data/sprites/frame_0020.bin"                        ; 2038 bytes (whole asset)
+    incbin "../data/sprites/frame_0021.bin"                        ; 2038 bytes (whole asset)
+    incbin "../data/sprites/frame_0022.bin"                        ; 2010 bytes (whole asset)
+    incbin "../data/sprites/frame_0023.bin"                        ; 2004 bytes (whole asset)
+    incbin "../data/sprites/frame_0024.bin"                        ; 2004 bytes (whole asset)
+    incbin "../data/sprites/frame_0025.bin"                        ; 1976 bytes (whole asset)
+    incbin "../data/sprites/frame_0026.bin"                        ; 1970 bytes (whole asset)
+    incbin "../data/sprites/frame_0027.bin":$0000..$0132        ; 306 bytes
+    incbin "../data/sprites/frame_0027.bin":$0132..$07B2        ; 1664 bytes
+    incbin "../data/sprites/frame_0028.bin"                        ; 1942 bytes (whole asset)
+    incbin "../data/sprites/frame_0029.bin"                        ; 1942 bytes (whole asset)
+    incbin "../data/sprites/frame_0030.bin"                        ; 1936 bytes (whole asset)
+    incbin "../data/sprites/frame_0031.bin"                        ; 1934 bytes (whole asset)
+    incbin "../data/maps/tilemap_unref_ba4ca.bin"                        ; 1922 bytes (whole asset)
+    incbin "../data/sprites/frame_0032.bin"                        ; 1914 bytes (whole asset)
+    incbin "../data/sprites/frame_0033.bin"                        ; 1902 bytes (whole asset)
+    incbin "../data/sprites/frame_0034.bin"                        ; 1902 bytes (whole asset)
+    incbin "../data/sprites/frame_0035.bin"                        ; 1902 bytes (whole asset)
+    incbin "../data/sprites/frame_0036.bin"                        ; 1880 bytes (whole asset)
+    incbin "../data/sprites/frame_0037.bin"                        ; 1880 bytes (whole asset)
+    incbin "../data/sprites/frame_0038.bin"                        ; 1880 bytes (whole asset)
+    incbin "../data/sprites/frame_0039.bin"                        ; 1880 bytes (whole asset)
+    incbin "../data/sprites/frame_0040.bin"                        ; 1874 bytes (whole asset)
+    incbin "../data/sprites/frame_0041.bin"                        ; 1874 bytes (whole asset)
+    incbin "../data/sprites/frame_0042.bin"                        ; 1874 bytes (whole asset)
+    incbin "../data/sprites/frame_0043.bin"                        ; 666 bytes (whole asset)

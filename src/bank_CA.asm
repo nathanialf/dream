@@ -1,5 +1,30 @@
 ; bank $CA  (file $0A0000)
 
 org $CA0000
-    incbin "../data/14.bin":$0000..$8000      ; 32768 bytes
-    incbin "../data/15.bin":$0000..$8000      ; 32768 bytes
+    incbin "../data/gfx/bg2_tiles_streamed.bin"                        ; 9888 bytes (whole asset)
+    incbin "../data/maps/metatiles_mode1.bin"                        ; 4352 bytes (whole asset)
+    incbin "../data/maps/metatiles_mode3.bin"                        ; 4288 bytes (whole asset)
+    incbin "../data/maps/level_map_mode0.bin"                        ; 3840 bytes (whole asset)
+    incbin "../data/maps/level_map_mode2.bin"                        ; 3072 bytes (whole asset)
+    incbin "../data/sprites/frame_0003.bin"                        ; 2338 bytes (whole asset)
+    incbin "../data/sprites/frame_0004.bin"                        ; 2304 bytes (whole asset)
+    incbin "../data/sprites/frame_0005.bin"                        ; 2276 bytes (whole asset)
+    incbin "../data/sprites/frame_0006.bin":$0000..$019A        ; 410 bytes
+    incbin "../data/sprites/frame_0006.bin":$019A..$08E4        ; 1866 bytes
+    incbin "../data/sprites/frame_0007.bin"                        ; 2276 bytes (whole asset)
+    incbin "../data/sprites/frame_0008.bin"                        ; 2242 bytes (whole asset)
+    incbin "../data/sprites/frame_0009.bin"                        ; 2208 bytes (whole asset)
+    incbin "../data/sprites/frame_0010.bin"                        ; 2208 bytes (whole asset)
+    incbin "../data/sprites/frame_0011.bin"                        ; 2174 bytes (whole asset)
+    incbin "../data/sprites/frame_0012.bin"                        ; 2112 bytes (whole asset)
+    incbin "../data/sprites/frame_0013.bin"                        ; 2112 bytes (whole asset)
+    incbin "../data/sprites/frame_0014.bin"                        ; 2072 bytes (whole asset)
+    incbin "../data/sprites/frame_0015.bin"                        ; 2072 bytes (whole asset)
+    incbin "../data/sprites/frame_0016.bin"                        ; 2072 bytes (whole asset)
+    incbin "../data/sprites/frame_0017.bin"                        ; 2062 bytes (whole asset)
+    incbin "../data/unknown/unknown_gap_ae384.bin"                        ; 10 bytes (whole asset)
+    incbin "../data/maps/tilemap_bg3_mode0.bin"                        ; 2048 bytes (whole asset)
+    incbin "../data/maps/tilemap_mode0_7000.bin"                        ; 2048 bytes (whole asset)
+    incbin "../data/maps/tilemap_mode0_6800.bin"                        ; 2048 bytes (whole asset)
+    incbin "../data/sprites/frame_0018.bin"                        ; 1118 bytes (whole asset)
+    incbin "../data/unknown/unknown_gap_afffec.bin"                        ; 20 bytes (whole asset)

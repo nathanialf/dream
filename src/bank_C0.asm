@@ -3,7 +3,11 @@
 org $C00000
 
 stale_build_image:
-    incbin "../data/00.bin":$0000..$8000      ; 32768 bytes
+    incbin "../data/stale/stale_code.bin"                        ; 12288 bytes (whole asset)
+    incbin "../data/stale/stale_anim_table.bin"                        ; 6912 bytes (whole asset)
+    incbin "../data/stale/stale_tiles.bin"                        ; 12232 bytes (whole asset)
+    incbin "../data/stale/stale_palette.bin"                        ; 1016 bytes (whole asset)
+    incbin "../data/stale/stale_tail.bin"                        ; 320 bytes (whole asset)
 
 reset:
     clc                                    ; C08000 m1x1
@@ -7172,4 +7176,7 @@ loc_C0BFF6:
 loc_C0C008:
     rep.b #$30                             ; C0C008 m1x1
     jmp.w loc_C0A4F5                       ; C0C00A m0x0
-    incbin "../data/01.bin":$400D..$8000      ; 16371 bytes
+    incbin "../data/hdma/hdma_inidisp_table.bin"                        ; 71 bytes (whole asset)
+    incbin "../data/filler/filler_0637.bin"                        ; 16256 bytes (whole asset)
+    incbin "../data/filler/header_remnants.bin"                        ; 16 bytes (whole asset)
+    incbin "../data/filler/cpu_vectors.bin"                        ; 28 bytes (whole asset)

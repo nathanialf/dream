@@ -4,12 +4,48 @@
     python3 tools/emit_asar.py DREAM.sfc src/ data/
 
 Writes src/main.asm (+ per-bank files). No ROM bytes are placed in src/: every data run is an
-`incbin "../data/<half-bank>.bin":$start-$end` range into the files that tools/extract.py splits
-out of the user's own ROM (one file per 32 KB half bank).
+`incbin` into a file that tools/extract.py splits out of the user's own ROM. Where a run
+coincides exactly with a named asset from config/assets.txt it is `incbin "../data/<asset>"`
+(whole file); where a run is a sub-range of one asset it is `incbin "../data/<asset>":$lo..$hi`
+(offsets into that asset file); runs inside the code-embedded tables of 008000-00C00D and
+018000-01841A (interleaved with real 65816 instructions) keep the original
+`incbin "../data/<half-bank>.bin":$lo..$hi` half-bank form, and any run that still straddles
+more than one asset (should not happen once asset boundaries are clipped to data-run
+boundaries below) also falls back to the half-bank form.
 """
-import sys, os
+import sys, os, bisect
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import trace65816 as t
+import gen_assets
+
+# 65816 code lives here, interleaved with embedded data tables; leave these as half-bank ranges
+# per the phase-3 spec (they are not named assets in config/assets.txt in any useful sense).
+CODE_HALFBANK_RANGES = [(0x008000, 0x00C00D), (0x018000, 0x01841A)]
+
+ASSETS = []        # sorted list of (start, end, path)
+ASSET_STARTS = []  # parallel list of starts, for bisect
+FALLBACKS = [0]
+WHOLE = [0]
+SUBRANGE = [0]
+
+def in_code_halfbank(f):
+    return any(lo <= f < hi for lo, hi in CODE_HALFBANK_RANGES)
+
+def asset_at(f):
+    """Return (start, end, path) of the named asset covering file offset f, or None."""
+    if not ASSET_STARTS or in_code_halfbank(f):
+        return None
+    i = bisect.bisect_right(ASSET_STARTS, f) - 1
+    if i < 0:
+        return None
+    a = ASSETS[i]
+    return a if a[0] <= f < a[1] else None
+
+def load_assets(assets_path):
+    global ASSETS, ASSET_STARTS
+    rows = gen_assets.parse_assets_file(assets_path)
+    ASSETS = [(s, e, p) for (s, e, k, p, n) in rows]
+    ASSET_STARTS = [a[0] for a in ASSETS]
 
 
 def fmt_imm(f, size):
@@ -93,6 +129,9 @@ def main():
     sys.argv = ['trace65816', rom, os.path.join(srcdir, '..', 'out')]
     t.main()
     os.makedirs(srcdir, exist_ok=True)
+    assets_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'assets.txt')
+    if os.path.exists(assets_path):
+        load_assets(assets_path)
     ROM, N = t.ROM, t.ROMSIZE
     bank_files = {}
     def out(bank):
@@ -127,16 +166,32 @@ def main():
                 fp.write(f'    dw {label_at(e) or "$%04X" % (t.file2addr(e) & 0xFFFF)}\n')
             f += 2 * len(t.tables[f]); last_org = f
             continue
-        # data run: up to next instruction/table/label
+        # data run: up to next instruction/table/label (and, outside the code-embedded-table
+        # ranges, up to the end of the named asset covering `start` -- this keeps every run a
+        # whole-file or sub-range reference into exactly one asset, never straddling two).
         start = f
-        f += 1
+        asset = asset_at(start)
         bank_end = (start | 0x7FFF) + 1      # asar refuses incbin/db runs that cross a 32K bank-half border
-        while f < bank_end and f not in t.insns and f not in t.tables and f not in t.labels: f += 1
+        run_end = min(bank_end, asset[1]) if asset else bank_end
+        f += 1
+        while f < run_end and f not in t.insns and f not in t.tables and f not in t.labels: f += 1
         n = label_at(start)
         if n: fp.write(f'\n{n}:\n')
         size = f - start
-        lo = start & 0x7FFF
-        fp.write(f'    incbin "../data/{half_name(start)}":${lo:04X}..${lo + size:04X}      ; {size} bytes\n')
+        if asset and asset[0] <= start and f <= asset[1]:
+            astart, aend, apath = asset
+            if start == astart and f == aend:
+                fp.write(f'    incbin "../{apath}"' + ' ' * 24 + f'; {size} bytes (whole asset)\n')
+                WHOLE[0] += 1
+            else:
+                lo, hi = start - astart, f - astart
+                fp.write(f'    incbin "../{apath}":${lo:04X}..${hi:04X}' + ' ' * 8 + f'; {size} bytes\n')
+                SUBRANGE[0] += 1
+        else:
+            if asset:   # run touches this asset but also spills past its end: straddle fallback
+                FALLBACKS[0] += 1
+            lo = start & 0x7FFF
+            fp.write(f'    incbin "../data/{half_name(start)}":${lo:04X}..${lo + size:04X}      ; {size} bytes\n')
         data_files += 1
         last_org = f
     for fp in bank_files.values(): fp.close()
@@ -152,7 +207,8 @@ def main():
         fp.write('\n')
         for bank in sorted(bank_files):
             fp.write(f'incsrc "bank_{bank:02X}.asm"\n')
-    print(f'banks={len(bank_files)} data_runs={data_files}')
+    print(f'banks={len(bank_files)} data_runs={data_files} '
+          f'incbin_whole={WHOLE[0]} incbin_subrange={SUBRANGE[0]} incbin_fallback={FALLBACKS[0]}')
 
 if __name__ == '__main__':
     main()

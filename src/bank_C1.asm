@@ -1,7 +1,14 @@
 ; bank $C1  (file $010000)
 
 org $C10000
-    incbin "../data/02.bin":$0000..$8000      ; 32768 bytes
+    incbin "../data/maps/tilemap_strip1.bin"                        ; 256 bytes (whole asset)
+    incbin "../data/gfx/tiles_strip1.bin"                        ; 9984 bytes (whole asset)
+    incbin "../data/maps/tilemap_strip2.bin"                        ; 256 bytes (whole asset)
+    incbin "../data/gfx/tiles_strip2.bin"                        ; 2560 bytes (whole asset)
+    incbin "../data/maps/tilemap_strip3.bin"                        ; 256 bytes (whole asset)
+    incbin "../data/gfx/tiles_strip3.bin"                        ; 7136 bytes (whole asset)
+    incbin "../data/gfx/font_tiles.bin"                        ; 1536 bytes (whole asset)
+    incbin "../data/filler/fill_55_a.bin"                        ; 10784 bytes (whole asset)
 
 spc_init:
     rep.b #$30                             ; C18000 m0x0
@@ -443,4 +450,6 @@ sub_C18415:
     tax                                    ; C18415 m0x0
     jsr.w write_spc_command                ; C18416 m0x0
     rtl                                    ; C18419 m0x0
-    incbin "../data/03.bin":$041A..$8000      ; 31718 bytes
+    incbin "../data/stale/stale_dup_bg1_mode3.bin"                        ; 26278 bytes (whole asset)
+    incbin "../data/unknown/unknown_tilelike_1eac0.bin"                        ; 1280 bytes (whole asset)
+    incbin "../data/filler/fill_55_b.bin"                        ; 4160 bytes (whole asset)

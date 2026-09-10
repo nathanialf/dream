@@ -245,6 +245,77 @@ Stale-image tiles at `004C00` (unreferenced 4bpp):
 - High-entropy 1 KB windows (>= 7.0 bits/byte) outside the BRR sample area: 8 (058000 7.02, 058C00 7.00, 059000 7.01, 05B400 7.02, 092000 7.02, 092C00 7.01, 093000 7.01, 095400 7.02). The BRR block `023095-035163` averages 7.0-7.3 bits/byte, as expected for 4-bit ADPCM nibbles. Every other region sits at 2-6.6 bits/byte, consistent with raw tiles (row-to-row bit coherence 0.15-0.35 in all tile regions versus 0.5 for BRR/code).
 - Conclusion: the ROM is entirely uncompressed. Roughly 27% of it is stale duplicates of other regions plus an alternate sprite-frame format the code never reads, which is what an uncompressed prototype image with fixed-origin bank layouts looks like (see NOTES.md, toolchain evidence).
 
+## 3a. Asset manifest
+
+`config/assets.txt` (built by `tools/gen_assets.py generate baserom/DREAM.sfc config/regions.txt
+config/assets.txt`, checked with `tools/gen_assets.py verify config/assets.txt`) subdivides the
+region table above into 1808 named, per-asset byte ranges, the same granularity as the
+DKC2/DKC3 disassemblies' `Graphics/GFX_Sprite_<Name>.bin` / `Music_<Name>` extraction. Format:
+
+    <start6hex> <end6hex> <kind> <path>    ; note
+
+`start`/`end` are file offsets (end exclusive), `kind` is one of `sprite_frame`, `sprite_table`,
+`tileset_4bpp`, `tileset_8bpp`, `tileset_2bpp`, `tilemap`, `metatiles`, `map`, `palette`, `hdma`,
+`brr`, `song`, `sfx_bank`, `spc_table`, `anim_script`, `anim_table`, `entity_table`, `code`,
+`stale`, `filler`, `unknown`, and `path` is the file under `data/` that `tools/extract.py`
+writes the asset's bytes to (gitignored, same as the half-bank files; nothing under `data/` is
+ever committed). Coverage is total and non-overlapping: every byte of `000000-200000` belongs to
+exactly one asset. Most regions.txt rows map 1:1 to a single asset; four are subdivided by
+parsing the ROM's own code-driven structures instead of guessing at sub-boundaries:
+
+- **Sprite frames** (`sprite_frame_table` at `0x040000`, 1558 x 4-byte `{ptr16, bank, y_bias}`
+  records): the table itself becomes one `sprite_table` asset
+  (`data/sprites/frame_table.bin`); its 1556 non-null entries resolve to 1556 distinct file
+  offsets, of which entry 0 (`bank=$C4, ptr=0`) aliases the table's own last two (null) bytes
+  and is not real frame data, leaving 1555 offsets inside the nine live-format
+  `sprite_frames_*` regions. Each is decoded with the `{n1, n2, tile_off, ?, ?, ntiles1,
+  vram_off, ntiles2|flags}` 8-byte header from section 1b (`total_tiles = ntiles1 +
+  (ntiles2_byte & 0x7F)`) to get its length; the next frame's start (or the region end) closes
+  the file, folding in the 2-40 byte undecoded trailer bytes documented in 1b. Result: 1555
+  `data/sprites/frame_NNNN.bin` assets, globally numbered in file order, with zero overlaps
+  and gap sizes matching the documented trailer range exactly. The two alternate-format
+  regions (`1CC6AA-1F0000`, `1F2E14-1FFEE5`) are not code-referenced by any table, so they stay
+  single assets (`sprite_frame`) per the "no finer structure" rule.
+- **Animation scripts** (`anim_script_index` at `0x041858`, 174 words): kept as one `anim_table`
+  asset (`data/anim/script_index.bin`); its 174 entries resolve to 96 distinct script offsets,
+  one of which (`$1850`, "the empty script" in `docs/handler_tables.md`) aliases the same two
+  null frame-table bytes as sprite entry 0 above and is left inside `frame_table.bin` rather
+  than double-covered. The remaining 95 offsets partition `anim_scripts`
+  (`0x0419B4-0x046588`) into `data/anim/script_NNN.bin` assets (each running to the next
+  script's start, since 37 of the 96 scripts have no `$FFFE`/`$FFFF` terminator record and are
+  ended by a callback instead, per `docs/handler_tables.md`).
+- **BRR samples** (`brr_samples`, `0x023095-0x035163`): walked directly as a chain of
+  `{loop_offset u16, length u16, length bytes of BRR blocks}` records (the same fields
+  `sub_C1815F` reads) rather than via the pointer table's ambiguous byte order; this lands on
+  exactly 51 records that tile the region with no remainder, matching
+  `docs/data_formats.md` 1's count. Each record is one `data/brr/sample_NN.bin` asset (kind
+  `brr`).
+- **Song blocks** (`song_blocks`, `0x02119F-0x022E5C`): the song table at `0x0210B9` (16 x
+  `{song_block_ptr24, sample_list_ptr24}`, only the first 8 used) gives the 8 song starts
+  directly; each runs to the next song's start (or the region end for song 7), giving
+  `data/music/song_00.bin` .. `song_07.bin` (kind `song`; songs 3-7 are the documented empty
+  4-byte blocks).
+
+Every other regions.txt row becomes a single asset; its `kind` follows the regions.txt `class`
+plus a note-keyword check for the finer distinctions the manifest makes that regions.txt does
+not (tile bit depth from `8bpp`/`2bpp` in the note; `maps` rows split into `hdma`, `tilemap`,
+`metatiles`, or the `map` fallback for the handful of level-scene tables -- wave/parallax/scroll
+curves, per-mode parameter tables -- that are code-referenced but not literally a tilemap,
+metatile set, level map, or HDMA table; `music` rows split into `sfx_bank`, the `filler` sfx
+bank 2 placeholder run, and `spc_table` for the rest). `code` covers `main_program.bin`
+(`0x008000-0x00C00D`) and `sound_iface.bin` (`0x018000-0x01841A`) under `data/misc/`, plus the
+SPC700 `data/spc/ipl_loader.bin` and `data/spc/driver.bin` images.
+
+`tools/emit_asar.py` clips every data run it emits to the named asset covering its start
+address (in addition to the existing 32 KB bank-half and instruction/table/label boundaries),
+so a run can never straddle two assets: it is emitted as a whole-file `incbin "../data/<path>"`
+when the run is exactly one asset, or `incbin "../data/<path>":$lo..$hi` (offsets into that
+asset file) when it is a sub-range of one. Runs inside `main_program.bin`/`sound_iface.bin`
+(65816 code interleaved with embedded data tables) keep the original half-bank
+`incbin "../data/NN.bin":$lo..$hi` form. `tools/asset_sprite.py` and `tools/asset_brr.py`
+decode a sprite frame / BRR sample asset to a PPM+ASCII preview / 16-bit PCM WAV respectively,
+as a check that the derived boundaries line up with the documented formats.
+
 ## 4. Summary by content type
 
 | type | bytes | % of ROM |
