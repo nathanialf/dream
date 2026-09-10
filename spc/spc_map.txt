@@ -1,0 +1,473 @@
+SPC700 code map for DREAM.sfc sound driver (tools/trace_spc700.py)
+
+Loaded blocks:
+  $04D8-$055F  file 0x20000  IPL loader (spc_ipl_upload_loader)
+  $0560-$1291  file 0x20088  main driver (spc_upload_driver, 0x699 words)
+
+Trace roots:
+  $04D8  IPL jump target (spc_ipl_upload_loader writes $04D8 to APUIO2)
+  $0672  loader jmp ($0539+x): operand self-modified to $0672 by sub_C1803E on the 65816 side
+
+Bytes: 2917 code, 597 data/unreached, 3514 total
+Instructions: 1348; subroutines (call targets): 17; labels: 192
+
+Code ranges:
+  $04D8-$055C  (133 bytes)
+  $0660-$06A6  (71 bytes)
+  $06B7-$0FC1  (2315 bytes)
+  $103E-$11CB  (398 bytes)
+
+Data / unreached ranges inside the loaded blocks (jump tables excluded):
+  $055D-$055F  (3 bytes)  data_055D
+  $0560-$065F  (256 bytes)  data_0560
+  $0FC2-$0FD7  (22 bytes)
+  $11CC-$1291  (198 bytes)  pitch_table
+
+Subroutines (call targets) with callers:
+  spc_loader     $04D8  callers: (root)
+  dsp_step_toward_zero $06EB  callers: $06BE, $06C4, $06D0, $06D6, $06DC, $06E2
+  seq_step       $0813  callers: $07B2, $07CA
+  seq_note       $0867  callers: $0862
+  channel_update $09BC  callers: $07AD, $07C5, $084A
+  seq_pop_x      $0B64  callers: $0B72, $0B97, $0BB6, $0BF0, $0C02, $0C18, $0C4E, $0C83, $0CA0, $0CD7, $0CE6, $0CFF, $0D34, $0D70, $0E45, $0E5A, $0EA4, $0EAE, $0EBB, $0EF7, $0F29, $0F43, $0FAF, $0FB9
+  seq_retrigger  $0B69  callers: $0DB5, $0DF2, $0E30, $0E9E, $0F61, $0F91
+  seq_load_srcn  $0B8B  callers: $0B75, $0B9A
+  seq_read_volume $0BC2  callers: $0BA9, $0BB9
+  sub_0BCC       $0BCC  callers: $0BF6
+  scale_volume   $0C59  callers: $0724, $072D, $08FC, $0906
+  seq_push_return $0D1C  callers: $0CEE, $0D05
+  seq_read_vibrato $0E25  callers: $0E14, $0E1F
+  seq_read_adsr  $0E4E  callers: $0BAD, $0E48
+  dsp_init       $103E  callers: $0678, $080D
+  dsp_flg_20     $1123  callers: $0CA5
+  sfx_start      $112A  callers: $0776
+
+Jump tables (jmp (abs+x)):
+  cmd_table at $06A7, 8 entries, used at $06A4
+    [$00] $070A  cmd0_set_E8
+    [$01] $0702  cmd1_set_E7
+    [$02] $06FA  cmd2_set_mono
+    [$03] $06B7  cmd3_fade_and_song
+    [$04] $0739  cmd4_pitch_offset
+    [$05] $0712  cmd5_voice5_volume
+    [$06] $077B  cmd6_play
+    [$07] $07DB  cmd7_stop_to_loader
+  seq_cmd_table at $0FD8, 51 entries, used at $085F
+    [$00] $0B18  seq_end
+    [$01] $0B72  seq_instrument
+    [$02] $0BB6  seq_volume
+    [$03] $0CD7  seq_jump
+    [$04] $0CE6  seq_call
+    [$05] $0D34  seq_return
+    [$06] $0D70  seq_set_length
+    [$07] $0D8F  seq_clear_length
+    [$08] $0D9B  seq_slide_up
+    [$09] $0DA2  seq_slide_down
+    [$0A] $0DD6  seq_slide_off
+    [$0B] $0DEB  seq_tempo
+    [$0C] $0DF8  seq_tempo_add
+    [$0D] $0E11  seq_vibrato
+    [$0E] $0E05  seq_vibrato_off
+    [$0F] $0E1A  seq_vibrato_delay
+    [$10] $0E45  seq_adsr
+    [$11] $0E5A  seq_master_volume
+    [$12] $0EA4  seq_finetune
+    [$13] $0EAE  seq_transpose
+    [$14] $0EBB  seq_transpose_add
+    [$15] $0ECA  seq_echo_setup
+    [$16] $0EF7  seq_echo_on
+    [$17] $0F0F  seq_echo_off
+    [$18] $0F29  seq_fir
+    [$19] $0F43  seq_noise_clock
+    [$1A] $0F56  seq_noise_on
+    [$1B] $0F67  seq_noise_off
+    [$1C] $0E8D  seq_set_note_E0
+    [$1D] $0E97  seq_set_note_E1
+    [$1E] $0C83  seq_volume_presets
+    [$1F] $0CA0  seq_echo_delay
+    [$20] $0C02  seq_volume_preset
+    [$21] $0CFF  seq_call_once
+    [$22] $0B97  seq_instr_full
+    [$23] $0BF0  seq_volume_mono
+    [$24] $0C4E  seq_master_percent
+    [$25] (null)
+    [$26] $0F77  orphan_slide_up2
+    [$27] $0F81  orphan_slide_down2
+    [$28] (null)
+    [$29] (null)
+    [$2A] (null)
+    [$2B] $0FAF  orphan_gate_on
+    [$2C] $0FB9  orphan_gate_off
+    [$2D] (null)
+    [$2E] (null)
+    [$2F] (null)
+    [$30] $0F0F  seq_echo_off
+    [$31] $0C18  orphan_volume_preset2
+    [$32] $0F0F  seq_echo_off
+
+I/O register accesses:
+  04DD  mov !CPUIO0,x                
+  04F5  mov !DSPADDR,#$6C            DSP FLG
+  04F8  mov !DSPDATA,x               
+  04FA  mov !DSPADDR,#$7D            DSP EDL
+  04FD  mov !DSPDATA,#$00            
+  0500  mov !DSPADDR,#$6D            DSP ESA
+  0503  mov !DSPDATA,x               
+  050A  cmp x,!CPUIO0                
+  050E  movw ya,!CPUIO1              
+  0510  mov !CPUIO0,x                
+  051F  cmp x,!CPUIO0                
+  0523  movw ya,!CPUIO1              
+  0525  mov !CPUIO0,x                
+  0532  cmp x,!CPUIO0                
+  0536  mov a,!CPUIO1                
+  053B  mov a,!CPUIO2                
+  053D  mov !CPUIO0,x                
+  0681  mov !CONTROL,a               
+  0685  cmp a,!CPUIO0                
+  068C  mov x,!CPUIO2                
+  0691  mov x,!CPUIO1                
+  0693  mov !CPUIO0,a                
+  06BC  mov !DSPADDR,y               
+  06C2  mov !DSPADDR,y               
+  06CD  mov !DSPADDR,#$0C            DSP MVOLL
+  06D3  mov !DSPADDR,#$1C            DSP MVOLR
+  06D9  mov !DSPADDR,#$2C            DSP EVOLL
+  06DF  mov !DSPADDR,#$3C            DSP EVOLR
+  06EB  mov a,!DSPDATA               
+  06F7  mov !DSPDATA,a               
+  071F  mov !DSPADDR,#$50            DSP V5_VOL_L
+  0722  mov a,!DSPDATA               
+  0727  mov !DSPDATA,a               
+  0729  inc !DSPADDR                 
+  072B  mov a,!DSPDATA               
+  0730  mov !DSPDATA,a               
+  0768  mov !DSPADDR,#$4D            DSP EON
+  076B  mov a,!DSPDATA               
+  076F  mov !DSPDATA,a               
+  077E  mov !CONTROL,#$00            
+  0788  mov !T0TARGET,$E4            t0_target
+  078B  mov !CONTROL,#$01            
+  078E  mov a,!T0OUT                 
+  0792  mov !CONTROL,#$01            
+  07E3  mov !DSPADDR,#$5C            DSP KOFF
+  07E6  mov !DSPDATA,#$FF            
+  07E9  mov !CONTROL,#$00            
+  07EC  mov !T1TARGET,#$C8           
+  07EF  mov !CONTROL,#$02            
+  07F2  mov a,!T1OUT                 
+  07F6  mov !DSPADDR,#$6C            DSP FLG
+  07F9  mov !DSPDATA,#$A0            
+  07FE  mov !DSPADDR,#$4D            DSP EON
+  0801  mov !DSPDATA,x               
+  0803  mov !DSPADDR,#$2C            DSP EVOLL
+  0806  mov !DSPDATA,x               
+  0808  mov !DSPADDR,#$3C            DSP EVOLR
+  080B  mov !DSPDATA,x               
+  0845  mov !DSPADDR,#$5C            DSP KOFF
+  0848  mov !DSPDATA,a               
+  0873  mov !DSPADDR,#$5C            DSP KOFF
+  0876  mov !DSPDATA,a               
+  087E  mov !DSPADDR,a               
+  0882  mov !DSPDATA,a               
+  0884  inc !DSPADDR                 
+  0886  mov !DSPDATA,a               
+  08EF  mov !DSPADDR,a               
+  08FF  mov !DSPDATA,a               
+  0901  inc !DSPADDR                 
+  0909  mov !DSPDATA,a               
+  090B  inc !DSPADDR                 
+  0951  mov !DSPDATA,a               
+  0953  inc !DSPADDR                 
+  0959  mov !DSPDATA,a               
+  095B  inc !DSPADDR                 
+  0960  mov !DSPDATA,a               
+  0962  inc !DSPADDR                 
+  0967  mov !DSPDATA,a               
+  0969  inc !DSPADDR                 
+  096E  mov !DSPDATA,a               
+  0970  inc !DSPADDR                 
+  0972  mov !DSPDATA,#$7F            
+  0975  mov !DSPADDR,#$5C            DSP KOFF
+  0978  mov !DSPDATA,#$00            
+  097B  mov !DSPADDR,#$4C            DSP KON
+  0981  mov !DSPDATA,a               
+  0A26  mov !DSPADDR,a               
+  0A2A  mov !DSPDATA,a               
+  0A2C  inc !DSPADDR                 
+  0A2E  mov !DSPDATA,y               
+  0A98  mov !DSPADDR,a               
+  0A9C  mov !DSPDATA,a               
+  0A9E  inc !DSPADDR                 
+  0AA0  mov !DSPDATA,y               
+  0AEA  mov !DSPADDR,a               
+  0AEF  mov !DSPDATA,a               
+  0AF4  inc !DSPADDR                 
+  0AF6  mov !DSPDATA,a               
+  0B23  mov !DSPADDR,#$5C            DSP KOFF
+  0B29  mov !DSPDATA,a               
+  0B3A  mov !DSPADDR,#$3D            DSP NON
+  0B42  and a,!DSPDATA               
+  0B44  mov !DSPDATA,a               
+  0B46  mov !DSPADDR,#$4D            DSP EON
+  0B51  or a,!DSPDATA                
+  0B53  mov !DSPDATA,a               
+  0B5C  and a,!DSPDATA               
+  0B5E  mov !DSPDATA,a               
+  0CA8  mov !DSPADDR,#$7D            DSP EDL
+  0CAD  mov !DSPDATA,a               
+  0CAF  mov !DSPADDR,#$6D            DSP ESA
+  0CBC  mov !DSPDATA,a               
+  0E5D  mov !DSPADDR,#$0C            DSP MVOLL
+  0E66  mov !DSPDATA,a               
+  0E70  mov !DSPADDR,#$1C            DSP MVOLR
+  0E77  mov !DSPDATA,a               
+  0E7D  mov !DSPADDR,#$1C            DSP MVOLR
+  0E82  mov !DSPDATA,a               
+  0ECB  mov !DSPADDR,#$0D            DSP EFB
+  0ED2  mov !DSPDATA,a               
+  0ED5  mov !DSPADDR,#$2C            DSP EVOLL
+  0EDD  mov !DSPDATA,a               
+  0EDF  mov !DSPADDR,#$3C            DSP EVOLR
+  0EE8  mov !DSPDATA,a               
+  0EEF  mov !DSPADDR,#$6C            DSP FLG
+  0EF2  mov !DSPDATA,a               
+  0EFA  mov !DSPADDR,#$4D            DSP EON
+  0F00  or a,!DSPDATA                
+  0F02  mov !DSPDATA,a               
+  0F10  mov !DSPADDR,#$4D            DSP EON
+  0F18  and a,!DSPDATA               
+  0F1A  mov !DSPDATA,a               
+  0F2C  mov !DSPADDR,#$0F            DSP FIR0
+  0F31  mov !DSPDATA,a               
+  0F35  adc !DSPADDR,#$10            
+  0F38  cmp !DSPADDR,#$8F            
+  0F4E  mov !DSPADDR,#$6C            DSP FLG
+  0F51  mov !DSPDATA,a               
+  0F57  mov !DSPADDR,#$3D            DSP NON
+  0F5D  or a,!DSPDATA                
+  0F5F  mov !DSPDATA,a               
+  0F68  mov !DSPADDR,#$3D            DSP NON
+  0F70  and a,!DSPDATA               
+  0F72  mov !DSPDATA,a               
+  1048  mov !DSPADDR,#$6C            DSP FLG
+  104B  mov !DSPDATA,#$E0            
+  104E  mov !DSPADDR,#$2C            DSP EVOLL
+  1054  mov !DSPDATA,a               
+  1056  mov !DSPADDR,#$3C            DSP EVOLR
+  105C  mov !DSPDATA,a               
+  105E  mov !DSPADDR,#$0D            DSP EFB
+  1061  mov !DSPDATA,a               
+  1063  mov !DSPADDR,#$4C            DSP KON
+  1066  mov !DSPDATA,a               
+  1068  mov !DSPADDR,#$5C            DSP KOFF
+  106B  mov !DSPDATA,#$FF            
+  106E  mov !DSPADDR,#$2D            DSP PMON
+  1071  mov !DSPDATA,a               
+  1073  mov !DSPADDR,#$3D            DSP NON
+  1076  mov !DSPDATA,a               
+  1078  mov !DSPADDR,#$4D            DSP EON
+  107B  mov !DSPDATA,a               
+  1085  mov !DSPADDR,#$0C            DSP MVOLL
+  1088  mov !DSPDATA,a               
+  108A  mov !DSPADDR,#$1C            DSP MVOLR
+  108D  mov !DSPDATA,a               
+  1094  mov !DSPADDR,#$5D            DSP DIR
+  1097  mov !DSPDATA,#$31            
+  109C  mov !DSPADDR,#$00            DSP V0_VOL_L
+  10A1  mov !DSPDATA,a               
+  10A3  inc !DSPADDR                 
+  10A5  mov !DSPDATA,a               
+  10A8  adc !DSPADDR,#$04            
+  10AD  mov !DSPDATA,a               
+  10AF  inc !DSPADDR                 
+  10B1  mov !DSPDATA,a               
+  10B3  inc !DSPADDR                 
+  10B5  mov !DSPDATA,#$FF            
+  10B9  adc !DSPADDR,#$09            
+  1123  mov !DSPADDR,#$6C            DSP FLG
+  1126  mov !DSPDATA,#$20            
+  114C  mov !DSPADDR,#$3D            DSP NON
+  1154  and a,!DSPDATA               
+  1156  mov !DSPDATA,a               
+  11BF  mov !DSPADDR,#$4D            DSP EON
+  11C7  and a,!DSPDATA               
+  11C9  mov !DSPDATA,a               
+
+Absolute references to non-code addresses (variables / tables):
+  $0000  from $0538, $0541
+  $0100  from $091D, $09D7, $09DA, $09DE, $09E6
+  $0110  from $0813, $0B1B, $10E0, $1164
+  $0120  from $0983, $098B, $0D75, $0D7D, $0D86, $0D92, $10F7, $1168
+  $0130  from $0990, $0D80, $0D95, $10FA, $116B
+  $0140  from $089C, $0BA0, $0EB5, $0EC1, $0EC4, $1100, $1179
+  $0150  from $090D, $092B, $09BC, $0A39, $0AB4, $0B01, $0DAD, $0DB2, $0DD7, $0DDC, $0E06, $0E0B ...
+  $0160  from $0914, $0DBA, $0F96
+  $0170  from $091A, $09E3, $0DC0, $0F9C
+  $0180  from $0920, $0DC6, $0FA6
+  $0190  from $0925, $0DCD, $0FA2
+  $01A0  from $0917, $09C6, $09D0, $0A36
+  $01B0  from $09F2, $0A10, $0DAA, $0F86
+  $01C0  from $0928, $09E9, $09EF
+  $01D0  from $099D, $0D78, $0FB3, $0FBC, $10F2, $1170
+  $01E0  from $07B7, $083D, $086B, $08F1, $0A1B, $0A8D, $0ADF, $0B1E, $0B37, $1105, $1149, $1173
+  $0200  from $093D, $0AA6, $0E35
+  $0210  from $0943, $0A4C, $0E3B
+  $0220  from $0948, $0E25
+  $0230  from $0E6D, $0E79, $107F
+  $0231  from $0E84, $1082
+  $0232  from $0EDA, $1051
+  $0233  from $0EE5, $1059
+  $0234  from $0932, $093A, $0A51, $0AAB, $0AB1, $0E41
+  $0244  from $095D, $0B93
+  $0254  from $08F9, $0AEC, $0BC8, $0BE9, $0BF3, $0BFC, $0C08, $0C1E, $0C2E, $0C45, $1183
+  $0264  from $0903, $0AF1, $0BCE, $0BEC, $0BF9, $0C0E, $0C24, $0C39, $0C48, $1186
+  $0274  from $0964, $0E50, $1191
+  $0284  from $096B, $0E56, $1196
+  $0294  from $0B49, $0F06, $0F1E, $1108, $117C
+  $02A4  from $0ABE, $0AC3, $0AC7
+  $02B4  from $0ACD, $0AD1, $0ADC
+  $02C4  from $0AD9
+  $02D4  from $0B0E, $0B14
+  $02E4  from $0AF8, $0AFC, $0B0B
+  $02F4  from $0B08
+  $0314  from $1189
+  $0324  from $118C
+  $0334  from $0CF1, $0D0F, $0D40
+  $03B4  from $0D12, $0D16, $0D2E, $0D3B
+  $0434  from $0D29, $0D45, $0D49
+  $04B4  from $0F48, $10D7
+  $04B5  from $0EEC, $0F4B, $10CB
+  $04B6  from $0712, $071C, $0734, $0C53, $0C5A, $1091
+  $04B7  from $0505, $0CBE
+  $04B8  from $0C05, $0C88
+  $04B9  from $0C0B, $0C8E
+  $04BA  from $0C1B, $0C94
+  $04BB  from $0C21, $0C9A
+  $0539 (in image, inside instruction at $0538)  from $0513, $055A
+  $053A (in image, inside instruction at $0538)  from $0519, $054E
+  $0542 (in image, inside instruction at $0541)  from $0516
+  $0543 (in image, inside instruction at $0541)  from $051C, $0551
+  $055D (in image)  from $0660, $068E, $06FA, $0702, $070A, $0719, $0739, $073F, $074A, $074D, $0773, $07DB
+  $0560 (in image)  from $0B8F
+  $06A7 (in image)  from $06A4
+  $0FC8 (in image)  from $0842, $0870, $097E, $0B26, $0B3D, $0B4E, $0B57, $0EFD, $0F13, $0F5A, $0F6B, $114F ...
+  $0FD8 (in image)  from $085F
+  $11CC (in image)  from $08B0, $08CE, $08E0
+  $11CD (in image)  from $08BA, $08CA, $08E5
+  $1312  from $0665
+  $1313  from $066A
+  $2410  from $1130
+  $2412  from $119F, $11A5
+  $2E94  from $113B
+  $2E96  from $11B0, $11B6
+
+Notes:
+  jmp ($0539+x) at $055A: no plausible table entries (operand is probably self-modified)
+
+=== SPC-side protocol (inferred; 65816 side: out/dream.asm spc_ipl_upload_loader $C1805A,
+    spc_send_words $C18324, sub_C180FF $C180FF, spc_command $C183CE, sub_C1815F $C1815F) ===
+
+Handshake (both loader and driver): port0 ($F4) carries a running counter. The SPC keeps its
+expected value in $E9 (loader: x register while inside the loader, saved to $E9 on exit).
+  65816: wait until APUIO0 == X; write data to APUIO1/APUIO2; X++; write X to APUIO0.
+  SPC:   wait until $F4 == counter; read $F5/$F6; write counter to $F4 (ack); counter++.
+The counter is not reset between loader and driver, so the same sequence number space is
+used for uploads and commands.  It is 8-bit and wraps.
+
+Loader ($04D8-$055C, entered by the IPL jump):
+  1. clrp, sp=$FF, port0=0, $E9=1, clear $D000-$FFFF (echo buffer area).
+  2. loader_reset_dsp ($04F3): DSP FLG=$FF (mute, echo off, reset), EDL=0, ESA=$FF,
+     $04B7=$FF (esa_value).  Driver command 7 jumps back here (with the DSP muted first).
+  3. loader_block_loop ($050A): one handshake reads a 16-bit DEST address (movw ya,$F5:
+     A=port1=low, Y=port2=high); it is patched into the operands of the two
+     `mov $xxxx+y,a` at $0538/$0541 ($0539/$053A and $0542/$0543).  A second handshake
+     reads the WORD COUNT ($EA/$EB).
+       count == 0  -> loader_jump ($0556): $E9 = counter, x = 0, `jmp ($0539+x)`
+                      = jump to DEST.  The 65816 sends DEST=$0672 (sub_C1803E) after
+                      every upload batch, which (re)starts the driver at driver_entry.
+       count  > 0  -> each handshake delivers one word (port1 low byte, port2 high byte)
+                      to DEST+y, DEST+y+1; the abs operand high byte is bumped when y wraps.
+                      Then back to the block loop.
+  Matches spc_send_words: (addr, count, count words), each with the counter handshake.
+
+Driver command port protocol (main_loop $0683 / cmd_receive $068C):
+  Polled, not interrupt driven: the loop alternates between checking port0 and, while
+  play_flag ($1C) is set, waiting one timer-0 tick and stepping the 16 channel slots.
+  A command is: port1 = command byte, port2 = parameter byte (-> cmd_param $055D).
+    cmd < $80         : play_sfx ($0773): sfx id = cmd, channel = param (0-7) -> sfx_start.
+                        id < $60 uses sfx_bank1_ptrs ($2412+2*id, count at $2410,
+                        uploaded at spc_init from $C22E5C); otherwise sfx_bank2_ptrs
+                        ($2E96+2*(id-$60), uploaded per song from data_C210EE).
+                        The sfx runs on slot x|8 and overrides music voice x
+                        (sfx_override $01E0+x) until it ends.
+    cmd >= $80        : cmd & 7 selects cmd_table ($06A7):
+      0 ($F8) cmd0_set_E8        $E8 = param (no other traced reader)
+      1 ($F9) cmd1_set_E7        $E7 = param (no other traced reader; 65816 orphan_C183F1 sends $F9)
+      2 ($FA) cmd2_set_mono      mono_flag $1D = param (volume L/R averaged)
+      3 ($FB) cmd3_fade_and_song ramp all DSP volumes to 0 over 0x7F loops, then
+                                 start_song: song_table[$1312 + 2*param] -> $E5/$E6,
+                                 driver_init (stale 65816 bytes at $C18403 send $FB)
+      4 ($FC) cmd4_pitch_offset  pitch_offset $EC/$ED = sign-extended param * 8
+                                 (applied to sfx slot $0D in channel_update); EON bit5 cleared
+      5 ($FD) cmd5_voice5_volume rescale DSP V5 VOL_L/VOL_R by param percent
+      6 ($FE) cmd6_play          play_flag = 1, CONTROL = 0 (timers restarted at tick_wait).
+                                 spc_command ends with cmd $FE.
+      7 ($FF) cmd7_stop_to_loader param != 0: jump to loader_reset_dsp immediately.
+                                 param == 0: KOFF all, wait ~200 timer-1 ticks (T1=$C8),
+                                 FLG=$A0, EON=0, EVOL=0, dsp_init, then loader_reset_dsp.
+                                 spc_command starts with cmd $FF, param 0: the driver hands
+                                 control back to the loader so the 65816 can upload the new
+                                 song block ($1300), sample remap ($0560), directory
+                                 ($3100), samples ($3400+) and sfx bank 2 ($2E94), then it
+                                 sends DEST=$0672/count 0 (restart) and cmd $FE (play).
+  spc_init sequence: loader upload, driver upload ($0560), samples/dir (sub_C180C1),
+  sfx bank 1 ($2410), then jump $0672.  Game then calls spc_command(1) (song 1 set).
+
+Timing: tick_wait ($0781) programs T0TARGET = t0_target ($E4 = 100 -> 8kHz/100 = 80 Hz)
+  and waits for T0OUT.  Each tick adds tempo ($1F, from song header byte 16) into
+  tempo_acc ($1E); the carry (tick_music $20) decides whether the sequencer advances
+  (seq_step) or only per-tick effects run (channel_update).  $21/$22/$23 do the same for
+  the sfx slots (tempo2 from song header byte 17, $FF in the shipped songs).
+
+=== Memory layout seen by the driver ===
+  $0000-$0004  temporaries          $000C/$0014  stored notes for events $E0/$E1
+  $001C-$0023  play flag, mono flag, tempo accumulators
+  $0024-$00E3  per-slot byte arrays, 16 slots (0-7 music, 8-15 sfx): gate, duration,
+               seq pointer lo/hi, finetune, pitch lo/hi, slide/vibrato counters, seq_sp
+  $00E4-$00EF  t0 target, song pointer, $E7/$E8, port counter, loader count, pitch offset
+  $0100-$02FF  per-slot arrays (16 bytes each): slide, note length/gate, transpose, flags,
+               vibrato, SRCN, volume, ADSR, echo, tremolo
+  $0334/$03B4/$0434  sequencer call stack (lo/hi/count), 8 entries per slot via seq_sp
+  $04B4-$04BB  noise clock, echo-off flag, master percent, ESA, volume presets
+  $04D8-$055C  loader (stays resident)    $055D  cmd_param
+  $0560-$065F  sample_remap[256]: sample number in song data -> directory slot
+  $0660-$11CB  driver code               $11CC-$128F  pitch_table (98 words)
+  $1300        song block: 8 channel pointers, tempo, tempo2, then song_table ($1312) and
+               sequence data (uploaded per spc_command from data_C210B9)
+  $2410/$2412  sfx bank 1 count/pointers (spc_init, $C22E5C)   $2E94/$2E96  sfx bank 2
+  $3100        sample directory (DSP DIR = $31, dsp_init $1094)   $3400+  BRR samples
+  $D000-$FFFF  cleared by the loader; echo buffer at ESA = $FF - EDL*8 (seq_echo_delay)
+
+=== Sequence data format (seq_fetch $0850 / seq_note $0867) ===
+  Event byte >= $80: note.  $80 = rest (key off).  $E0/$E1 = play stored note $0C+x/$14+x.
+    Other values: pitch = pitch_table[(note + $24 + transpose[x]) * 2] with finetune[x]
+    ($64+x, signed, 1/256 semitone steps via mul) applied; writes VOL/PITCH/SRCN/ADSR/GAIN
+    and KON for the voice unless an sfx overrides it.  Duration: from note_len[x] if set
+    (seq cmd $07), else one inline byte (two bytes: duration, gate when gate_mode $01D0+x).
+  Event byte < $80: command, dispatched through seq_cmd_table ($0FD8):
+    $00 end of track            $01 instrument (1)         $02 volume L,R (2)
+    $03 jump (addr)             $04 call (count, addr)     $05 return / loop end
+    $06 note length (1 or 2)    $07 inline lengths         $08 slide up (5)
+    $09 slide down (5)          $0A slide off              $0B tempo (1)
+    $0C tempo add (1)           $0D vibrato (3)            $0E vibrato off
+    $0F vibrato+delay (4)       $10 ADSR (2)               $11 master volume L,R (2)
+    $12 finetune (1)            $13 transpose (1)          $14 transpose add (1)
+    $15 echo EFB,EVOLL,EVOLR (3)  $16 echo on   $17 echo off   $18 FIR x8 (8)
+    $19 noise clock (1)         $1A noise on               $1B noise off
+    $1C set note for $E0 (1)    $1D set note for $E1 (1)   $1E volume presets (4)
+    $1F echo delay (1)          $20 volume from preset     $21 call once (addr)
+    $22 instrument full (7)     $23 volume mono (1)        $24 master percent (1)
+    (operand byte counts in parentheses; handlers set tmp0 = total event length)
+    $25-$32: stale entries (nulls and orphan handlers), see jump table listing.
+

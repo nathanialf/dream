@@ -1,0 +1,28 @@
+# =============================================================================
+# IP PROTECTION — DO NOT REMOVE OR LOOSEN THESE RULES WITHOUT REVIEW
+# =============================================================================
+# This repository must never contain the ROM, extracted data, or any other
+# material owned by Rare / Microsoft / Nintendo. The build reads your own
+# ROM from baserom/ and splits it into data/; neither is ever committed.
+# =============================================================================
+
+# --- ROM images and dumps ---
+*.sfc
+*.smc
+*.bin
+*.zip
+baserom/
+
+# --- Extracted data (populated by tools/extract.py from your ROM) ---
+data/
+
+# --- Build output and tracer output (regenerated from the ROM) ---
+build/
+out/
+
+# --- Local toolchain ---
+tools/bin/
+tools/__pycache__/
+__pycache__/
+*.pyc
+.venv/

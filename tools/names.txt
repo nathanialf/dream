@@ -1,0 +1,85 @@
+; Project Dream (SNES) curated labels. Format:
+;   <24-bit addr> <name>      code entry (traced as a subroutine)
+;   data <addr> <name>        data label only
+;   ram <addr> <name>         WRAM / direct page variable
+; Addresses are HiROM ($C0:0000 = file offset 0). Bank $00/$80 mirrors of the
+; high half resolve to the same file offset.
+
+; ---- entry points (from the vector table at file 0xFFE4) ----
+C08000 reset                  ; native RESET: clears WRAM, inits sound, jumps to main loop
+C0A4D1 nmi                    ; NMI: saves regs, reads RDNMI, then jmp ($0000) -> handler pointer in RAM
+C0A442 unused_vec             ; COP/BRK/ABORT/IRQ vectors all point here
+data C00000 stale_build_image     ; low half of bank $C0: older build leftover, calls into live code at off-by-one addresses (e.g. $ABCB)
+
+; ---- sound (bank $C1 high half = $81:8000) ----
+C18000 spc_init               ; jsl target: IPL handshake, upload loader + driver from $C2:0000
+C1805A spc_ipl_upload_loader  ; uploads 0x88 bytes from $C2:0000 to SPC $04D8 via IPL protocol
+C1809F spc_upload_driver      ; src ptr $04/$06 = $C2:0088, streams blocks via custom loader
+C1830A spc_upload_block       ; block header at [$04]: word dest, word count, then words
+C18324 spc_send_words
+C183CE spc_command            ; jsl target, A = command (0 at boot, 1/2 from reset)
+
+; ---- core ----
+C0A385 ppu_init               ; writes most $21xx regs, NMITIMEN, clears OAM/VRAM
+C0A2DE read_joypads           ; JOYSER0/1 + JOY1..4
+C0A4A8 set_bg_scroll          ; writes BGxHOFS/VOFS, returns with M=16
+C0A500 clear_sprite_table     ; zeroes $0400..$041E, $94=$0200
+C08152 wait_and_enable_nmi    ; INIDISP + NMITIMEN setup
+C08BDB ppu_regs_default
+data C0826A game_mode_table        ; jsr (table,X) with X = game_mode*2
+
+data C0814C alt_mode_table
+data C20000 spc_loader_image  ; 0x88-byte SPC700 loader uploaded by IPL
+data C20088 spc_driver_blocks ; block list uploaded by spc_upload_driver
+
+; ---- RAM ----
+ram 0000 nmi_handler_ptr      ; 16-bit pointer used by nmi: jmp ($0000)
+ram 0004 ptr_04               ; generic 24-bit pointer ($04/$06): SPC upload source, handler dispatch via jmp ($0004), data reads
+ram 0007 spc_dest_addr
+ram 0009 spc_word_count
+ram 0034 nmitimen_shadow
+ram 0046 spc_port0_counter
+ram 0094 sprite_count
+ram 009C init_magic_AA55
+ram 009E init_magic_FFFF
+ram 00A4 game_mode            ; index into game_mode_table
+; ram 00B5 (stale image only)
+
+; ---- from out/handler_tables.md (RAM-dispatched handlers) ----
+; ---- $B66A velocity -> animation-rate handlers (jmp ($0004) at $99B6; entry DB=$80, A=|vel|, X=entity) ----
+data C0B66A anim_rate_fn_table
+data C0B6DC entity_state_velocity_table
+data C0B7AE entity_state_anim_table
+data C0B652 facing_flag_table
+data C0B654 facing_state_bits_table
+C099B9 anim_rate_3_16 m0x0
+C099BA anim_rate_3_8 m0x0
+C099D1 anim_rate_1_8 m0x0
+C099D2 anim_rate_1_4 m0x0
+C099D4 anim_rate_store
+; unreferenced variants in the same run (optional)
+C099C4 anim_rate_3_32 m0x0
+C099D0 anim_rate_1_16 m0x0
+C099D3 anim_rate_1_2 m0x0
+
+; ---- $B022 animation-script callbacks (pointers in bank $C4 scripts; entry X=entity, Y=record) ----
+data C41858 anim_script_table
+C0AEC8 anim_update
+data C0B022 anim_callback_dispatch
+C0B0C5 play_sound_effect
+C0B171 entity_hit_react
+C0B1B1 set_entity_state
+C0B025 anim_cb_sfx_0704 m0x0
+C0B052 anim_cb_sfx_0506 m0x0
+C0B057 anim_cb_sfx_0606 m0x0
+C0B05C anim_cb_sfx_0602 m0x0
+C0B061 anim_cb_sfx_0507 m0x0
+C0B066 anim_cb_sfx_050C m0x0
+C0B06B anim_cb_sfx_0508 m0x0
+C0B070 anim_cb_sfx_0709 m0x0
+C0B08F anim_cb_sfx_060E m0x0
+C0B0CE anim_cb_hit_player m0x0
+C0B0FE anim_cb_hit_enemies m0x0
+C0B1AE anim_cb_reset_state m0x0
+; unreferenced fragment (optional)
+C0B1FE entity_clear_anim_unused m0x0
