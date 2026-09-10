@@ -92,6 +92,8 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
       --input FILE              input script (default: no buttons)
       --trace FILE              write the executed-PC coverage set
       --dump-wram DIR           write DIR/wram_NNNNNN.bin after every frame
+      --dump-cgram DIR          write DIR/cgram_NNNNNN.bin after every frame
+      --dump-oam DIR            write DIR/oam_NNNNNN.bin after every frame
       --hooks on|off            install the recomp 65816 routines (default off)
       --spc-hooks on|off        install the recomp SPC700 routines (default off)
       --hook-table all|demo|empty  which table to install (default all)
@@ -139,7 +141,11 @@ game from a blanked one. The sample point is the instant the frame enters vblank
 `inidisp` reflects the frame that just finished.
 
 `--dump-wram DIR` additionally writes the raw 128 KB per frame, for `cmp`/`xxd` work
-when a hash differs and you need to know where.
+when a hash differs and you need to know where. `--dump-cgram DIR` and `--dump-oam DIR`
+do the same for the other two PPU regions the frame line hashes — 512 bytes of CGRAM,
+512 + 32 bytes of OAM — out of the same snapshot, so what lands in the file is what the
+hash covered. They are how `docs/data_formats.md`'s "Palette assignment" section is
+checked against the running game.
 
 ### Input scripts
 
