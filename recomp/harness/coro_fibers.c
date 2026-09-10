@@ -30,7 +30,18 @@
  *
  * DeleteFiber on the *running* fiber would likewise call ExitThread; the
  * scheduler always frees from outside (harness/snes_state.c: ss_nocpu_free),
- * which is the teardown --test-coro exercises.
+ * which is the teardown --test-coro exercises. coro_free below refuses that
+ * case rather than taking the process down with it.
+ *
+ * 4. coro_start has to give fn a *fresh* stack even when the coro it is handed
+ *    is parked halfway through an earlier body. The POSIX backend cannot get
+ *    this wrong -- coro_start makecontext()s the stack again every time, which
+ *    throws the suspended frames away -- but SwitchToFiber has no such step: it
+ *    resumes wherever the fiber stopped. The scheduler does hand back parked
+ *    coros: ss_nocpu_reap() drops a body chain the NMI handler displaced (this
+ *    ROM's does, two instructions in, with `ldx #$01FF ; txs`) and the slot,
+ *    with its Coro, is reused for the next dispatch. So a suspended fiber is
+ *    deleted and remade at coro_start; only a *finished* one is reused.
  */
 #define WIN32_LEAN_AND_MEAN
 #ifndef _WIN32_WINNT
@@ -100,13 +111,34 @@ Coro* coro_new(size_t stackSize) {
   return co;
 }
 
+/* Throw a fiber away. DeleteFiber frees the stack of a suspended fiber, which is
+ * what dropping a coro means; called on the fiber that is running it calls
+ * ExitThread instead and the process is gone, so that case is refused. */
+static void coro_drop_fiber(Coro* co, const char* what) {
+  if(co->fiber == NULL) return;
+  if(IsThreadAFiber() && co->fiber == coro_current_fiber()) {
+    fprintf(stderr, "coro: %s on the running fiber; refusing (it would ExitThread)\n",
+            what);
+    return;
+  }
+  DeleteFiber(co->fiber);
+  co->fiber = NULL;
+}
+
 void coro_free(Coro* co) {
   if(co == NULL) return;
-  if(co->fiber != NULL) DeleteFiber(co->fiber);
+  coro_drop_fiber(co, "coro_free");
   free(co);
 }
 
 void coro_start(Coro* co, void (*fn)(void*), void* arg) {
+  /* A coro that is not done still has a fiber parked inside coro_yield, halfway
+   * through the body it was running when the scheduler abandoned it. Switching
+   * into that fiber would resume the old body and never call fn: the stack has
+   * to go. A finished coro is parked at the top of coro_fiber_proc's loop
+   * instead, and reusing it is the whole point of that loop. (See note 4 at the
+   * top of this file; the POSIX backend gets this for free.) */
+  if(co->fiber != NULL && !co->done) coro_drop_fiber(co, "coro_start (restart)");
   co->fn = fn;
   co->arg = arg;
   co->done = false;
@@ -127,6 +159,13 @@ void coro_start(Coro* co, void (*fn)(void*), void* arg) {
 }
 
 void coro_resume(Coro* co) {
+  if(co->fiber == NULL) {
+    /* Only a coro that has been started can be resumed (coro.h). Say so here
+     * rather than handing SwitchToFiber a null pointer, which faults inside
+     * ntdll with nothing to read off the address. */
+    fprintf(stderr, "coro: coro_resume on a coroutine that was never started\n");
+    exit(2);
+  }
   co->back = coro_self();
   SwitchToFiber(co->fiber);
 }

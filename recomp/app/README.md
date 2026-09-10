@@ -41,11 +41,154 @@ own verification box runs under.
     ./build/recomp/dream [path/to/DREAM.sfc]
 
 The ROM is looked for in this order: the path on the command line, then
-`./baserom/DREAM.sfc`, then `~/.local/share/dream/DREAM.sfc`. It must be the
+`./baserom/DREAM.sfc`, then `~/.local/share/dream/DREAM.sfc` (on Windows, see
+below). It must be the
 prototype this port was verified against — SHA-1
 `2675d7afe886f20462337aa1ee3aa5c3135fff3a`, 2 MiB. Anything else is refused with
 one line naming both hashes; no ROM ships with this repository and none ever will
 (see [docs/LEGAL.md](../../docs/LEGAL.md)).
+
+## Windows
+
+The release zips at
+[github.com/nathanialf/dream/releases](https://github.com/nathanialf/dream/releases)
+carry `dream.exe`, the README and the LICENSE, and nothing else: no ROM, no data
+([docs/LEGAL.md](../../docs/LEGAL.md)). The executable is self-contained — it
+imports only Windows' own DLLs (SDL3 is linked statically, and so are libgcc and
+libwinpthread), so there is no runtime to install and nothing to unpack beside it.
+
+**Where to put the ROM.** Unzip anywhere and put your own `DREAM.sfc` next to
+`dream.exe`. The search order on Windows is:
+
+1. the path on the command line,
+2. `DREAM.sfc` in the directory `dream.exe` is in,
+3. `%APPDATA%\dream\DREAM.sfc` — for an unpack in a read-only place, or to keep
+   one copy for several builds,
+4. `baserom\DREAM.sfc` relative to the current directory (a checkout).
+
+It must be the prototype this port was verified against, SHA-1
+`2675d7afe886f20462337aa1ee3aa5c3135fff3a`, 2 MiB; anything else is refused with
+one line naming both hashes.
+
+**How to run it.** Double-click `dream.exe`, or from a terminal:
+
+    dream.exe                      # ROM next to the exe or in %APPDATA%\dream
+    dream.exe C:\path\to\DREAM.sfc
+    dream.exe --frames 600 --input inputs\title_start_right.txt
+
+`dream.exe` is a console-subsystem program, so a console window accompanies the
+game window and the hidden `--frames` mode prints the same frame line it prints on
+Linux, into the terminal it was started from. That comparison is the point of the
+flag (see "Checking it against the harness" below) and it is worth more than the
+tidier windowed subsystem would be.
+
+The controls, the menu bar and the gallery are the same as everywhere else.
+
+### Building it yourself
+
+Two supported ways, both MinGW. MSVC is not: every `recomp/src` file registers its
+routines from a file-scope constructor (`RECOMP_REGISTER`,
+[`recomp/include/snes_state.h`](../include/snes_state.h)), which needs
+`__attribute__((constructor))` — GCC, clang and MinGW have it, MSVC does not, and
+the header stops the build with an `#error` rather than linking an empty registry
+and reporting every routine as missing. Adding the MSVC `.CRT$XCU` section trick to
+that one macro is all it would take, if someone wants it.
+
+**On Windows, MSYS2/UCRT64** (what the CI and release workflows use):
+
+    pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake \
+              mingw-w64-ucrt-x86_64-ninja
+    cmake -S recomp -B build/recomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DDREAM_FETCH_SDL3=ON -DCMAKE_EXE_LINKER_FLAGS=-static
+    cmake --build build/recomp -j
+
+`-DDREAM_FETCH_SDL3=ON` has cmake fetch and build SDL3 (a pinned 3.2.x release)
+itself, so there is no separate SDL step; `-static` is what keeps `libgcc_s_seh-1.dll`
+and `libwinpthread-1.dll` out of the imports.
+
+**Cross-built from Linux with mingw-w64:**
+
+    make app-win
+
+which builds SDL3 for the target into `build/sdl3-win` (static, the same options
+`make sdl3` uses), configures `recomp/` with
+[`recomp/cmake/mingw-w64.cmake`](../cmake/mingw-w64.cmake), and writes
+`build/win/dream.exe` and `build/win/dream_harness.exe`. It finishes by listing
+what the two executables import and failing if any of it is not a Windows system
+DLL — `make win-dlls` on its own repeats that check. As built here they import:
+
+    dream.exe          ADVAPI32 GDI32 IMM32 KERNEL32 OLEAUT32 SETUPAPI SHELL32
+                       USER32 VERSION WINMM msvcrt ole32
+    dream_harness.exe  KERNEL32 msvcrt
+
+### When it crashes: `dream.log`
+
+Every run writes a log beside the executable — `dream.log` in the directory
+`dream.exe` is in on Windows, in the working directory everywhere else. It is
+opened before anything else in `main()`, one timestamped line a stage, flushed
+to disk (and `FlushFileBuffers`'d on Windows) as each line is written, because
+the line that matters is always the last one before the fault:
+
+    2026-09-10 19:47:19.448    +0.000  dream: log opened at dream.log
+    2026-09-10 19:47:19.448    +0.000  crash handlers installed (signals)
+    2026-09-10 19:47:19.448    +0.000  argv: 5 argument(s)
+    ...
+    2026-09-10 19:47:19.468    +0.020  rom: sha1 2675d7... (expected 2675d7...) -- match
+    2026-09-10 19:47:19.474    +0.026  run: entering the frame loop (--frames, unpaced)
+    2026-09-10 19:47:19.477    +0.029  frame 1: wram=e12ecc387a955073
+
+Wall clock, then seconds since the log was opened, then the line. What is
+recorded: the arguments, every ROM path tried and what was there, the ROM's size
+and SHA-1, the SDL version and the video and audio driver SDL chose, the window,
+renderer, texture and audio device (with `SDL_GetError()` on a failure), the
+gamepads, the two hook table sizes, the coroutine backend, the first frame and
+then every 300th with its WRAM hash, every gallery open and close, and the exit.
+Nothing goes to stdout that did not go there before: the frame line `--frames`
+prints stays byte-identical to `dream_harness`'s, which is the point of the flag.
+
+**A fault writes itself down.** On Windows the app installs a
+`SetUnhandledExceptionFilter` that logs the exception code and name, the faulting
+address, the module's load address and the base it was *linked* at, the fault
+address as `dream+RVA` and as the address to look up in the map file, the current
+fiber (so a fault on a coroutine stack says so), the last stage logged, and a
+stack walk if `RtlCaptureStackBackTrace` is there — addresses only, since
+`dbghelp.dll` is not among the DLLs this executable is allowed to import. Then it
+flushes, closes the log and leaves with exit code **86**. `SIGSEGV`, `SIGABRT`,
+`SIGILL` and `SIGFPE` are caught on every platform and leave with **87**.
+`SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)` is set as well, so
+a crash under a script or a shortcut falls over and is gone instead of waiting on
+a dialog nobody is looking at.
+
+**Reading an address back.** `make app-win` builds with `-g` and writes
+`build/win/dream.map` next to `build/win/dream.exe`. The log already does the
+arithmetic — `dream+0x2a1b40  (map 0x1402a2b40)` — so the second number is the one
+to search for in the map, which lists every symbol at its linked address. (ASLR
+means the load address differs every run, which is why the offset and not the raw
+address is what identifies the code.) The executable is not stripped either, so
+the same number goes straight into `addr2line` against the build the log came
+from, which gives the line as well as the symbol:
+
+    x86_64-w64-mingw32-addr2line -f -e build/win/dream.exe 0x1402a2b40
+
+### The coroutine backend
+
+The one thing in the port with no portable spelling is the stack the `--no-cpu`
+scheduler runs a body chain on. It lives behind
+[`recomp/harness/coro.h`](../harness/coro.h) — create, switch and destroy with an
+explicit stack size — with `coro_ucontext.c` (`makecontext`/`swapcontext`) on POSIX
+and `coro_fibers.c` (`ConvertThreadToFiber`/`CreateFiber`/`SwitchToFiber`/`DeleteFiber`)
+on Windows, chosen by CMake. `dream_harness --test-coro` exercises whichever one was
+built — nesting, a yield across a frame boundary, tearing down a suspended
+coroutine — and needs no ROM, which is how the fiber backend is checked on a real
+Windows runner in CI while the ROM stays out of it.
+
+One case that test does *not* cover is `coro_start` on a coroutine that is
+suspended rather than finished, which is what the scheduler does when it reuses
+the slot of a body chain the NMI handler displaced (`ss_nocpu_reap`). `makecontext`
+gives the POSIX backend a fresh stack every start and so cannot get it wrong;
+`SwitchToFiber` has no such step, so `coro_fibers.c` deletes a parked fiber and
+makes a new one at `coro_start` and only reuses a finished one. A test for it
+belongs in `--test-coro`.
 
 ## Controls
 

@@ -21,7 +21,9 @@
  *   --gallery-toggle N,ITERS    open the gallery mid-run and close it again, so a
  *                               run with the toggle can be diffed against one without
  */
+#ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
+
+#ifdef _WIN32
+/* GetModuleFileNameA, for the ROM sitting next to dream.exe (find_rom below).
+ * Nothing else in the app is Windows-specific: SDL covers the window, the
+ * sound, the pads and the 60.0988 Hz pacing, and the coroutine backend the
+ * --no-cpu scheduler needs is chosen by CMake (recomp/harness/coro.h). */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -45,6 +56,8 @@
 #include "gallery.h"
 #include "menubar.h"
 #include "music.h"
+#include "coro.h"   /* coro_backend(), for the log line naming the backend */
+#include "dlog.h"   /* dream.log: the run, and the crash, written down */
 
 #define ROM_SIZE    0x200000u
 #define WRAM_SIZE   0x20000u
@@ -457,17 +470,81 @@ static uint8_t* read_file(const char* path, size_t* lenOut) {
   return buf;
 }
 
-/* argv[1], else ./baserom/DREAM.sfc, else ~/.local/share/dream/DREAM.sfc. */
+static bool file_exists(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if(f == NULL) return false;
+  fclose(f);
+  return true;
+}
+
+/* One candidate of the search below, written to dream.log either way. "the game
+ * does not start" is nearly always this list, so the list is what the log
+ * carries: every path tried, in order, and what was there. */
+static bool rom_try(const char* what, const char* path) {
+  bool ok = file_exists(path);
+  dlog("rom: %-16s %s -> %s", what, path, ok ? "FOUND" : "not there");
+  return ok;
+}
+
+/* Where the ROM is looked for, in order:
+ *
+ *   the path on the command line, then
+ *   Windows: the directory dream.exe is in, then %APPDATA%\dream\DREAM.sfc,
+ *   everywhere: ./baserom/DREAM.sfc (a checkout, on either platform), then
+ *   POSIX: $HOME/.local/share/dream/DREAM.sfc.
+ *
+ * The Windows pair is what the release zip needs: it holds dream.exe and no
+ * data, so the player drops their own DREAM.sfc next to it, and %APPDATA% is
+ * where it belongs when the zip is unpacked somewhere read-only. The path is
+ * taken with GetModuleFileNameA rather than SDL_GetBasePath because it is
+ * handed straight to fopen: both speak the process's ANSI code page, while
+ * SDL's path is UTF-8 and fopen would mis-read a non-ASCII directory name.
+ *
+ * buf holds whichever path is returned, so it must outlive the call. */
 static const char* find_rom(const char* fromArgv, char* buf, size_t bufLen) {
-  if(fromArgv != NULL) return fromArgv;
-  FILE* f = fopen("baserom/DREAM.sfc", "rb");
-  if(f != NULL) { fclose(f); return "baserom/DREAM.sfc"; }
-  const char* home = getenv("HOME");
-  if(home != NULL) {
-    snprintf(buf, bufLen, "%s/.local/share/dream/DREAM.sfc", home);
-    f = fopen(buf, "rb");
-    if(f != NULL) { fclose(f); return buf; }
+  dlog_stage("rom: searching");
+  if(fromArgv != NULL) {
+    dlog("rom: %-16s %s (taken as given)", "command line", fromArgv);
+    return fromArgv;
   }
+#ifdef _WIN32
+  {
+    char exe[MAX_PATH];
+    DWORD n = GetModuleFileNameA(NULL, exe, (DWORD) sizeof(exe));
+    if(n > 0 && n < sizeof(exe)) {
+      char* slash = strrchr(exe, '\\');
+      char* fwd = strrchr(exe, '/');
+      if(fwd != NULL && (slash == NULL || fwd > slash)) slash = fwd;
+      if(slash != NULL) {
+        *slash = 0;
+        snprintf(buf, bufLen, "%s\\DREAM.sfc", exe);
+        if(rom_try("beside the exe", buf)) return buf;
+      }
+    } else {
+      dlog("rom: GetModuleFileNameA failed (%lu)", (unsigned long) GetLastError());
+    }
+  }
+  {
+    const char* appdata = getenv("APPDATA");
+    if(appdata != NULL) {
+      snprintf(buf, bufLen, "%s\\dream\\DREAM.sfc", appdata);
+      if(rom_try("%APPDATA%", buf)) return buf;
+    } else {
+      dlog("rom: %%APPDATA%% is not set");
+    }
+  }
+#endif
+  if(rom_try("checkout", "baserom/DREAM.sfc")) return "baserom/DREAM.sfc";
+#ifndef _WIN32
+  {
+    const char* home = getenv("HOME");
+    if(home != NULL) {
+      snprintf(buf, bufLen, "%s/.local/share/dream/DREAM.sfc", home);
+      if(rom_try("$HOME share", buf)) return buf;
+    }
+  }
+#endif
+  dlog("rom: nothing found; falling back to baserom/DREAM.sfc");
   return "baserom/DREAM.sfc";
 }
 
@@ -564,7 +641,26 @@ static void play_pcm(SDL_AudioStream* audio, const int16_t* pcm, int count) {
 
 /* ---- main -------------------------------------------------------------- */
 
+/* A plain C main(), on every platform including Windows.
+ *
+ * SDL3, unlike SDL2, does not include SDL_main.h from SDL.h and does not rename
+ * main(): the entry point below is the real one, and SDL_MAIN_USE_CALLBACKS is
+ * an opt-in this app has no use for -- it owns its frame loop, which is paced by
+ * the SNES's 60.0988 Hz and not by the platform (recomp/app/README.md, "Rate").
+ *
+ * On Windows that leaves dream.exe a console-subsystem program (no -mwindows, no
+ * WinMain), which is deliberate: `--frames N --input SCRIPT` has to print the
+ * harness's frame line to the terminal it was started from, and that line being
+ * byte-identical to dream_harness's is the whole proof that the platform layer
+ * changed nothing. A console window alongside the game is the price. */
 int main(int argc, char** argv) {
+  /* Before anything else, including the argument parse: whatever goes wrong
+   * below, the log is already open and the crash handler is already on. */
+  dlog_open();
+  dlog_install_crash_handlers();
+  dlog_stage("argv: %d argument(s)", argc);
+  for(int i = 0; i < argc; i++) dlog("argv[%d] = %s", i, argv[i] != NULL ? argv[i] : "(null)");
+
   const char* romArg = NULL;
   const char* inputPath = NULL;
   const char* shotPath = NULL;
@@ -603,14 +699,19 @@ int main(int argc, char** argv) {
   char romBuf[1024];
   const char* romPath = find_rom(romArg, romBuf, sizeof(romBuf));
   size_t romLen = 0;
+  dlog_stage("rom: reading %s", romPath);
   uint8_t* rom = read_file(romPath, &romLen);
   if(rom == NULL) {
+    dlog("rom: cannot read %s (%s) -- giving up", romPath, strerror(errno));
     fprintf(stderr, "dream: cannot read %s: put your own DREAM.sfc there "
                     "(or pass its path)\n", romPath);
     return 2;
   }
+  dlog("rom: %zu bytes (expected %u)", romLen, ROM_SIZE);
   char hex[41];
   sha1_hex(rom, romLen, hex);
+  dlog_stage("rom: sha1 %s (expected %s) -- %s", hex, ROM_SHA1,
+             strcmp(hex, ROM_SHA1) == 0 ? "match" : "MISMATCH");
   if(romLen != ROM_SIZE || strcmp(hex, ROM_SHA1) != 0) {
     fprintf(stderr, "dream: %s is not the supported ROM (sha1 %s, expected %s)\n",
             romPath, hex, ROM_SHA1);
@@ -619,16 +720,35 @@ int main(int argc, char** argv) {
   }
 
   InputScript script = { NULL, 0 };
-  if(inputPath != NULL && !input_load(&script, inputPath)) { free(rom); return 2; }
+  if(inputPath != NULL) {
+    dlog_stage("input: loading %s", inputPath);
+    if(!input_load(&script, inputPath)) { free(rom); return 2; }
+    dlog("input: %d event(s)", script.count);
+  }
 
   /* SDL is initialised even for --frames: the harness comparison is only worth
    * something if it runs the same program, and the dummy drivers make that
    * possible without a display. */
   SDL_SetHint(SDL_HINT_APP_NAME, "Dream: Land of Giants");
+  {
+    int v = SDL_GetVersion();
+    dlog("sdl: built against %d.%d.%d, running on %d.%d.%d (%s)",
+         SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION,
+         SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v),
+         SDL_GetRevision());
+  }
+  dlog_stage("sdl: SDL_Init(VIDEO|AUDIO|GAMEPAD)");
   if(!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
+    dlog("sdl: SDL_Init failed: %s", SDL_GetError());
     fprintf(stderr, "dream: SDL_Init failed: %s\n", SDL_GetError());
     free(rom);
     return 2;
+  }
+  {
+    const char* vd = SDL_GetCurrentVideoDriver();
+    const char* ad = SDL_GetCurrentAudioDriver();
+    dlog("sdl: video driver %s, audio driver %s",
+         vd != NULL ? vd : "(none)", ad != NULL ? ad : "(none)");
   }
 
   SDL_Window* window = NULL;
@@ -638,9 +758,12 @@ int main(int argc, char** argv) {
   uint8_t* srcPixels = NULL;
   int16_t* audioBuf = NULL;
 
+  dlog_stage("sdl: creating the window and renderer (%dx%d)",
+             FB_W * 3, FB_H * 3 + menubar_height(FB_W * 3));
   if(!SDL_CreateWindowAndRenderer("Dream: Land of Giants", FB_W * 3,
                                   FB_H * 3 + menubar_height(FB_W * 3),
                                   SDL_WINDOW_RESIZABLE, &window, &renderer)) {
+    dlog("sdl: SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
     fprintf(stderr, "dream: cannot create a window: %s\n", SDL_GetError());
     SDL_Quit();
     free(rom);
@@ -649,9 +772,16 @@ int main(int argc, char** argv) {
   /* No logical presentation: the menu bar is drawn at the window's own resolution
    * and the picture goes into a rect computed under it (view_rect), which keeps the
    * default 8:7 view on whole-numbered pixels exactly as before. */
+  {
+    const char* rn = SDL_GetRendererName(renderer);
+    dlog("sdl: window %p renderer %p (%s)", (void*) window, (void*) renderer,
+         rn != NULL ? rn : "(unnamed)");
+  }
+  dlog_stage("sdl: creating the %dx%d framebuffer texture", FB_W, FB_H);
   texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBX8888,
                               SDL_TEXTUREACCESS_STREAMING, FB_W, FB_H);
   if(texture == NULL) {
+    dlog("sdl: SDL_CreateTexture failed: %s", SDL_GetError());
     fprintf(stderr, "dream: cannot create the framebuffer: %s\n", SDL_GetError());
     SDL_Quit();
     free(rom);
@@ -661,19 +791,31 @@ int main(int argc, char** argv) {
   srcPixels = malloc((size_t) SRC_W * SRC_H * 4);
 
   /* No audio device is not a reason to refuse to play the game. */
+  dlog_stage("sdl: opening the audio device (%d Hz, stereo s16)", AUDIO_HZ);
   SDL_AudioSpec want = { SDL_AUDIO_S16, 2, AUDIO_HZ };
   audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, NULL, NULL);
   if(audio != NULL) {
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(audio);
+    const char* dn = SDL_GetAudioDeviceName(dev);
+    dlog("audio: device %u \"%s\", stream %p", (unsigned) dev,
+         dn != NULL ? dn : "(unnamed)", (void*) audio);
     audioBuf = malloc((size_t) (AUDIO_SAMPLES_PER_FRAME + 64) * 4);
     SDL_ResumeAudioStreamDevice(audio);
+  } else {
+    dlog("audio: no device (%s) -- the game runs silent, which is not an error",
+         SDL_GetError());
   }
 
+  dlog_stage("machine: snes_init");
   Machine m;
   memset(&m, 0, sizeof(m));
   m.snes = snes_init();
   m.ss.snes = m.snes;
   m.hooks = build_table(&m.hookCount);
   m.spcHooks = build_spc_table(&m.spcHookCount);
+  dlog("machine: hook tables: %u 65816 entries, %u SPC700 entries",
+       m.hookCount, m.spcHookCount);
+  dlog_stage("machine: loading the cart and resetting");
   if(!machine_load_rom(&m, rom, romLen)) { free(rom); return 2; }
   /* The ROM image stays mapped for the gallery, which decodes it at run time. */
   snes_setPixelFormat(m.snes, pixelFormatRGBX);
@@ -686,16 +828,27 @@ int main(int argc, char** argv) {
   /* The game is the C bodies: neither emulated CPU fetches an instruction. The
    * scheduler in the harness sources resolves every pc through the tables above
    * (recomp/README.md, "Running without the CPUs"). */
+  dlog_stage("machine: --no-cpu on, coroutine backend \"%s\"", coro_backend());
   ss_nocpu_enable(&m.ss, true);
   sps_nocpu_enable(&m.sps, true);
 
+  dlog_stage("input: opening gamepads");
   SDL_Gamepad* pad = NULL;
   SDL_Gamepad* pad2 = NULL;
   open_gamepads(&pad, &pad2);
+  {
+    int padCount = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&padCount);
+    if(ids != NULL) SDL_free(ids);
+    dlog("input: %d gamepad(s) present; player 1 %s, player 2 %s", padCount,
+         pad  != NULL ? SDL_GetGamepadName(pad)  : "(none)",
+         pad2 != NULL ? SDL_GetGamepadName(pad2) : "(none)");
+  }
 
   /* The app's own UI: a menu bar and the gallery pages it opens. The gallery reads
    * the ROM image and the framebuffer and nothing else — no path from here reaches
    * the machine above. */
+  dlog_stage("ui: creating the gallery and the menu bar");
   uint32_t* fb = calloc((size_t) FB_W * FB_H, sizeof(uint32_t));
   Gallery* gal = gallery_create(rom, romLen);
   Menubar* bar = menubar_create(renderer);
@@ -706,6 +859,8 @@ int main(int argc, char** argv) {
   int frame = 0;
   int toggleLeft = 0;
   uint64_t nextFrame = SDL_GetTicksNS();
+  dlog_stage("run: entering the frame loop (%s)",
+             timed ? "--frames, unpaced" : "60.0988 Hz");
 
   while(running) {
     MenuModel model = { view.scaleMode, view.aspect, view.fullscreen,
@@ -732,10 +887,12 @@ int main(int argc, char** argv) {
             SDL_SetWindowFullscreen(window, view.fullscreen);
             break;
           case MENU_ACT_GALLERY:
+            dlog_stage("gallery: opening section %d (menu)", act.arg);
             gallery_open(gal, act.arg);
             if(audio != NULL) SDL_ClearAudioStream(audio);   /* the game falls silent */
             break;
           case MENU_ACT_GALLERY_CLOSE:
+            dlog_stage("gallery: closing (menu)");
             gallery_close(gal);
             break;
           default: break;
@@ -744,13 +901,19 @@ int main(int argc, char** argv) {
       }
       switch(ev.type) {
         case SDL_EVENT_QUIT:
+          dlog_stage("run: SDL_EVENT_QUIT");
           running = false;
           break;
         case SDL_EVENT_KEY_DOWN:
           /* Escape closes the page if one is open, and quits otherwise. */
           if(ev.key.scancode == SDL_SCANCODE_ESCAPE) {
-            if(gallery_is_open(gal)) gallery_close(gal);
-            else running = false;
+            if(gallery_is_open(gal)) {
+              dlog_stage("gallery: closing (escape)");
+              gallery_close(gal);
+            } else {
+              dlog_stage("run: escape, quitting");
+              running = false;
+            }
           }
           break;
         case SDL_EVENT_GAMEPAD_ADDED:
@@ -775,6 +938,8 @@ int main(int argc, char** argv) {
      * it again. Nothing below runs the machine while it is open, which is the whole
      * point — the frame line at the end has to be the one an untoggled run prints. */
     if(toggleFrame >= 0 && frame == toggleFrame && toggleIters > 0) {
+      dlog_stage("gallery: opening at frame %d (--gallery-toggle, %d iterations)",
+                 frame, toggleIters);
       gallery_open(gal, 0);
       toggleLeft = toggleIters;
       toggleFrame = -1;                 /* once: a paused iteration is not a frame */
@@ -786,7 +951,10 @@ int main(int argc, char** argv) {
       /* The gallery's own UI step. The machine is not stepped, not written to and
        * not even handed an input state: it stands exactly as it was. */
       if(toggleLeft > 0) {
-        if(--toggleLeft == 0) gallery_close(gal);
+        if(--toggleLeft == 0) {
+          dlog_stage("gallery: closing (--gallery-toggle done), back at frame %d", frame);
+          gallery_close(gal);
+        }
         else if(toggleLeft % 4 == 0)
           gallery_open(gal, (gallery_section(gal) + 1) % GALLERY_SECTION_COUNT);
         else gallery_press(gal, 1u << GALLERY_BTN_RIGHT);
@@ -874,6 +1042,13 @@ int main(int argc, char** argv) {
 
     if(paused) continue;      /* a paused iteration is not a frame of the game */
     frame++;
+    /* The first frame proves the machine ran at all; every 300th (five seconds)
+     * is the heartbeat, and its WRAM hash is what says whether the run that
+     * stopped was still the same run as a good one. The last of these lines in
+     * dream.log is where the crash handler's "stage" points. */
+    if(frame == 1 || frame % 300 == 0)
+      dlog_stage("frame %d: wram=%016llx", frame,
+                 (unsigned long long) xxh64(m.snes->ram, WRAM_SIZE, 0));
     if(timed && frame >= frames) break;
   }
 
@@ -893,6 +1068,7 @@ int main(int argc, char** argv) {
     if(sec < 0) {
       fprintf(stderr, "dream: unknown gallery section '%s'\n", spec);
     } else {
+      dlog_stage("gallery: opening section '%s' (--gallery)", spec);
       gallery_open(gal, sec);
       if(colon != NULL) gallery_nav(gal, colon + 1);
       gallery_render(gal, fb);
@@ -900,6 +1076,7 @@ int main(int argc, char** argv) {
   }
   if(shotPath != NULL) write_ppm(shotPath, fb);
 
+  dlog_stage("run: leaving the frame loop after %d frame(s); tearing down", frame);
   if(music != NULL) music_destroy(music);
   menubar_destroy(bar);
   gallery_destroy(gal);
@@ -919,5 +1096,7 @@ int main(int argc, char** argv) {
   free(srcPixels);
   free(audioBuf);
   free(script.ev);
+  dlog_stage("dream: clean exit (0)");
+  dlog_close();
   return 0;
 }

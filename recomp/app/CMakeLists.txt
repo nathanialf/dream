@@ -66,6 +66,7 @@ endif()
 # `dream --frames N --input S` can be diffed against `dream_harness --hooks on`.
 add_executable(dream
   main.c
+  dlog.c
   sha1.c
   font5x7.c
   gallery.c
@@ -76,6 +77,7 @@ add_executable(dream
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/spc_state.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/hooks.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/xxh64.c
+  ${RECOMP_CORO_SRC}
   ${RECOMP_SOURCES}
   ${RECOMP_SPC_SOURCES}
 )
@@ -86,6 +88,22 @@ target_include_directories(dream PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness
 )
 target_link_libraries(dream PRIVATE lakesnes SDL3::SDL3)
+
+# Debug info, always, in every build type. The app writes an address into
+# dream.log when it faults (app/dlog.c) and that address is worth nothing
+# without something to resolve it against; -g costs nothing at run time and the
+# executable is not stripped, so a backtrace taken on the player's machine can
+# be read here. Release keeps its -O3: this is -O3 -g, not a debug build.
+target_compile_options(dream PRIVATE -g)
+
+# ...and, on Windows, a link map beside the executable. dbghelp is deliberately
+# not imported (recomp/app/README.md: the release zip imports Windows' own DLLs
+# and nothing else), so the crash log reports "dream+0xRVA" and the map is what
+# turns that into a symbol. Written with an absolute path because the link step
+# does not run in the directory the executable lands in.
+if(MINGW)
+  target_link_options(dream PRIVATE "-Wl,-Map,${CMAKE_BINARY_DIR}/dream.map")
+endif()
 
 # Next to dream_harness, so both are build/recomp/<name>.
 set_target_properties(dream PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

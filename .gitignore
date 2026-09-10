@@ -20,6 +20,10 @@ data/
 build/
 out/
 
+# --- the app's run log, written beside the executable / in the working
+#     directory every time `dream` runs (recomp/app/dlog.c) ---
+dream.log
+
 # --- Local toolchain ---
 tools/bin/
 tools/__pycache__/
