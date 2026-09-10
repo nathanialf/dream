@@ -10,7 +10,7 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc harness
+.PHONY: all check extract regen clean spc roundtrip harness
 
 all: check
 
@@ -42,6 +42,10 @@ build/spc.bin: spc/driver.asm $(HALVES) | build
 harness:
 	cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/recomp -j
+
+# decode every asset with a codec into build/assets/ and re-encode; must be byte-exact
+roundtrip: $(HALVES)
+	python3 tools/roundtrip_check.py
 
 regen: $(HALVES)
 	python3 tools/emit_asar.py $(ROM) src

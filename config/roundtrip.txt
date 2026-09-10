@@ -1,4 +1,24 @@
-; Asset kinds (from config/assets.txt) that have a verified decoder + encoder pair: the
-; decoded, human-editable form re-encodes to the exact ROM bytes (checked by make check
-; once the build consumes the editable form). Bytes of these kinds count as matched in the
-; data sections of tools/progress.py. Empty at init.
+; config/roundtrip.txt -- asset kinds (from config/assets.txt) whose decoder + encoder pair
+; in tools/assetcodec.py is verified byte-exact: the decoded, human-editable form
+; re-encodes to the exact ROM bytes for every asset of that kind.  Regenerate with
+;
+;   python3 tools/roundtrip_check.py --update
+;
+; Bytes of these kinds count as matched in the data sections of tools/progress.py.
+; One kind per line; a kind only appears here at 100% pass.
+anim_script
+anim_table
+brr
+hdma
+map
+metatiles
+palette
+sfx_bank
+song
+spc_table
+sprite_frame
+sprite_table
+tilemap
+tileset_2bpp
+tileset_4bpp
+tileset_8bpp

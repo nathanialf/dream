@@ -1,0 +1,124 @@
+; Suggested conversion order: leaf routines first (depth = longest call chain below),
+; executed = reached by recomp/harness/inputs/title_start_right.txt (900 frames).
+; addr name size depth exec callees
+C0848C dma_setup_channel_step                22 d0 exec 
+C08A74 sub_C08A74                           359 d0 exec 
+C08E8E check_pending_player_attack           13 d0 exec 
+C091BB sub_C091BB                            75 d0 cold 
+C09206 orphan_C09206                         23 d0 cold 
+C09227 mode0_particle_draw_dispatch           3 d0 exec 
+C09230 mode2_particle_dispatch                3 d0 cold 
+C09233 particle_dispatch_noop                 1 d0 exec 
+C09246 particle_table_clear                  13 d0 exec 
+C09331 particle_update_and_draw_mode0       435 d0 exec 
+C09521 sparkle_update_and_draw              194 d0 cold 
+C099B9 anim_rate_3_16                         1 d0 cold 
+C099BA anim_rate_3_8                         10 d0 cold 
+C099C4 anim_rate_3_32                        12 d0 cold 
+C099D0 anim_rate_1_16                         1 d0 cold 
+C099D1 anim_rate_1_8                          1 d0 exec 
+C099D2 anim_rate_1_4                          1 d0 exec 
+C099D3 anim_rate_1_2                          1 d0 exec 
+C09A5F entity_ai_none                         2 d0 exec 
+C09A61 entity_apply_hit_reaction             87 d0 exec 
+C09BDA entity_ground_y_lookup                60 d0 exec 
+C09C28 vram_write_tile_row_planes            58 d0 cold 
+C09C62 vram_stream_descriptor_dispatch      208 d0 exec 
+C09D32 cgram_upload_queue_flush              56 d0 exec 
+C09D6A entity_init_from_table               281 d0 exec 
+C09E83 build_metatile_column_500            308 d0 exec 
+C09FB7 build_metatile_column_580            314 d0 exec 
+C0A0F1 vram_upload_column_580                87 d0 exec 
+C0A148 vram_upload_column_500               104 d0 exec 
+C0A1B0 camera_follow_player                  67 d0 exec 
+C0A1F3 sub_C0A1F3                            31 d0 exec 
+C0A212 random_next                           32 d0 cold 
+C0A232 entity_accelerate_velocity_x          61 d0 exec 
+C0A26F entity_apply_velocity_x               37 d0 exec 
+C0A294 orphan_C0A294                         37 d0 cold 
+C0A2B9 entity_apply_velocity_y               37 d0 exec 
+C0A2DE read_joypads                         126 d0 exec 
+C0A35C orphan_C0A35C                         41 d0 cold 
+C0A385 ppu_init                             189 d0 exec 
+C0A442 unused_vec                             1 d0 cold 
+C0A445 dma_fill_vram_zero                    37 d0 exec 
+C0A46A dma_upload_to_vram                    25 d0 exec 
+C0A483 dma_upload_to_cgram                   35 d0 exec 
+C0A4A6 set_bg_scroll_prep                     2 d0 exec 
+C0A4A8 set_bg_scroll                         41 d0 exec 
+C0A4D1 nmi                                   47 d0 exec 
+C0A500 clear_sprite_table                    56 d0 exec 
+C0A757 oam_emit_frame_1row                   27 d0 cold 
+C0A772 oam_emit_frame_2row                  388 d0 exec 
+C0A8F6 oam_emit_frame_1row_flip              27 d0 cold 
+C0A911 oam_emit_frame_2row_flip             409 d0 cold 
+C0AAAA oam_emit_frame_3row                  406 d0 exec 
+C0AC40 oam_emit_frame_3row_flip             423 d0 cold 
+C0ADE7 oam_hide_unused_sprites               22 d0 exec 
+C0ADFD oam_dma_upload                        34 d0 exec 
+C0AE1F entity_sort_draw_order                95 d0 exec 
+C0AE7E entity_upload_pending_tiles           59 d0 exec 
+C0AEB9 entity_render_order_reset             15 d0 exec 
+C0B022 anim_callback_dispatch                 3 d0 exec 
+C0B025 anim_cb_sfx_0704                      45 d0 exec 
+C0B052 anim_cb_sfx_0506                       5 d0 cold 
+C0B057 anim_cb_sfx_0606                       5 d0 cold 
+C0B05C anim_cb_sfx_0602                       5 d0 cold 
+C0B061 anim_cb_sfx_0507                       5 d0 cold 
+C0B066 anim_cb_sfx_050C                       5 d0 cold 
+C0B06B anim_cb_sfx_0508                       5 d0 cold 
+C0B070 anim_cb_sfx_0709                       5 d0 cold 
+C0B08F anim_cb_sfx_060E                      45 d0 cold 
+C0B0CE anim_cb_hit_player                    48 d0 cold 
+C0B1AE anim_cb_reset_state                    3 d0 cold 
+C1805A spc_ipl_upload_loader                 69 d0 exec 
+C180FF write_spc_command                     26 d0 exec 
+C1830A upload_inline_spc_block               26 d0 exec 
+C18324 upload_spc_block                     110 d0 exec 
+C08292 mode0_level_init                     506 d1 exec dma_setup_channel_step,particle_table_clear,build_metatile_column_580,vram_upload_column_580,dma_fill_vram_zero,dma_upload_to_vram,dma_upload_to_cgram,set_bg_scroll_prep
+C088AB title_screen_init                    431 d1 cold dma_setup_channel_step,build_metatile_column_580,vram_upload_column_580,dma_fill_vram_zero,dma_upload_to_vram,dma_upload_to_cgram,set_bg_scroll
+C08E9B nmi_scroll_mode0                     172 d1 exec vram_upload_column_580,vram_upload_column_500
+C08F47 nmi_scroll_mode1                     258 d1 cold vram_upload_column_580,vram_upload_column_500
+C09049 nmi_scroll_mode2                     177 d1 cold vram_upload_column_580,vram_upload_column_500
+C090FA nmi_scroll_title                     193 d1 cold vram_upload_column_580,vram_upload_column_500
+C0922A mode1_particle_dispatch                6 d1 cold sparkle_update_and_draw
+C09234 vram_upload_shared_tileset_c5         18 d1 exec dma_upload_to_vram
+C09253 particle_spawn_mode0_weather         160 d1 cold random_next
+C092F3 mode1_reset_particles_and_oam         62 d1 cold particle_update_and_draw_mode0,clear_sprite_table,oam_hide_unused_sprites,oam_dma_upload
+C094E4 sparkle_array_init                    61 d1 cold random_next
+C098DA entity_update_tick                   223 d1 exec entity_ground_y_lookup,sub_C0A1F3,entity_accelerate_velocity_x,entity_apply_velocity_x,entity_apply_velocity_y
+C099EF entity_ai_chase_player               112 d1 cold random_next
+C09C16 vram_generate_particle_tile           18 d1 cold vram_write_tile_row_planes
+C0A538 entity_build_oam_frame               411 d1 exec oam_emit_frame_1row,oam_emit_frame_2row,oam_emit_frame_1row_flip,oam_emit_frame_2row_flip,oam_emit_frame_3row,oam_emit_frame_3row_flip
+C0AEC8 anim_update                          346 d1 exec anim_callback_dispatch
+C0B1B1 set_entity_state                      77 d1 cold entity_ground_y_lookup
+C1803E execute_spc_sound_engine              14 d1 exec upload_spc_block
+C1809F spc_upload_driver                     34 d1 exec upload_spc_block
+C18119 upload_song_data                      36 d1 exec upload_inline_spc_block
+C1813D upload_song_sound_effects             34 d1 exec upload_inline_spc_block
+C1815F sample_uploader                      427 d1 exec upload_spc_block
+C183F1 orphan_C183F1                         18 d1 cold write_spc_command
+C18415 sfx_command_dispatch                   5 d1 exec write_spc_command
+C095E3 particle_spawn_from_table            414 d2 cold vram_generate_particle_tile,random_next
+C09781 particle_spawn_random                338 d2 cold vram_generate_particle_tile,random_next
+C09AB8 entity_spawn_transform_a              62 d2 exec anim_update
+C09AF6 entity_animate_only                    7 d2 cold anim_update
+C09B00 entity_spawn_transform_b             137 d2 exec anim_update
+C09B89 entity_spawn_transform_c              81 d2 exec anim_update
+C0B0C5 play_sound_effect                      9 d2 exec sfx_command_dispatch
+C0B171 entity_hit_react                      61 d2 cold set_entity_state
+C0B1FE entity_clear_anim_unused             425 d2 exec vram_upload_shared_tileset_c5
+C0BD20 nmi_handler_title_fade               740 d2 exec mode1_reset_particles_and_oam,read_joypads
+C180C1 upload_global_samples                 62 d2 exec sample_uploader
+C18392 upload_song_sample_set                60 d2 exec sample_uploader
+C084D7 mode1_level_init                     698 d3 cold sparkle_array_init,particle_spawn_from_table,build_metatile_column_580,vram_upload_column_580,dma_fill_vram_zero,dma_upload_to_vram,dma_upload_to_cgram,set_bg_scroll
+C08798 mode2_level_init                     270 d3 cold dma_setup_channel_step,particle_spawn_random,build_metatile_column_580,vram_upload_column_580,dma_fill_vram_zero,dma_upload_to_vram,dma_upload_to_cgram,set_bg_scroll
+C099D4 anim_rate_store                       27 d3 exec entity_ai_chase_player,entity_ai_none,entity_apply_hit_reaction,entity_spawn_transform_a,entity_animate_only,entity_spawn_transform_b,entity_spawn_transform_c,anim_update
+C0B075 play_footstep_sound                   26 d3 cold play_sound_effect
+C0B0BC play_zone_transition_sound             9 d3 cold play_sound_effect
+C0B0FE anim_cb_hit_enemies                  115 d3 cold play_sound_effect,entity_hit_react
+C18000 spc_init                              62 d3 exec execute_spc_sound_engine,spc_ipl_upload_loader,spc_upload_driver,upload_global_samples,upload_inline_spc_block
+C183CE spc_command                           35 d3 exec execute_spc_sound_engine,write_spc_command,upload_song_data,upload_song_sound_effects,upload_song_sample_set
+C08000 reset                                244 d4 exec entity_init_from_table,ppu_init,oam_dma_upload,entity_render_order_reset,spc_init,spc_command
+C080F4 nmi_handler_gameplay                 414 d4 exec mode0_level_init,mode1_level_init,mode2_level_init,title_screen_init,sub_C08A74,check_pending_player_attack,nmi_scroll_mode0,nmi_scroll_mode1,nmi_scroll_mode2,nmi_scroll_title,sub_C091BB,mode0_particle_draw_dispatch,mode1_particle_dispatch,mode2_particle_dispatch,particle_dispatch_noop,particle_spawn_mode0_weather,entity_update_tick,cgram_upload_queue_flush,build_metatile_column_500,build_metatile_column_580,camera_follow_player,read_joypads,clear_sprite_table,entity_build_oam_frame,oam_hide_unused_sprites,oam_dma_upload,entity_sort_draw_order,entity_upload_pending_tiles,play_footstep_sound
+C08BDB ppu_regs_default                     691 d4 exec vram_stream_descriptor_dispatch,play_zone_transition_sound

@@ -316,6 +316,120 @@ asset file) when it is a sub-range of one. Runs inside `main_program.bin`/`sound
 decode a sprite frame / BRR sample asset to a PPM+ASCII preview / 16-bit PCM WAV respectively,
 as a check that the derived boundaries line up with the documented formats.
 
+## 3b. Round-trip codecs
+
+`tools/assetcodec.py` (python3 stdlib only: `zlib` for PNG, `struct`, `json`, `wave`) converts
+the raw asset bytes `tools/extract.py` writes under `data/` into human-editable files and back:
+
+    python3 tools/assetcodec.py decode <kind> <asset.bin> <outdir>
+    python3 tools/assetcodec.py encode <kind> <editable> <asset.bin>
+
+`decode` writes the editable form(s) into `<outdir>`, named after the input stem, and marks the
+*primary* file with `*`; `encode` is handed that primary file (it picks up the `.json` sidecar
+next to it by name) and writes the asset bytes back. The requirement on every codec is
+byte-exactness: `encode(decode(bytes)) == bytes` for every asset of the kind, with no exceptions
+and no "close enough". Bits with no recovered meaning are carried through verbatim (an unused
+palette word's bit 15, a sprite frame's trailer, a BRR record's pad bytes) rather than dropped.
+
+`tools/roundtrip_check.py` enforces that over the whole manifest:
+
+    python3 tools/roundtrip_check.py               # per-kind pass/total
+    python3 tools/roundtrip_check.py --update      # ... and rewrite config/roundtrip.txt
+    python3 tools/roundtrip_check.py --kind brr -v # one kind, list every failure
+
+It decodes each asset of a codec-carrying kind into `build/assets/<same subpath as data/>`,
+re-encodes, and compares with `data/`. `--update` rewrites `config/roundtrip.txt` with exactly
+the kinds at **100%** pass; `tools/progress.py` reads that file to decide which data bytes count
+as matched. Nothing here is committed -- `build/` is gitignored like `data/` (docs/LEGAL.md 1).
+
+| kind | primary editable form | sidecar | notes |
+|---|---|---|---|
+| `palette` | `.json`: rows of 16 `[r,g,b]` triples, 5 bits each | `.png` swatch (viewing only, not read back) | word indices whose bit 15 is set are listed in `bit15_set`; an odd trailing byte goes to `trailer` |
+| `tileset_2bpp` / `tileset_4bpp` / `tileset_8bpp` | `.png`, 8-bit indexed, 16 tiles per row | `.json` when the tile count is not a multiple of 16 or bytes remain | pixel bytes hold the raw palette index (0-3 / 0-15 / 0-255); the PLTE is only a grey viewing ramp. All five PNG row filters are handled on read, so an editor re-save is fine |
+| `tilemap` | `.json` list of `{tile, pal, pri, h, v}` | - | `tile\|pal<<10\|pri<<13\|h<<14\|v<<15` covers all 16 bits, so nothing is lost |
+| `metatiles` | `.json` list of 4x4 word groups (32 bytes each) | - | `tail_words` holds a partial trailing group |
+| `map` | `.json` column-major `columns x rows` grid of `{index, h, v}` (bits 14/15) | - | dimensions from section 1, keyed by asset name. The `map` rows that are really code-referenced curves (camera/parallax/scroll, per-mode parameter pairs) decode as an `s16_table` instead |
+| `hdma` | `.json` entries `{lines, pointer}` + terminator | - | the `wave_table_sine` row is an HDMA *source*, not a table, and decodes as an `s16_table` |
+| `anim_script` | `.json` records `{callback, mode, duration, frame}` | - | `mode_name` / `duration_name` (`loop_to_frame_0`, `switch_to_anim`) are derived and not read back |
+| `anim_table` | `.json` list of script offsets | - | |
+| `sprite_table` | `.json` records `{ptr, bank, y_bias}` | - | frame id = 2 x record index |
+| `sprite_frame` | `.png` of the assembled frame | `.json` header + OAM list + tile rects | see below |
+| `brr` | `.wav`, 16-bit mono, 32000 Hz | `.json` `{loop_offset, length, per-block shift/filter/loop/end, pad, trailing}` | see below |
+| `song` / `sfx_bank` / `spc_table` | `.json` | - | see below |
+
+### Sprite frames
+
+The live-format decoder follows `sub_C0A538` / `oam_emit_frame_2row` (`$C0A772`): every sprite is
+16x16 (the size bit out of `data_C0A6D3`/`data_C0A6D7` is always set), the emitter walks tile
+numbers with `tile += 2; if tile & $10: tile += $10`, i.e. a 16-tile-wide VRAM grid in which a
+sprite owns tiles `t, t+1, t+16, t+17`. Group 1's `ntiles1` tiles land at grid slots
+`0..ntiles1-1` starting at tile number 0; group 2's `ntiles2` tiles land at grid slot `vram_off`
+(header byte 6) and its `n2` sprites start at tile number `tile_off` (header byte 2).
+
+The PNG is that assembly: sprites drawn at their OAM `(x, y)`, canvas cropped to their bounding
+box (`canvas.origin_x` / `origin_y` record the crop). Sprite positions are not 8-pixel aligned,
+so ownership is tracked per *pixel*: the first tile to claim a pixel keeps it, and any VRAM tile
+that could not be placed uniquely -- overlapped by an earlier sprite, or never referenced by one
+-- is appended to a spill strip below the canvas, 16 tiles per row. The `tiles` array in the
+sidecar gives the authoritative 8x8 source rect of every VRAM tile, and `encode` reads tiles from
+those rects, so the round trip is exact regardless of how the frame assembles. Across the 1555
+live frames, 84% of the 35242 VRAM tiles sit in the assembled canvas and 279 frames assemble with
+no spill at all. Editing a tile that the canvas draws twice only takes effect at its first
+(authoritative) rect.
+
+Caveats worth knowing: frame ids `< 4` are emitted by `oam_emit_frame_1row` with a 5-byte header,
+so for those one or two frames the OAM list in the sidecar is shifted (the bytes still round-trip,
+since the extra header bytes simply parse as OAM records). The two alternate-format regions
+(`1CC6AA-1F0000`, `1F2E14-1FFEE5`) and the ROM tail are **kept raw**: their header semantics are
+not established, so the decoder writes a `.raw.bin` alongside a `.json` that names it, rather than
+inventing a structure. That is flagged by `format: "raw"` in the sidecar.
+
+### BRR samples
+
+The `.wav` holds the PCM the standard SNES BRR decode produces from the whole record (all blocks,
+end flag included), and the sidecar keeps the per-block `shift`/`filter`/`loop`/`end` plus the
+`{loop_offset, length}` header, any pad bytes at the tail of the declared length, and any bytes
+past it. `encode` re-quantises the PCM with the stored filter and shift: because the PCM came from
+those exact nibbles, the residual is exactly reproducible whenever the mapping nibble -> sample is
+injective. It is not injective when `shift == 0` (the `>> 1` drops the low bit), when
+`shift >= 13`, or when a sample was clamped; the decoder detects those blocks by re-running the
+quantiser and falls back to storing that block's nibbles in `raw_nibbles`. Over the 51 samples,
+**6 of 8190 blocks** (0.07%) need that fallback; the other 8184 come back from the PCM alone.
+
+### SPC sequences
+
+`song` and the `sfx_bank1` block decode as `{dest, word_count, segments}`, where the segments
+cover the body **exactly once, in order**: a `song_header` (8 channel pointers, tempo, tempo2) or
+`sfx_index` (count + pointers), then `events` runs and `raw` runs. Streams are walked linearly
+from each channel/sfx pointer and from every jump/call target, using the opcode table in
+`spc/spc_map.txt` with the event lengths read off the `mov $00,#$nn` (`tmp0` = total event length)
+in each handler of `spc/driver.asm`; note events are 1 byte when a note length is latched
+(seq cmd `$06`) and 2 otherwise (3 with the stale gate mode). Each event re-encodes to its own
+bytes -- notes as `{note, operands}`, commands as `{cmd, code, operands}`, control transfers as
+`{cmd, code, target}` (plus `count` for `$04`) -- so anything the walk does not reach stays a
+`raw` hex run and exactness never depends on the parse being semantically right. In practice the
+three real songs parse to 1829 / 1116 / 207 events with 32 / 31 / 27 bytes left raw, and
+`sfx_bank1`'s 21 sequences parse to 222 events with none. The small pointer/count assets
+(`sample_pointer_table`, `song_table`, `sfx_bank2_ptrs`, `sample_pointer_tail`,
+`sfx_bank2_blocks`, `sample_lists`) decode as `pointer_table_24`, `u16_table` or `sample_lists`
+JSON, chosen by asset name.
+
+### Kinds without a codec
+
+`code` (`main_program.bin`, `sound_iface.bin`, the SPC700 loader/driver images) belongs to `src/`
+and `spc/`, not here. `stale`, `filler` and `unknown` have no recovered structure to decode; they
+already count as matched in `tools/progress.py` for exactly that reason. `entity_table` is a kind
+`config/assets.txt` can emit but currently does not use.
+
+### Current status
+
+`python3 tools/roundtrip_check.py --update` passes **1774 / 1774** assets across all **16**
+codec-carrying kinds, so all 16 are in `config/roundtrip.txt`: `anim_script`, `anim_table`, `brr`,
+`hdma`, `map`, `metatiles`, `palette`, `sfx_bank`, `song`, `spc_table`, `sprite_frame`,
+`sprite_table`, `tilemap`, `tileset_2bpp`, `tileset_4bpp`, `tileset_8bpp`. That is 1833792 bytes,
+87.4% of the 2 MiB image, now reachable as editable files (3403 files, 10070823 bytes under
+`build/assets/`).
+
 ## 4. Summary by content type
 
 | type | bytes | % of ROM |
