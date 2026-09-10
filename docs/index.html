@@ -12,11 +12,17 @@
    *
    * This dashboard shares its visual system with the sibling ICO decomp
    * dashboard (nathanialf/ico, docs/index.html) — same near-black ground,
-   * hairline borders, square corners, no shadows, dense mono micro-labels,
-   * one serif for headings, contrast-audited text ramp. The one deliberate
-   * difference is the accent below: a green lifted from the game's own
-   * sprite palettes instead of ICO's sand, so the highlight is literally
-   * a colour the prototype puts on screen.
+   * hairline borders, square corners, no shadows, mono micro-labels, one
+   * serif for headings, contrast-audited text ramp, same 1040px measure.
+   * The one deliberate difference is the accent below: a green lifted
+   * from the game's own sprite palettes instead of ICO's sand, so the
+   * highlight is literally a colour the prototype puts on screen.
+   *
+   * SHAPE: one headline (recomp), one section list, one table. Everything
+   * that was a second number, a second tone or a duplicate rollup is now
+   * hover text or gone: a reader who wants the byte counts asks for them,
+   * a reader who wants the state of the project reads three lines. The
+   * page is short by default and grows only where asked.
    *
    * FONTS: named FIRST so a local install is used when the visitor has
    * one, with a system stack behind it. Nothing is fetched either way —
@@ -29,12 +35,11 @@
    * ramp of the main sprite palette block (data/palettes/palettes_main_block,
    * decoded by tools/assetcodec.py) — one of the game's own greens, chosen
    * from the candidates that clear 4.5:1 on the ground. Every text role
-   * sits at least one step up the ladder from the
-   * portfolio-derived values ICO measured, so text clears WCAG 1.4.3
-   * (4.5:1) and control outlines clear 1.4.11 (3:1). Measured ratios sit
-   * beside each token; --accent on --bg measures 8.7:1 (and, since
-   * contrast is symmetric, --on-accent on --accent measures the same
-   * 11.5:1 the other way round).
+   * sits at least one step up the ladder from the portfolio-derived values
+   * ICO measured, so text clears WCAG 1.4.3 (4.5:1) and control outlines
+   * clear 1.4.11 (3:1). Measured ratios sit beside each token; --accent on
+   * --bg measures 8.7:1 (and, since contrast is symmetric, --on-accent on
+   * --accent measures the same 8.7:1 the other way round).
    * ------------------------------------------------------------------ */
   :root {
     color-scheme: dark;               /* dark native scrollbars + form controls */
@@ -54,16 +59,13 @@
     --ctl:#737373;     /*  4.2:1 — control outline */
 
     /* -- accent + status -------------------------------------------------
-       See the block comment above for why banana/amber rather than sand. */
+       See the block comment above for why one of the game's greens. There
+       is exactly ONE accent tone on this page now: the old lighter
+       --accent-dim tint carried the "extracted" level as a second fill,
+       and that level moved into row hover text, so the tint is gone. Every
+       bar is one tone, and a bar means one thing. */
     --accent:#00c552;  /* 8.7:1 on --bg; SNES (0,24,10) from the sprite palettes */
     --on-accent:#0a0a0a;              /* 8.7:1 the other way round         */
-    /* Lighter tint of --accent, used ONLY as the "extracted" fill behind
-       the "matched" fill in two-tone bars (see .bar i.ext below). It is
-       fill colour inside an aria-hidden progress graphic that restates a
-       number already in the text, exactly like the single-tone --accent
-       fill below it, so it is exempt from 1.4.11 the same way that fill
-       is, rather than failing it. */
-    --accent-dim:rgba(0,197,82,.32);
     /* Focus is its OWN channel, not the accent: the selected control is
        already an accent-coloured fill, and a green ring on a green fill
        is 1:1. #f9fafb is 18.9:1 on --bg, and the 2px outline-offset keeps
@@ -81,17 +83,20 @@
     --f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
     --maxw:1040px;
-    --ease:cubic-bezier(.4,0,.2,1);
+
+    /* Vertical rhythm. One scale, three steps: rows breathe at --sp-1,
+       blocks separate at --sp-2, the page's three parts at --sp-3. */
+    --sp-1:10px; --sp-2:28px; --sp-3:52px;
 
     /* Column widths live here so the breakpoints below only retune numbers. */
-    --pad-x:16px; --gap-col:8px;
-    --w-bar:64px; --w-pct:58px; --w-sz:64px;
+    --pad-x:16px; --gap-col:12px;
+    --w-bar:80px; --w-pct:62px;
   }
   @media (min-width:560px) {
-    :root { --pad-x:20px; --gap-col:10px; --w-bar:110px; --w-pct:64px; --w-sz:76px; }
+    :root { --pad-x:20px; --gap-col:16px; --w-bar:140px; --w-pct:68px; --sp-3:64px; }
   }
   @media (min-width:900px) {
-    :root { --pad-x:24px; --w-bar:160px; --w-pct:68px; --w-sz:84px; }
+    :root { --pad-x:24px; --w-bar:220px; --sp-2:32px; --sp-3:76px; }
   }
 
   * { box-sizing:border-box; }
@@ -103,194 +108,154 @@
   .wrap { max-width:var(--maxw); margin:0 auto; padding-inline:var(--pad-x); }
 
   /* ---------- header ---------- */
-  header { padding:32px 0 0; }
-  @media (min-width:900px) { header { padding:48px 0 0; } }
-  .head {
-    display:flex; flex-wrap:wrap; gap:16px 24px;
-    align-items:flex-end; justify-content:space-between;
-    border-bottom:1px solid var(--line); padding-bottom:12px;
-  }
+  header { padding-block:40px 0; }
+  @media (min-width:900px) { header { padding-block:64px 0; } }
   h1 {
     font:700 24px/1.2 var(--f-serif); color:var(--fg);
-    margin:0 0 8px; letter-spacing:.04em; text-transform:uppercase;
+    margin:0 0 10px; letter-spacing:.04em; text-transform:uppercase;
     text-wrap:balance;
   }
   @media (max-width:559px) { h1 { font-size:20px; } }
   .sub { font-family:var(--f-mono); font-size:12px; color:var(--dim);
          margin:0; max-width:62ch; text-wrap:pretty; }
-  .sub b { color:var(--fg2); font-weight:500; }
   a { color:var(--fg); text-decoration:none;
       border-bottom:1px solid var(--ctl);
       transition:color 150ms ease, border-color 150ms ease; }
   a:hover { color:var(--accent); border-color:var(--accent); }
   a:focus-visible, button:focus-visible, input:focus-visible,
-  select:focus-visible, th button:focus-visible {
+  th button:focus-visible {
     outline:2px solid var(--focus); outline-offset:2px; border-radius:0;
   }
 
-  /* ---------- summary cards ---------- *
-   * One panel with hairline-divided cells rather than floating cards.
-   * The 1px grid gap over a --line ground is how borders are drawn
-   * throughout this page: children paint --panel, the container paints
-   * --line, and what shows through between them is the rule. */
-  .stats {
-    display:grid; grid-template-columns:1fr; gap:1px;
-    margin:24px 0 0; background:var(--line);
-    border:1px solid var(--line); border-radius:0;
-  }
-  @media (min-width:560px) { .stats { grid-template-columns:repeat(2,1fr); } }
-  @media (min-width:900px) { .stats { grid-template-columns:repeat(4,1fr); } }
-  .card {
-    background:var(--panel); padding:10px 14px;
-    display:flex; flex-direction:row-reverse; justify-content:space-between;
-    align-items:baseline; gap:12px;
-  }
-  .card .n { flex:0 0 auto; white-space:nowrap; color:var(--fg);
-             font:500 17px/1.2 var(--f-mono); letter-spacing:-.01em;
-             font-variant-numeric:tabular-nums; }
-  .card .l { flex:0 1 auto; font-family:var(--f-mono); font-size:10px;
-             color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
-  .card .bar { display:none; }
-  @media (min-width:560px) {
-    .card {
-      flex-direction:column; align-items:stretch; justify-content:flex-start;
-      gap:6px; padding:14px 16px;
-    }
-    .card .n { font-size:19px; }
-    .card .bar { display:block; flex:none; width:100%; margin-top:auto; }
-  }
+  /* ---------- headline ---------- *
+   * The one number the project is aiming at. No panel, no border, no
+   * accent edge: it is the largest thing on the page and the only thing
+   * in accent green, which is hierarchy enough. Whitespace does the
+   * framing the old card did. */
+  .headline { margin-block:var(--sp-3) 0; }
+  .hl-row { display:flex; flex-wrap:wrap; align-items:baseline;
+            justify-content:space-between; gap:4px 20px; }
+  .hl-lbl { font:700 15px/1.3 var(--f-serif); color:var(--fg); margin:0;
+            text-transform:uppercase; letter-spacing:.04em; }
+  .hl-tag { font:400 11px var(--f-mono); color:var(--dim);
+            text-transform:none; letter-spacing:0; margin-left:8px; }
+  .hl-pct { font:700 40px/1 var(--f-mono); color:var(--accent);
+            font-variant-numeric:tabular-nums; white-space:nowrap;
+            letter-spacing:-.02em; }
+  @media (max-width:559px) { .hl-pct { font-size:30px; } }
+  .hl-bar { height:8px; margin-top:18px; }
+  .hl-ctx { margin:14px 0 0; font-family:var(--f-mono); font-size:12px;
+            color:var(--dim); font-variant-numeric:tabular-nums;
+            text-wrap:pretty; }
+  .hl-sha { margin:6px 0 0; font-family:var(--f-mono); font-size:10px;
+            color:var(--faint); word-break:break-all; }
 
-  /* ---------- progress bar (shared by cards, strip, headline) ---------- *
-   * A track (--bar) with one or two absolutely-positioned fills painted
-   * left-to-right; DOM order gives the paint order, so no z-index is
-   * needed. Single-tone rows (routines, code-kind sections) emit one
-   * unclassed <i> and get --accent; two-tone data rows emit an .ext fill
-   * (lighter tint, the weaker "extracted" level) UNDER a .mat fill (full
-   * --accent, the "round-trips" level); see JS bar()/bar2(). Every bar
-   * is aria-hidden: the number beside it always carries the same value in
-   * text, so the graphic is decoration, not information. */
-  .bar { position:relative; display:block; width:100%; height:6px;
+  /* ---------- progress bar (headline + section rows) ---------- *
+   * A track (--bar) with one absolutely-positioned fill. Every bar on the
+   * page is one tone and restates a percentage printed as text beside it,
+   * so it is decoration to a screen reader and hidden from one. */
+  .bar { position:relative; display:block; width:100%; height:5px;
          background:var(--bar); overflow:hidden; }
   .bar i { position:absolute; inset:0; width:0; height:100%; background:var(--accent); }
-  .bar i.ext { background:var(--accent-dim); }
-  .bar i.mat { background:var(--accent); }
 
-  /* ---------- headline (recomp, the project's end target) ---------- *
-   * One band, bigger type, above the ROM-section cards/strip below it.
-   * Same hairline-panel language as the rest of the page (--panel fill,
-   * --line border) plus an --accent top edge so it reads as "the one that
-   * matters" without breaking the page's no-shadows rule. */
-  .headline { margin:24px 0 0; padding:16px 18px 18px; background:var(--panel);
-              border:1px solid var(--line); border-top:3px solid var(--accent); }
-  .headline-row { display:flex; flex-wrap:wrap; align-items:flex-end;
-                  justify-content:space-between; gap:6px 16px; }
-  .headline-lbl { font:700 14px/1.3 var(--f-serif); color:var(--fg);
-                  text-transform:uppercase; letter-spacing:.04em; }
-  .headline-tag { font:400 11px var(--f-mono); color:var(--dim);
-                  text-transform:none; letter-spacing:0; margin-left:6px; }
-  .headline-def { margin:4px 0 0; font-family:var(--f-mono); font-size:11px;
-                  color:var(--dim); max-width:58ch; text-wrap:pretty; }
-  .headline-pct { font:700 32px/1 var(--f-mono); color:var(--accent);
-                  font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .headline-bar { height:10px; margin-top:14px; }
-  .headline-sub { margin:8px 0 0; font-family:var(--f-mono); font-size:11px;
-                  color:var(--faint); font-variant-numeric:tabular-nums; }
-  @media (max-width:559px) { .headline-pct { font-size:24px; } }
-
-  /* ---------- legend ---------- *
-   * Static prose, not bound to progress.json: the four terms the bars
-   * above use, paraphrased from the tools/progress.py module docstring so
-   * this page and that script cannot drift apart silently. */
-  .legend { margin:14px 0 0; padding:14px 16px; border:1px solid var(--line);
-            border-top:0; background:var(--panel); }
-  .legend h2 { font:700 11px/1.4 var(--f-mono); color:var(--dim); margin:0 0 10px;
-               text-transform:uppercase; letter-spacing:.1em; }
-  .legend dl { margin:0; display:grid; gap:8px 20px; grid-template-columns:1fr; }
-  @media (min-width:700px) { .legend dl { grid-template-columns:1fr 1fr; } }
-  .legend dt { font:500 11px var(--f-mono); color:var(--fg2); text-transform:uppercase;
-               letter-spacing:.06em; margin:0 0 2px; }
-  .legend dd { margin:0; font-family:var(--f-mono); font-size:11px; line-height:1.6;
-               color:var(--dim); }
-
-  /* ---------- section strip ---------- *
-   * One row per ROM region class declared in config/regions.txt (see
-   * tools/progress.py). Same hairline grid as .stats, same 6px bar, same
-   * mono micro-labels — it reads as a continuation of the panel above it. */
-  .strip { margin:0; border:1px solid var(--line); border-top:0;
-           background:var(--line); display:flex; flex-direction:column; gap:1px; }
-  .striprows { display:flex; flex-direction:column; gap:1px; }
-  .striphd {
-    background:var(--panel); margin:0; padding:9px 14px;
+  /* ---------- section list ---------- *
+   * One row per ROM region class in config/regions.txt, in two groups:
+   * code (bytes inside human-named routines, plus recomp's stricter bar)
+   * and data (bytes that re-encode byte-identically). Rows are hairline-
+   * separated, not boxed — the same rule language as the header, with the
+   * bar carrying the shape instead of a panel fill. */
+  .sections { margin-block:var(--sp-3) 0; }
+  .group + .group { margin-top:var(--sp-2); }
+  .grouphd {
+    margin:0 0 2px; padding-bottom:8px; border-bottom:1px solid var(--line);
     font:500 10px/1.6 var(--f-mono); color:var(--dim);
     text-transform:uppercase; letter-spacing:.1em;
   }
   .secrow {
-    background:var(--panel); display:grid; align-items:center;
-    grid-template-columns:minmax(0,1fr) 44px var(--w-bar) var(--w-pct) 150px;
-    column-gap:var(--gap-col); padding:6px 14px;
+    display:grid; align-items:center;
+    grid-template-columns:minmax(0,1fr) var(--w-bar) var(--w-pct);
+    column-gap:var(--gap-col); padding-block:var(--sp-1);
+    border-bottom:1px solid var(--line);
+    /* Every row carries a title with its byte counts, and data rows carry
+       the weaker "extracted" level there too — the cursor says so. */
+    cursor:help;
   }
-  .secrow .bar { width:auto; }
+  .secrow:last-child { border-bottom:0; }
   .secnm { min-width:0; overflow:hidden; text-overflow:ellipsis;
            white-space:nowrap; font-family:var(--f-mono); font-size:12px;
            color:var(--fg); }
-  /* The kind caption: not decoration, it names whether the row's bytes
-     come from named routines (code) or labelled regions (data) — the two
-     meanings "matched" carries on this page (see footer). */
-  .secmt { font-family:var(--f-mono); font-size:10px;
-           color:var(--faint); text-transform:uppercase; letter-spacing:.06em; }
-  /* Two lines for a data row (matched over extracted), one for a code row
-     (matched only); see renderStrip(). */
-  .secpct { display:flex; flex-direction:column; line-height:1.3;
-            font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .secpct b { font-family:var(--f-mono); font-size:11px; font-weight:500; color:var(--fg2); }
-  .secpct small { font-family:var(--f-mono); font-size:9px; color:var(--faint); }
-  .secsz { text-align:right; color:var(--dim);
-           font-family:var(--f-mono); font-size:11px;
-           font-variant-numeric:tabular-nums; white-space:nowrap; }
-  @media (max-width:559px) {
-    .secrow { grid-template-columns:minmax(0,1fr) 44px var(--w-bar) var(--w-pct); }
-    .secsz { display:none; }
-  }
+  .secpct { text-align:right; font-family:var(--f-mono); font-size:12px;
+            color:var(--fg2); font-variant-numeric:tabular-nums;
+            white-space:nowrap; }
+  .note { margin:18px 0 0; font-family:var(--f-mono); font-size:11px;
+          line-height:1.7; color:var(--dim); max-width:78ch;
+          text-wrap:pretty; }
 
-  /* ---------- section headings above each table ---------- */
+  /* ---------- text button (the two "show all" controls) ---------- */
+  .tbtn {
+    display:inline-flex; align-items:center; min-height:32px;
+    margin-top:8px; padding:0; background:none; border:0;
+    border-bottom:1px solid var(--ctl); cursor:pointer;
+    font:500 11px/1 var(--f-mono); color:var(--dim);
+    text-transform:uppercase; letter-spacing:.06em;
+    transition:color 150ms ease, border-color 150ms ease;
+  }
+  .tbtn:hover { color:var(--accent); border-color:var(--accent); }
+
+  /* ---------- table ---------- */
+  .listing { margin-block:var(--sp-3) 0; }
   h2.sechd {
     font:700 15px/1.3 var(--f-serif); color:var(--fg2);
-    letter-spacing:.02em; margin:36px 0 4px; padding-bottom:8px;
-    border-bottom:1px solid var(--line);
+    letter-spacing:.02em; margin:0 0 var(--sp-2);
+    padding-bottom:8px; border-bottom:1px solid var(--line);
   }
-  p.sechint { font-family:var(--f-mono); font-size:11px; color:var(--dim);
-              margin:6px 0 0; max-width:70ch; }
+  .toolbar { display:flex; gap:12px 16px; align-items:center;
+             margin:0 0 16px; flex-wrap:wrap; }
 
-  /* ---------- toolbar ---------- */
-  .toolbar { display:flex; gap:10px 16px; align-items:center; margin:16px 0 10px; flex-wrap:wrap; }
-  input[type=search], select {
+  /* Two-way switch: a radiogroup, so arrow keys move between the two
+     views and only one tab stop exists for the pair. */
+  .seg { display:flex; flex:0 0 auto; }
+  .seg-btn {
+    flex:0 0 auto; position:relative; display:inline-flex; align-items:center;
+    justify-content:center; min-height:36px; padding:0 14px;
+    font:500 11px/1 var(--f-mono); letter-spacing:.06em; text-transform:uppercase;
+    background:transparent; color:var(--fg2);
+    border:1px solid var(--ctl); border-radius:0; cursor:pointer;
+    transition:background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+  .seg-btn + .seg-btn { margin-left:-1px; }            /* collapse shared edge */
+  /* A 44px target on a 36px control: grow the hit area without growing the
+     button. Offsets are 5px, not 4px, because an absolutely positioned
+     child is laid out against the padding box — the 1px outline would
+     otherwise eat 2px of the target. */
+  .seg-btn::after { content:""; position:absolute; inset:-5px 0; }
+  .seg-btn:hover { background:var(--layer); color:var(--fg); }
+  .seg-btn[aria-checked="true"] {
+    background:var(--accent); border-color:var(--accent); color:var(--on-accent);
+    z-index:1;
+  }
+  .seg-btn[aria-checked="true"]:hover {
+    background:linear-gradient(rgba(10,10,10,.10),rgba(10,10,10,.10)) var(--accent);
+  }
+  .seg-btn:focus-visible { outline:3px solid var(--focus); outline-offset:2px; z-index:2; }
+
+  input[type=search] {
     background:var(--field); border:1px solid var(--ctl); color:var(--fg);
     border-radius:0; -webkit-appearance:none; appearance:none;
-    padding:8px 10px; font:12px/1 var(--f-mono);
-    min-height:36px;
+    padding:8px 10px; font:12px/1 var(--f-mono); min-height:36px;
+    flex:1 1 200px; min-width:0; max-width:300px;
     transition:border-color 150ms ease;
   }
-  input[type=search] { flex:1 1 220px; min-width:0; max-width:340px; }
-  select { flex:0 1 auto; min-width:0; max-width:220px; cursor:pointer; }
-  input[type=search]:hover, select:hover { border-color:var(--dim); }
+  input[type=search]:hover { border-color:var(--dim); }
   input[type=search]::placeholder { color:var(--dim); opacity:1; }
-  label.chk {
-    font-family:var(--f-mono); font-size:11px; color:var(--dim);
-    text-transform:uppercase; letter-spacing:.06em;
-    user-select:none; cursor:pointer;
-    display:inline-flex; align-items:center; gap:7px; min-height:36px;
-    transition:color 150ms ease;
-  }
-  label.chk:hover { color:var(--fg); }
-  input[type=checkbox] { accent-color:var(--accent); width:14px; height:14px; margin:0; }
   .rescount { font-family:var(--f-mono); font-size:11px; color:var(--faint);
-              margin-left:auto; white-space:nowrap; }
+              margin-left:auto; white-space:nowrap;
+              font-variant-numeric:tabular-nums; }
 
-  /* ---------- tables ---------- *
-   * Real <table> markup: this is tabular data, and screen readers get
-   * row/column navigation for free. A dedicated scroll container is the
-   * only thing on the page allowed to scroll sideways — the page body
-   * itself never does, even at phone width. */
+  /* Real <table> markup: this is tabular data, and screen readers get
+     row/column navigation for free. A dedicated scroll container is the
+     only thing on the page allowed to scroll sideways — the page body
+     itself never does, even at phone width. */
   .table-wrap { overflow-x:auto; border:1px solid var(--line); }
   table { border-collapse:collapse; width:100%; min-width:560px; }
   thead th {
@@ -321,14 +286,13 @@
   .mk { text-align:center; font-size:13px; }
   .mk.y { color:var(--accent); }
   .mk.n { color:var(--mkn); }
-  .empty-row td { color:var(--faint); font-style:normal; text-align:center; padding:18px 10px; }
+  .empty-row td { color:var(--faint); text-align:center; padding:18px 10px; }
 
   /* ---------- footer ---------- */
-  main { padding-block:8px 60px; }
-  footer { padding-block:0 40px; color:var(--dim);
+  main { padding-block:0 var(--sp-3); }
+  footer { padding-block:0 56px; color:var(--dim);
            font-family:var(--f-mono); font-size:11px; line-height:1.8; }
-  footer p { margin:0 0 12px; max-width:640px; }
-  footer b { color:var(--fg2); font-weight:500; }
+  footer p { margin:0; max-width:70ch; text-wrap:pretty; }
   .warn {
     color:var(--warn); background:var(--warn-bg);
     border:1px solid var(--warn-line); border-radius:0; padding:10px 12px;
@@ -338,11 +302,11 @@
          background:var(--field); color:var(--dim); padding:.1em .35em; }
   .warn code { background:rgba(0,0,0,.25); color:inherit; }
 
-  /* Fade-through when data loads in. The new content is the DEFAULT
-     state, so if the animation never runs nothing is hidden. */
-  @keyframes fadeThrough { from { opacity:0; transform:translateY(10px); }
-                           to   { opacity:1; transform:none; } }
-  #headline, #cards, #strip, .table-wrap { animation:fadeThrough 300ms ease-out; }
+  /* One fade as the numbers arrive, opacity only — the page loads into
+     reading, not into a sequence. The loaded state is the DEFAULT state,
+     so if the animation never runs nothing is hidden. */
+  @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+  #headline, #sections, .listing { animation:fadeIn 220ms ease-out; }
 
   @media (prefers-reduced-motion:reduce) {
     *, *::before, *::after {
@@ -354,108 +318,80 @@
 </head>
 <body>
 <header class="wrap">
-  <div class="head">
-    <div>
-      <h1>Dream: Land of Giants disassembly progress</h1>
-      <p class="sub" id="sub">Matching disassembly of the SNES prototype
-        <i>Dream: Land of Giants</i> (codename Project Dream, Rare, c. 1995). Loading&hellip;
-        <a href="https://github.com/nathanialf/dream">repo</a></p>
+  <h1>Dream: Land of Giants disassembly progress</h1>
+  <p class="sub">Matching disassembly of the SNES prototype <i>Dream: Land of Giants</i>
+    (codename Project Dream, Rare, c. 1995).
+    <a href="https://github.com/nathanialf/dream">repo</a></p>
+
+  <section class="headline" id="headline" aria-labelledby="hlLbl">
+    <div class="hl-row">
+      <h2 class="hl-lbl" id="hlLbl">Recomp<span class="hl-tag">&middot; traced routines rewritten in C and verified in lockstep against the ROM</span></h2>
+      <span class="hl-pct" id="hlPct">&ndash;</span>
     </div>
-  </div>
-  <section class="headline" id="headline" aria-labelledby="headlinelbl" hidden>
-    <div class="headline-row">
-      <div>
-        <span class="headline-lbl" id="headlinelbl">Recomp<span class="headline-tag">&middot; project target</span></span>
-        <p class="headline-def">Traced 65816/SPC700 routines reimplemented in C and verified
-          byte-identical in lockstep against the ROM (<code>config/recomp.txt</code>).</p>
-      </div>
-      <span class="headline-pct" id="headlinePct">&ndash;</span>
+    <span class="bar hl-bar" aria-hidden="true"><i id="hlFill" style="width:0%"></i></span>
+    <p class="hl-ctx" id="hlCtx">Loading&hellip;</p>
+    <p class="hl-sha" id="hlSha"></p>
+  </section>
+
+  <section class="sections" id="sections" aria-label="ROM sections">
+    <div class="group">
+      <h2 class="grouphd">Code</h2>
+      <div id="grpCode"></div>
     </div>
-    <span class="bar headline-bar" aria-hidden="true"><i id="headlineFill" style="width:0%"></i></span>
-    <p class="headline-sub" id="headlineSub"></p>
-  </section>
-  <div class="stats" id="cards"></div>
-  <section class="strip" id="strip" aria-labelledby="striphd" hidden>
-    <h2 class="striphd" id="striphd">ROM sections</h2>
-    <div class="striprows" id="striprows" role="list"></div>
-  </section>
-  <section class="legend" aria-labelledby="legendhd">
-    <h2 id="legendhd">Reading the levels</h2>
-    <dl>
-      <div><dt>Identified</dt><dd>bytes fall inside a region with a known class
-        (<code>config/regions.txt</code>).</dd></div>
-      <div><dt>Extracted</dt><dd>bytes sit inside a named asset of a real kind
-        (not <code>unknown</code>), split into its own asset file. Shown as the lighter
-        fill and the smaller number below.</dd></div>
-      <div><dt>Round&#8209;trips (matched)</dt><dd>the asset's kind is listed in
-        <code>config/roundtrip.txt</code>: its editable form re-encodes to the exact
-        ROM bytes. Shown as the solid fill and the larger number.
-        <code>stale</code>/<code>filler</code>/<code>unknown</code> have nothing to
-        round-trip, so matched = extracted for them.</dd></div>
-      <div><dt>Recomp</dt><dd>traced 65816/SPC700 routines listed in
-        <code>config/recomp.txt</code>: reimplemented in C and passing the lockstep
-        check against the ROM. This is the project's end target, shown in the
-        headline above.</dd></div>
-    </dl>
+    <div class="group">
+      <h2 class="grouphd">Data</h2>
+      <div id="grpData"></div>
+      <button type="button" class="tbtn" id="secMore" aria-expanded="false"
+              aria-controls="grpData" hidden></button>
+    </div>
+    <p class="note">Code percentages count bytes inside routines that carry a human-chosen
+      name; data percentages count bytes whose editable form re-encodes to the exact ROM
+      bytes. Hover a row for its byte counts and, on data rows, the weaker <i>extracted</i>
+      level underneath &mdash; <a href="./PROGRESS.md">PROGRESS.md</a> defines all three.</p>
   </section>
 </header>
-<main class="wrap">
-  <h2 class="sechd" id="rtnhd">Routines</h2>
-  <p class="sechint">Code-kind sections only (<code>code</code>, <code>sound_iface</code>,
-    <code>spc700</code>). A routine is "named" once it carries a human-chosen label instead
-    of an auto-generated <code>sub_</code>/<code>loc_</code>/<code>orphan_</code> one.</p>
-  <div class="toolbar">
-    <input type="search" id="rtnFilter" placeholder="filter by name or address&hellip;" autocomplete="off"
-           aria-label="Filter routines by name or address">
-    <select id="rtnSection" aria-label="Filter routines by section">
-      <option value="">All sections</option>
-    </select>
-    <label class="chk"><input type="checkbox" id="rtnUnnamed"> unnamed only</label>
-    <span class="rescount" id="rtnCount" role="status"></span>
-  </div>
-  <div class="table-wrap">
-    <table id="rtnTable" aria-labelledby="rtnhd">
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Address</th>
-          <th scope="col" class="num sortable" id="rtnSizeHd" aria-sort="none">
-            <button type="button" id="rtnSizeBtn">Size <span class="arrow" aria-hidden="true"></span></button>
-          </th>
-          <th scope="col">Section</th>
-          <th scope="col">Named</th>
-        </tr>
-      </thead>
-      <tbody id="rtnBody"></tbody>
-    </table>
-  </div>
 
-  <h2 class="sechd" id="rgnhd">Data regions</h2>
-  <p class="sechint">Data-kind sections only. A region is "labelled" once its start address
-    carries a human-named label in the generated source &mdash; identified in the code, not
-    only in docs.</p>
-  <div class="table-wrap">
-    <table id="rgnTable" aria-labelledby="rgnhd">
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Start</th>
-          <th scope="col">End</th>
-          <th scope="col" class="num">Size</th>
-          <th scope="col">Class</th>
-          <th scope="col">Labelled</th>
-        </tr>
-      </thead>
-      <tbody id="rgnBody"></tbody>
-    </table>
-  </div>
+<main class="wrap">
+  <section class="listing" aria-labelledby="tblHd">
+    <h2 class="sechd" id="tblHd">Inventory</h2>
+    <div class="toolbar">
+      <div class="seg" id="viewTabs" role="radiogroup" aria-label="Table view">
+        <button type="button" class="seg-btn" role="radio" data-view="routines"
+                aria-checked="true" tabindex="0">Routines</button>
+        <button type="button" class="seg-btn" role="radio" data-view="regions"
+                aria-checked="false" tabindex="-1">Regions</button>
+      </div>
+      <input type="search" id="filter" placeholder="filter&hellip;" autocomplete="off"
+             aria-label="Filter rows by name, address or class">
+      <span class="rescount" id="count" role="status"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="table" aria-labelledby="tblHd">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <button type="button" class="tbtn" id="rowMore" aria-expanded="false"
+            aria-controls="tbody" hidden></button>
+  </section>
 </main>
-<footer class="wrap" id="foot"></footer>
+
+<footer class="wrap" id="foot">
+  <p>Generated by <code>tools/progress.py</code> from <code>config/regions.txt</code> and the
+    labels the tracer assigns. The round trip is byte-identical on every commit
+    (<code>make check</code>), so these figures measure how much of the ROM is understood,
+    not how much of it has been reproduced.</p>
+</footer>
 
 <script>
-const fmtPct = (m,t) => t ? (100*m/t).toFixed(2)+"%" : "–";
+/* ---- formatting ---------------------------------------------------- */
+// Percentages are clamped: `filler` reports 20 more extracted bytes than the
+// region holds, and a 100.1% would read as a bug rather than as rounding.
+const pctOf = (m,t) => t ? Math.min(100, 100*m/t) : 0;
+const fmtPct = (m,t) => t ? pctOf(m,t).toFixed(1)+"%" : "–";
 const fmtB = n => n>=1048576 ? (n/1048576).toFixed(2)+" MB"
               : n>=1024 ? (n/1024).toFixed(1)+" KB" : n+" B";
+const fmtN = n => Number(n).toLocaleString();
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function fmtWhen(iso){
@@ -471,203 +407,228 @@ const esc = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;")
 
 // Every bar restates a percentage already printed as text beside it, so it
 // is decorative to a screen reader and hidden from one.
-function pctOf(m,t){ return t ? Math.min(100, 100*m/t) : 0; }
-function bar(m,t){ const p=pctOf(m,t);
-  return `<span class="bar" aria-hidden="true"><i style="width:${p.toFixed(2)}%"></i></span>`; }
-// Two-tone bar for a data section: the lighter "extracted" fill drawn full
-// width first, the solid "matched" (round-trips) fill painted over it —
-// see the .bar/.bar i CSS comment for why DOM order is enough.
-function bar2(m,e,t){
-  const pe = pctOf(e,t), pm = pctOf(m,t);
-  return `<span class="bar" aria-hidden="true">`
-    + `<i class="ext" style="width:${pe.toFixed(2)}%"></i>`
-    + `<i class="mat" style="width:${pm.toFixed(2)}%"></i></span>`;
+function bar(m,t){
+  return `<span class="bar" aria-hidden="true"><i style="width:${pctOf(m,t).toFixed(2)}%"></i></span>`;
 }
 
-const CODE_KIND = "code", DATA_KIND = "data";
-// "recomp" is a cross-cutting duplicate of the code/sound_iface/spc700
-// routines (same routines, counted against a different bar: reimplemented
-// in C rather than merely named) — it is featured on its own in the
-// headline, and must stay OUT of every kind-based rollup below or the
-// code/routine totals double count it.
-const RECOMP_NAME = "recomp";
+/* ---- headline ------------------------------------------------------- */
+const RECOMP = "recomp";
 
-function sumBy(sections, kind, key){
-  return sections.filter(s=>s.kind===kind && s.name!==RECOMP_NAME)
-                 .reduce((a,s)=>a+(s[key]||0), 0);
+function renderHeadline(data){
+  const rc = (data.sections||[]).find(s => s.name === RECOMP);
+  const ctx = document.getElementById("hlCtx");
+  if(!rc){ ctx.textContent = "No recomp section in this dataset."; return; }
+  document.getElementById("hlPct").textContent = fmtPct(rc.matched, rc.total);
+  document.getElementById("hlFill").style.width = pctOf(rc.matched, rc.total).toFixed(2)+"%";
+  // One line, two facts: how many routines are through, and how old the
+  // number is. The byte counts live in the recomp row's hover text.
+  ctx.textContent = `${fmtN(rc.count_matched)} / ${fmtN(rc.count_total)} routines verified`
+    + ` · generated ${fmtWhen(data.generated)}`;
+  document.getElementById("hlSha").textContent = `ROM SHA-1 ${data.sha1}`;
 }
 
-// The headline band: recomp's own progress, above every other section.
-function renderHeadline(sections){
-  const rc = sections.find(s => s.name === RECOMP_NAME);
-  const el = document.getElementById("headline");
-  if (!rc){ el.hidden = true; return; }
-  el.hidden = false;
-  document.getElementById("headlinePct").textContent = fmtPct(rc.matched, rc.total);
-  document.getElementById("headlineFill").style.width = pctOf(rc.matched, rc.total).toFixed(2)+"%";
-  document.getElementById("headlineSub").textContent =
-    `${rc.count_matched.toLocaleString()} / ${rc.count_total.toLocaleString()} routines reimplemented `
-    + `· ${fmtB(rc.matched)} / ${fmtB(rc.total)} traced bytes`;
+/* ---- section list --------------------------------------------------- *
+ * Two groups: code (recomp first — it is the same routines held to the
+ * stricter bar) and data. stale/filler/unknown carry no work to do, so
+ * they start hidden behind the toggle under the data group. */
+const CODE_GROUP = ["recomp","code","sound_iface","spc700"];
+const NO_WORK = ["stale","filler","unknown"];
+
+function secTitle(s){
+  const bytes = `${fmtB(s.matched)} of ${fmtB(s.total)}`;
+  if(s.name === RECOMP)
+    return `${bytes} traced code · ${fmtN(s.count_matched)} of ${fmtN(s.count_total)} routines rewritten in C`;
+  if(s.kind === "code")
+    return `${bytes} in named routines · ${fmtN(s.count_matched)} of ${fmtN(s.count_total)} routines named`;
+  return `round-trips ${fmtPct(s.matched,s.total)} · extracted ${fmtPct(s.extracted,s.total)}`
+    + ` · ${bytes} · ${fmtN(s.count_matched)} of ${fmtN(s.count_total)} assets`;
 }
 
-function renderCards(sections){
-  const stat = (n,l,frac) =>
-    `<div class="card"><span class="n">${n}</span><span class="l">${l}</span>`
-    + (frac==null ? "" : bar(frac[0],frac[1])) + `</div>`;
-  const rtnM = sumBy(sections, CODE_KIND, "count_matched"), rtnT = sumBy(sections, CODE_KIND, "count_total");
-  const codeM = sumBy(sections, CODE_KIND, "matched"), codeT = sumBy(sections, CODE_KIND, "total");
-  const rtM = sumBy(sections, DATA_KIND, "count_matched"), rtT = sumBy(sections, DATA_KIND, "count_total");
-  const exM = sumBy(sections, DATA_KIND, "extracted"), exT = sumBy(sections, DATA_KIND, "total");
-  document.getElementById("cards").innerHTML = [
-    stat(`${rtnM.toLocaleString()} / ${rtnT.toLocaleString()}`, "routines named"),
-    stat(fmtPct(rtnM,rtnT), "by routine count", [rtnM,rtnT]),
-    stat(`${fmtB(codeM)} / ${fmtB(codeT)}`, "code bytes matched"),
-    stat(fmtPct(codeM,codeT), "by code bytes", [codeM,codeT]),
-    stat(`${rtM.toLocaleString()} / ${rtT.toLocaleString()}`, "assets round-tripped"),
-    stat(fmtPct(rtM,rtT), "by asset count", [rtM,rtT]),
-    stat(`${fmtB(exM)} / ${fmtB(exT)}`, "assets extracted"),
-    stat(fmtPct(exM,exT), "by bytes extracted", [exM,exT]),
-  ].join("");
+function secRow(s){
+  return `<div class="secrow" title="${esc(secTitle(s))}">`
+    + `<span class="secnm">${esc(s.name)}</span>`
+    + bar(s.matched, s.total)
+    + `<span class="secpct">${fmtPct(s.matched, s.total)}</span>`
+    + `</div>`;
 }
 
-// One row per ROM section class (recomp excluded; it has its own headline
-// above). Data-kind rows get a two-tone bar and two percentages (matched
-// over extracted); code-kind rows get the single-tone bar they always had.
-function renderStrip(sections){
-  const rows = sections.filter(s => s.total > 0 && s.name !== RECOMP_NAME);
-  document.getElementById("strip").hidden = rows.length === 0;
-  document.getElementById("striprows").innerHTML = rows.map(s=>{
-    const isData = s.kind === DATA_KIND;
-    const barHtml = isData ? bar2(s.matched, s.extracted, s.total) : bar(s.matched, s.total);
-    const pctHtml = isData
-      ? `<span class="secpct"><b>${fmtPct(s.matched, s.total)}</b><small>${fmtPct(s.extracted, s.total)} ext</small></span>`
-      : `<span class="secpct"><b>${fmtPct(s.matched, s.total)}</b></span>`;
-    return `<div class="secrow" role="listitem">`
-      + `<span class="secnm">${esc(s.name)}</span>`
-      + `<span class="secmt">${s.kind}</span>`
-      + barHtml
-      + pctHtml
-      + `<span class="secsz">${fmtB(s.matched)} / ${fmtB(s.total)}</span>`
-      + `</div>`;
-  }).join("");
-}
+function renderSections(sections){
+  const live = (sections||[]).filter(s => s.total > 0);
+  const byName = n => live.find(s => s.name === n);
+  const code = CODE_GROUP.map(byName).filter(Boolean);
+  const data = live.filter(s => !CODE_GROUP.includes(s.name) && !NO_WORK.includes(s.name));
+  const rest = NO_WORK.map(byName).filter(Boolean);
 
-/* --- routines table: filter by name/addr, filter by section, filter by
-       named/unnamed, sort by size (click the header, toggles asc/desc) --- */
-let ROUTINES = [];
-let rtnSort = null; // "asc" | "desc" | null (JSON order)
+  document.getElementById("grpCode").innerHTML = code.map(secRow).join("");
+  const dataEl = document.getElementById("grpData");
+  const more = document.getElementById("secMore");
 
-function populateSectionFilter(routines){
-  const sel = document.getElementById("rtnSection");
-  const names = [...new Set(routines.map(r=>r.section))];
-  names.forEach(n=>{
-    const opt = document.createElement("option");
-    opt.value = n; opt.textContent = n;
-    sel.appendChild(opt);
-  });
-}
+  const paint = open => {
+    dataEl.innerHTML = (open ? data.concat(rest) : data).map(secRow).join("");
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+    more.textContent = open
+      ? "hide sections with no work to track"
+      : `show all · ${rest.map(s=>s.name).join(", ")}`;
+  };
 
-function renderRoutines(){
-  const q = document.getElementById("rtnFilter").value.trim().toLowerCase();
-  const sec = document.getElementById("rtnSection").value;
-  const unnamedOnly = document.getElementById("rtnUnnamed").checked;
-
-  let rows = ROUTINES.filter(r=>{
-    if (sec && r.section !== sec) return false;
-    if (unnamedOnly && r.named) return false;
-    if (q && !r.name.toLowerCase().includes(q) && !r.addr.toLowerCase().includes(q)) return false;
-    return true;
-  });
-
-  if (rtnSort){
-    rows = rows.slice().sort((a,b)=> rtnSort==="asc" ? a.size-b.size : b.size-a.size);
+  if(rest.length){
+    more.hidden = false;
+    more.onclick = () => paint(more.getAttribute("aria-expanded") !== "true");
+  } else {
+    more.hidden = true;
   }
-
-  const tbody = document.getElementById("rtnBody");
-  tbody.innerHTML = rows.length ? rows.map(r=>
-    `<tr>`
-    + `<td class="nm">${esc(r.name)}</td>`
-    + `<td class="addr">${esc(r.addr)}</td>`
-    + `<td class="num">${r.size.toLocaleString()} B</td>`
-    + `<td>${esc(r.section)}</td>`
-    + `<td class="mk ${r.named?'y':'n'}" role="img" aria-label="${r.named?'named':'unnamed'}">`
-    +   `${r.named?'✓':'·'}</td>`
-    + `</tr>`
-  ).join("") : `<tr class="empty-row"><td colspan="5">No routines match this filter.</td></tr>`;
-
-  document.getElementById("rtnCount").textContent =
-    `${rows.length.toLocaleString()} / ${ROUTINES.length.toLocaleString()} routines`;
+  paint(false);
 }
 
-function initRoutines(routines){
-  ROUTINES = routines;
-  populateSectionFilter(routines);
-  document.getElementById("rtnFilter").addEventListener("input", renderRoutines);
-  document.getElementById("rtnSection").addEventListener("change", renderRoutines);
-  document.getElementById("rtnUnnamed").addEventListener("change", renderRoutines);
-  document.getElementById("rtnSizeBtn").addEventListener("click", ()=>{
-    rtnSort = rtnSort === "desc" ? "asc" : "desc";
-    document.getElementById("rtnSizeHd").setAttribute("aria-sort",
-      rtnSort === "asc" ? "ascending" : "descending");
-    renderRoutines();
+/* ---- one table, two views ------------------------------------------- *
+ * The two datasets differ only in their columns and their filter fields,
+ * so the sort, the filter, the 25-row collapse and the empty state are
+ * written once and the view supplies the rest. */
+const LIMIT = 25;
+const sizeTh = `<th scope="col" class="num sortable" id="sizeTh" aria-sort="none">`
+             + `<button type="button" data-sort="size">Size <span class="arrow" aria-hidden="true"></span></button></th>`;
+
+const VIEWS = {
+  routines: {
+    noun: "routines",
+    cols: 5,
+    rows: () => ROUTINES,
+    head: `<tr><th scope="col">Name</th><th scope="col">Address</th>${sizeTh}`
+        + `<th scope="col">Section</th>`
+        + `<th scope="col" title="Carries a human-chosen label rather than an auto-generated sub_/loc_/orphan_ one">Named</th></tr>`,
+    match: (r,q) => r.name.toLowerCase().includes(q) || r.addr.toLowerCase().includes(q)
+                 || r.section.toLowerCase().includes(q),
+    row: r => `<tr>`
+      + `<td class="nm">${esc(r.name)}</td>`
+      + `<td class="addr">${esc(r.addr)}</td>`
+      + `<td class="num">${fmtN(r.size)} B</td>`
+      + `<td>${esc(r.section)}</td>`
+      + `<td class="mk ${r.named?'y':'n'}" role="img" aria-label="${r.named?'named':'unnamed'}">`
+      +   `${r.named?'✓':'·'}</td></tr>`
+  },
+  regions: {
+    noun: "regions",
+    cols: 6,
+    rows: () => REGIONS,
+    head: `<tr><th scope="col">Name</th><th scope="col">Start</th><th scope="col">End</th>${sizeTh}`
+        + `<th scope="col">Class</th>`
+        + `<th scope="col" title="The region's start address carries a human-named label in the generated source">Labelled</th></tr>`,
+    match: (r,q) => r.name.toLowerCase().includes(q) || r.class.toLowerCase().includes(q)
+                 || r.start.toLowerCase().includes(q) || r.end.toLowerCase().includes(q),
+    row: r => `<tr>`
+      + `<td class="nm"${r.desc ? ` title="${esc(r.desc)}"` : ""}>${esc(r.name)}</td>`
+      + `<td class="addr">${esc(r.start)}</td>`
+      + `<td class="addr">${esc(r.end)}</td>`
+      + `<td class="num">${fmtB(r.size)}</td>`
+      + `<td>${esc(r.class)}</td>`
+      + `<td class="mk ${r.named?'y':'n'}" role="img" aria-label="${r.named?'labelled':'unlabelled'}">`
+      +   `${r.named?'✓':'·'}</td></tr>`
+  }
+};
+
+let ROUTINES = [], REGIONS = [];
+let view = "routines";
+let sort = null;        // "asc" | "desc" | null (JSON order)
+let expanded = false;   // false: first LIMIT rows only
+
+function renderBody(){
+  const v = VIEWS[view];
+  const q = document.getElementById("filter").value.trim().toLowerCase();
+  let rows = v.rows();
+  if(q) rows = rows.filter(r => v.match(r,q));
+  if(sort) rows = rows.slice().sort((a,b) => sort==="asc" ? a.size-b.size : b.size-a.size);
+
+  const shown = expanded ? rows : rows.slice(0, LIMIT);
+  document.getElementById("tbody").innerHTML = shown.length
+    ? shown.map(v.row).join("")
+    : `<tr class="empty-row"><td colspan="${v.cols}">No ${v.noun} match this filter.</td></tr>`;
+
+  document.getElementById("count").textContent =
+    `${fmtN(rows.length)} of ${fmtN(v.rows().length)} ${v.noun}`;
+
+  const more = document.getElementById("rowMore");
+  more.hidden = rows.length <= LIMIT;
+  more.setAttribute("aria-expanded", expanded ? "true" : "false");
+  more.textContent = expanded ? `show first ${LIMIT}` : `show all ${fmtN(rows.length)} ${v.noun}`;
+}
+
+// The head is rebuilt only when the view changes, never when the sort
+// flips — flipping it there would destroy the focus on the button the user
+// just pressed. The arrow is driven from aria-sort in CSS instead.
+function renderHead(){
+  document.getElementById("thead").innerHTML = VIEWS[view].head;
+  const th = document.getElementById("sizeTh");
+  if(th) th.setAttribute("aria-sort", sort ? (sort==="asc"?"ascending":"descending") : "none");
+}
+
+const viewBtns = [...document.querySelectorAll("#viewTabs [data-view]")];
+function selectView(v){
+  if(v === view) return;
+  view = v; expanded = false; sort = null;
+  viewBtns.forEach(b=>{
+    const on = b.dataset.view === v;
+    b.setAttribute("aria-checked", on ? "true" : "false");
+    b.tabIndex = on ? 0 : -1;          // roving tabindex: one tab stop total
   });
-  renderRoutines();
+  renderHead(); renderBody();
 }
 
-/* --- data regions table: static, sorted by start address ------------- */
-function renderRegions(regions){
-  const rows = regions.slice().sort((a,b)=> parseInt(a.start,16) - parseInt(b.start,16));
-  const tbody = document.getElementById("rgnBody");
-  tbody.innerHTML = rows.length ? rows.map(r=>
-    `<tr>`
-    + `<td class="nm"${r.desc ? ` title="${esc(r.desc)}"` : ""}>${esc(r.name)}</td>`
-    + `<td class="addr">${esc(r.start)}</td>`
-    + `<td class="addr">${esc(r.end)}</td>`
-    + `<td class="num">${fmtB(r.size)}</td>`
-    + `<td>${esc(r.class)}</td>`
-    + `<td class="mk ${r.named?'y':'n'}" role="img" aria-label="${r.named?'labelled':'unlabelled'}">`
-    +   `${r.named?'✓':'·'}</td>`
-    + `</tr>`
-  ).join("") : `<tr class="empty-row"><td colspan="6">No data regions in this dataset.</td></tr>`;
+function initTable(){
+  renderHead(); renderBody();
+
+  viewBtns.forEach(b => b.addEventListener("click", () => selectView(b.dataset.view)));
+  document.getElementById("viewTabs").addEventListener("keydown", e=>{
+    const i = viewBtns.indexOf(document.activeElement);
+    if(i < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+    const last = viewBtns.length - 1;
+    let j;
+    switch(e.key){
+      case "ArrowRight": case "ArrowDown": j = i===last ? 0 : i+1; break;
+      case "ArrowLeft":  case "ArrowUp":   j = i===0 ? last : i-1; break;
+      case "Home": j = 0; break;
+      case "End":  j = last; break;
+      default: return;
+    }
+    e.preventDefault();
+    viewBtns[j].focus();               // selection follows focus (radio pattern)
+    selectView(viewBtns[j].dataset.view);
+  });
+
+  // Delegated so the listener outlives every thead rebuild.
+  document.getElementById("thead").addEventListener("click", e=>{
+    const btn = e.target.closest("button[data-sort]");
+    if(!btn) return;
+    sort = sort === "desc" ? "asc" : "desc";
+    const th = document.getElementById("sizeTh");
+    if(th) th.setAttribute("aria-sort", sort==="asc" ? "ascending" : "descending");
+    renderBody();
+  });
+
+  document.getElementById("filter").addEventListener("input", renderBody);
+  document.getElementById("rowMore").addEventListener("click", ()=>{
+    expanded = !expanded;
+    renderBody();
+  });
 }
 
+/* ---- load ----------------------------------------------------------- */
 function render(data){
-  document.getElementById("sub").innerHTML =
-    `Matching disassembly of the SNES prototype <i>Dream: Land of Giants</i> `
-    + `(codename Project Dream, Rare, c. 1995). SHA-1 <code>${esc(data.sha1)}</code> `
-    + `&middot; generated <b>${esc(fmtWhen(data.generated))}</b> `
-    + `&middot; <a href="https://github.com/nathanialf/dream">repo</a>`;
-
-  renderHeadline(data.sections);
-  renderCards(data.sections);
-  renderStrip(data.sections);
-  initRoutines(data.routines || []);
-  renderRegions(data.regions || []);
-
-  document.getElementById("foot").innerHTML =
-    `<p>Generated by <code>tools/progress.py</code> from <code>config/regions.txt</code> `
-    + `plus the labels the tracer assigns from <code>tools/names.txt</code>. `
-    + `Code sections (<code>code</code>, <code>sound_iface</code>, <code>spc700</code>) count `
-    + `bytes inside routines that carry a human-chosen name; data sections count bytes of `
-    + `regions whose start is labelled in the generated source &mdash; identified in the code, `
-    + `not only in docs. <code>recomp</code> tracks the same routines against a stricter bar: `
-    + `reimplemented in C and verified in lockstep, per <code>config/recomp.txt</code>; see the `
-    + `legend above for how it and the extracted/round-trips data levels are defined. `
-    + `The round trip is byte-identical on every commit (<code>make check</code>), `
-    + `so these figures measure how much of the ROM is <b>understood</b>, not how much of it `
-    + `has been reproduced.</p>`;
+  ROUTINES = data.routines || [];
+  REGIONS  = data.regions  || [];
+  renderHeadline(data);
+  renderSections(data.sections);
+  initTable();
 }
 
 fetch("./progress.json")
   .then(r=>{ if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
   .then(render)
   .catch(e=>{
-    document.getElementById("sub").textContent =
-      "Matching disassembly of the SNES prototype Dream: Land of Giants.";
-    document.getElementById("rtnBody").innerHTML =
-      `<tr class="empty-row"><td colspan="5">Could not load progress.json.</td></tr>`;
+    document.getElementById("hlCtx").textContent = "";
     document.getElementById("foot").innerHTML =
       `<p class="warn err">Could not load <code>progress.json</code>: ${esc(e.message)}</p>`;
+    document.getElementById("tbody").innerHTML =
+      `<tr class="empty-row"><td colspan="5">Could not load progress.json.</td></tr>`;
   });
 </script>
 </body>

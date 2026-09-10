@@ -211,17 +211,20 @@ def compute():
     raw_paths = {row[1] for row in rt_rows if row[0] == 'raw' and len(row) > 1}
     for row in read_manifest(ASSETS):
         a, b, kind = int(row[0], 16), int(row[1], 16), row[2]
-        if len(row) > 3 and row[3] in raw_paths:
-            cls = KIND_CLASS.get(kind)
-            if cls: sections[cls]['count_total'] += 1; sections[cls]['extracted'] += b - a
-            continue
-        cls = KIND_CLASS.get(kind)
-        if cls is None: continue
+        # an asset is accounted to the section of the region it sits in, so section totals
+        # (from config/regions.txt) and asset bytes always agree even when a small filler or
+        # stale asset lies inside a music/tiles region
+        cls = class_at(regions, a)
+        if cls in CODE_KIND: cls = KIND_CLASS.get(kind)
+        if cls is None or cls in CODE_KIND: continue
         sec = sections[cls]
         sec['count_total'] += 1
+        if len(row) > 3 and row[3] in raw_paths:
+            sec['extracted'] += b - a
+            continue
         if kind != 'unknown':
             sec['extracted'] += b - a
-        if kind in roundtrip or (cls in LEVEL2_ONLY and kind != 'unknown'):
+        if kind in roundtrip or (kind in ('stale', 'filler')):
             sec['matched'] += b - a; sec['count_matched'] += 1
     region_rows = []
     for r in regions:
