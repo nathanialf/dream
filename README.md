@@ -51,7 +51,7 @@ The sound driver is the DKC2/DKC3 driver (96% identical) and ten library routine
 verbatim from the DKC games. Details and evidence: [`docs/NOTES.md`](docs/NOTES.md),
 [`docs/toolchain_evidence.md`](docs/toolchain_evidence.md),
 [`docs/data_formats.md`](docs/data_formats.md), [`docs/handler_tables.md`](docs/handler_tables.md),
-[`docs/dkc_crossref.md`](docs/dkc_crossref.md).
+[`docs/dkc_crossref.md`](docs/dkc_crossref.md). Recomp design decisions: [`docs/RECOMP.md`](docs/RECOMP.md).
 
 ## Quickstart
 
