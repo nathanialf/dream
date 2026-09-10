@@ -881,7 +881,14 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
  *   4. a suspended coroutine can be torn down (the scheduler drops one whenever
  *      an interrupt abandons it, and ss_nocpu_free frees them all at exit), and
  *      a finished coroutine can be started again on the same stack, which is
- *      how a context slot is reused.
+ *      how a context slot is reused;
+ *   5. coro_start on a coroutine still parked in coro_yield -- not finished --
+ *      discards the parked body instead of resuming it and runs the new fn from
+ *      scratch (coro_fibers.c note 4; the ucontext backend gets this for free by
+ *      re-makecontext-ing the same stack every coro_start), and the coroutine is
+ *      fully usable afterwards: yield, resume, finish and free all work, whether
+ *      the restart is initiated from main or from inside another coro's stack,
+ *      which is the shape ss_nocpu_reap() abandons a driver's body chain in.
  */
 #define CORO_TEST_LOG   64
 #define CORO_TEST_BLOB  16384u
@@ -913,6 +920,10 @@ typedef struct {
   Coro* parked;
   int parkedEntered;
   int parkedFinished;
+  /* coro_start restarting a coroutine still parked in coro_yield */
+  Coro* restart;
+  Coro* host;
+  bool restartOldPostYield;
 } CoroTest;
 
 static void ct_log(CoroTest* t, char c) {
@@ -979,6 +990,34 @@ static void ct_park(void* arg) {
   t->parkedEntered++;
   coro_yield(t->parked);
   t->parkedFinished++;                 /* must never happen: it is torn down */
+}
+
+/* 5. coro_start on a coroutine parked mid-body must discard that body, not
+ *    resume it -- 'Y' below must never reach the log. */
+static void ct_restart_old(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  ct_log(t, 'X');
+  coro_yield(t->restart);
+  ct_log(t, 'Y');                      /* must never run: the body is abandoned */
+  t->restartOldPostYield = true;
+}
+
+static void ct_restart_new(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  ct_log(t, 'M');
+  coro_yield(t->restart);
+  ct_log(t, 'N');
+}
+
+/* the same restart, but issued from inside another coroutine's stack instead
+ * of main's -- ss_nocpu_reap() drops a driver's body chain this way every time
+ * an NMI displaces it, from inside whatever body caught the APU up. */
+static void ct_restart_from_nested(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  ct_log(t, 'H');
+  coro_start(t->restart, ct_restart_new, t);
+  ct_log(t, 'I');
+  coro_yield(t->host);
 }
 
 static bool ct_check(const char* what, bool ok) {
@@ -1065,6 +1104,47 @@ static int run_coro_test(void) {
   bad += !ct_check("every suspended coroutine was entered and torn down",
                    t.parkedEntered == CORO_TEST_TEARDOWNS && t.parked == NULL);
   bad += !ct_check("none of them ran on after the teardown", t.parkedFinished == 0);
+
+  /* 5. coro_start on a coroutine parked in coro_yield, not finished */
+  t.logN = 0;
+  memset(t.log, 0, sizeof(t.log));
+  t.restart = coro_new(CORO_TEST_STACK);
+  coro_start(t.restart, ct_restart_old, &t);
+  bad += !ct_check("the old body ran up to its yield and parked there",
+                   strcmp(t.log, "X") == 0 && !coro_done(t.restart));
+  coro_start(t.restart, ct_restart_new, &t);   /* restart while parked */
+  bad += !ct_check("coro_start on a parked coroutine ran the new fn from its start",
+                   !coro_done(t.restart) && strcmp(t.log, "XM") == 0);
+  bad += !ct_check("the abandoned body's post-yield marker never appeared",
+                   !t.restartOldPostYield && strchr(t.log, 'Y') == NULL);
+  coro_resume(t.restart);
+  bad += !ct_check("the restarted coroutine still yields, resumes and finishes",
+                   coro_done(t.restart) && strcmp(t.log, "XMN") == 0);
+  coro_free(t.restart);
+  bad += !ct_check("coro_free of the restarted coroutine did not crash", true);
+  t.restart = NULL;
+
+  /* the same restart, but issued from inside another coroutine's stack */
+  t.logN = 0;
+  memset(t.log, 0, sizeof(t.log));
+  t.restart = coro_new(CORO_TEST_STACK);
+  t.host = coro_new(CORO_TEST_STACK);
+  coro_start(t.restart, ct_restart_old, &t);   /* parks, logs 'X' */
+  coro_start(t.host, ct_restart_from_nested, &t);
+  bad += !ct_check("a restart from inside another coro's stack discards the old body",
+                   !coro_done(t.restart) && !coro_done(t.host) &&
+                   strcmp(t.log, "XHMI") == 0 && !t.restartOldPostYield);
+  coro_resume(t.restart);
+  coro_resume(t.host);
+  bad += !ct_check("both coroutines finish normally afterwards",
+                   coro_done(t.restart) && coro_done(t.host) && strcmp(t.log, "XHMIN") == 0);
+  coro_free(t.restart);
+  coro_free(t.host);
+  t.restart = t.host = NULL;
+
+  /* coro_start on an already-finished coroutine restarts it on the same stack
+   * too: covered above in group 1 (t.deep is started a second time after it
+   * ran to completion). */
 
   printf("test-coro: %s\n", bad == 0 ? "PASS" : "FAIL");
   return bad == 0 ? 0 : 1;

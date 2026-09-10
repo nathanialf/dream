@@ -438,16 +438,20 @@ either: the coroutine backend of `harness/coro.h`, on its own.
 
     ./build/recomp/dream_harness --test-coro
 
-It checks the four things the `--no-cpu` scheduler asks of a backend: that a body
+It checks the five things the `--no-cpu` scheduler asks of a backend: that a body
 suspends and resumes where it stopped with its stack intact (16 KiB of locals
 written before a yield and verified after); that coroutines *nest*, so a coro
 started or resumed from inside another coro's stack comes back to that stack --
 which is what happens every time the SPC700's driver stack is resumed from inside
 a 65816 body catching the APU up; that a body yields across a simulated frame
 boundary and resumes inside the same loop, which is `ss_yield_wanted()`'s shape
-with the machine replaced by a counter; and that a coroutine suspended halfway
+with the machine replaced by a counter; that a coroutine suspended halfway
 through a body can be torn down, which the scheduler does whenever an interrupt
-abandons one and at every exit. It exits 0 on pass, 1 on fail, one line per check.
+abandons one and at every exit; and that coro_start on a coroutine still parked
+in coro_yield discards that parked body instead of resuming it and runs the new
+fn from scratch -- checked with the restart issued from main and from inside
+another coro's stack, the shape `ss_nocpu_reap()` abandons a driver's body chain
+in. It exits 0 on pass, 1 on fail, one line per check.
 
 It exists because the Windows backend cannot be reached by the gate: the gate
 needs the ROM and no ROM ever enters CI. `--test-coro` runs on any machine, so
