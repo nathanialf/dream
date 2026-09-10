@@ -1,0 +1,10 @@
+# Idle at the title past the attract-mode threshold (~frame 2365, found by
+# binary search with explore.py) before pressing Start, instead of pressing
+# it immediately as title_start_right.txt does. The title's own boot/fade
+# sequence (loc_C0BB81..loc_C0BEB6) branches on a state byte at $7F1195 that
+# only reaches its "$7F1195 not 0 or 1" arm after this long an idle period;
+# that arm is the only place mode1_reset_particles_and_oam is called from.
+0    none
+2400 Start
+2406 none
+2500 Right

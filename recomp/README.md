@@ -20,7 +20,8 @@ Headless, deterministic, no SDL, no X, no network, no threads.
         hooks.c                   recomp_hooks[] + the worked example
         xxh64.c/.h                XXH64, the per-frame region digest
         compare_coverage.py       trace vs out/codemap.txt
-        inputs/                   input scripts
+        explore.py                search tool: builds/keeps input scripts that add coverage
+        inputs/                   input scripts, and inputs/README.md documenting them
       third_party/lakesnes/       vendored emulator core (MIT)
         LICENSE.txt UPSTREAM.txt
         snes/*.c *.h
@@ -240,6 +241,24 @@ fetch per `stz` (a pure timing error, ~128 cycles per call) is *not* caught over
 frames — this routine's timing is not observable in the compared regions at frame
 granularity. State divergence is what lockstep proves; cycle fidelity is a discipline
 the hook author keeps, not something these four regions can always police.
+
+## Coverage scripts
+
+`harness/inputs/` holds a small set of scripts built to maximize the union of static
+routines exercised, for the recomp lockstep gate: `title_start_right.txt` (the
+worked example above), `title_attract_then_start.txt`, `mode_cycle.txt`,
+`level_walk_jump.txt` and `level_long_traverse.txt`. Together they take
+`compare_coverage.py`'s count from 74/123 (the single `title_start_right.txt` run)
+to 110/123, and reach all four `game_mode` values -- 0, 1 and 2 (the level scenes)
+and 3 (title) -- not just mode 0. The key to modes 1/2/3 is a debug/attract feature
+found during the search: pressing **Select** while no screen fade is in progress
+advances `game_mode` by one (wrapping 3 back to 0), which is otherwise not
+documented anywhere in the ROM. `harness/explore.py` is the search tool that found
+these scripts (it runs candidate button scripts, traces coverage, and greedily
+keeps whatever adds previously-uncovered routines); `harness/inputs/README.md` has
+the full per-script/union coverage table and, for the 13 routines still cold,
+which are dead code versus which would need a specific entity encounter not yet
+located.
 
 ## Reproducing the reported runs
 

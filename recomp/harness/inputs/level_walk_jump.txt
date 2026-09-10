@@ -1,0 +1,18 @@
+# Enter the game, then walk/jump inside game_mode 0 to trigger footstep and
+# enemy-hit sound callbacks and sprite-frame variants, before cycling to
+# modes 1 and 2 (via the Select debug feature, see mode_cycle.txt) to
+# trigger their entity animation-rate/sound variants too. Order matters:
+# Right+B (jump while moving) has to run before the plain-B jump-in-place or
+# the footstep callback does not fire in this composed run.
+0    none
+120  Start
+126  none
+240  Right+B
+1140 B
+1620 Left
+2220 Select
+2226 none
+2340 Right
+2940 Select
+2946 none
+3060 Right

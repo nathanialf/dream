@@ -1,0 +1,23 @@
+# Enter the game, then cycle game_mode 0 -> 1 -> 2 -> 3 -> 0 via the Select
+# "debug"/attract mode-advance feature (see recomp/harness/inputs/README.md):
+# pressing Select while no screen fade is in progress ($30 and $32 both zero)
+# advances game_mode by one, wrapping 3 back to 0. A press earlier than ~114
+# frames after entering a mode, or two presses closer than ~120 frames apart,
+# gets silently dropped (the fade gate is still closed) -- these timings were
+# found by binary search with explore.py and confirmed with --dump-wram
+# against game_mode ($A4).
+#
+# Exercises all four game_mode_table / jtbl_C08272 / jtbl_C0827A / jtbl_C08282
+# / jtbl_C0828A entries and each mode's NMI scroll handler.
+0    none
+120  Start
+126  none
+240  Select
+246  none
+360  Select
+366  none
+480  Select
+486  none
+600  Select
+606  none
+900  none

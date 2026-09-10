@@ -58,6 +58,17 @@ only 424 labels, so its output was discarded in favour of the tracer.
   `$C2:0000`, then streams the driver with a custom protocol (`upload_spc_block`).
   `spc_command` (`$81:83CE`) is the runtime entry, called with A = command.
 
+## Dynamic findings (harness)
+
+- The main loop runs inside NMI: after init the CPU parks on `wai` at `loc_C0A4FD` and all
+  per-frame work happens in the handler reached through `jmp ($0000)`.
+- Execution uses the `$80/$81` mirror banks, never `$C0/$C1` directly.
+- Pressing **Select** while no fade is in progress (`$30` and `$32` zero) advances
+  `game_mode` 0 -> 1 -> 2 -> 3 -> 0 (in `nmi_handler_gameplay`), a leftover debug/attract
+  mode cycle. It is how modes 1-3 are reached in `recomp/harness/inputs/`.
+- Coverage: the static trace is a strict superset of executed code; the input scripts
+  reach 110 of 123 routines, 8 of the remaining 13 are confirmed dead.
+
 ## Data formats
 
 Full region table (112 regions covering all 2 MiB, with ASCII tile renders and evidence):
