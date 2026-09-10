@@ -1,4 +1,4 @@
-# Project Dream (SNES) matching disassembly
+# Dream: Land of Giants (SNES prototype) matching disassembly
 #
 #   cp /path/to/DREAM.sfc baserom/      # your own ROM; never committed
 #   make                                # extract -> assemble -> verify sha1 (+ SPC700 driver)

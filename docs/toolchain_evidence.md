@@ -1,4 +1,4 @@
-# Project Dream: toolchain evidence from bytes
+# Dream: Land of Giants: toolchain evidence from bytes
 
 Scope: what the bytes of `DREAM.sfc` (2 MiB HiROM) say about how Rare built it, checked
 against six other Rare SNES ROMs read-only under `/primary/Games/ROMs/SNES/`:

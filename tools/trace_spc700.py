@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SPC700 recursive-descent tracer / disassembler for the Project Dream sound driver.
+"""SPC700 recursive-descent tracer / disassembler for the Dream: Land of Giants (SNES prototype) sound driver.
 
 Standalone, no dependencies.  Usage:
 
@@ -683,7 +683,7 @@ def emit_asm(tr, path):
     img = tr.img
     out = []
     w = out.append
-    w('; Project Dream (Rare, 1995) SPC700 sound driver, traced by tools/trace_spc700.py')
+    w('; Dream: Land of Giants (Rare, 1995, SNES prototype) SPC700 sound driver, traced by tools/trace_spc700.py')
     w('; Source: DREAM.sfc file 0x20000 (loader, 0x88 bytes -> $04D8) and 0x20088')
     w(';         (driver, 0x699 words -> $0560).  Data runs (tables, the sample remap')
     w(';         block, unreached bytes) are not inlined: they are incbin ranges into')

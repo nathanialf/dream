@@ -1,4 +1,4 @@
-# Project Dream (SNES) decompilation notes
+# Dream: Land of Giants (SNES prototype) decompilation notes
 
 ROM: `DREAM.sfc` / `DREAM.bin` (identical, 2 MiB), from the 2026-09-09 public release
 (`Release Info.txt`). No symbol map, debug strings, or source paths exist in the image or

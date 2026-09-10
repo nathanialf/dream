@@ -1,4 +1,4 @@
-; Project Dream (Rare, 1995) SPC700 sound driver, traced by tools/trace_spc700.py
+; Dream: Land of Giants (Rare, 1995, SNES prototype) SPC700 sound driver, traced by tools/trace_spc700.py
 ; Source: DREAM.sfc file 0x20000 (loader, 0x88 bytes -> $04D8) and 0x20088
 ;         (driver, 0x699 words -> $0560).  Data runs (tables, the sample remap
 ;         block, unreached bytes) are not inlined: they are incbin ranges into

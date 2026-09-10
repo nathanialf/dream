@@ -1,6 +1,6 @@
 # Notes for AI agents working in this repo
 
-This is a **matching disassembly** of *Project Dream* (SNES prototype, Rare, c. 1995,
+This is a **matching disassembly** of the *Dream: Land of Giants* prototype (codename Project Dream; SNES, Rare, c. 1995,
 the build that became *Banjo-Kazooie*). Read `docs/LEGAL.md` first. The rule that
 matters most: **no ROM, no extracted data, no build output, no literal byte runs in
 committed sources, ever.** `tools/check_no_rom.sh` runs in the pre-commit hook; it is

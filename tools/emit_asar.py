@@ -141,7 +141,7 @@ def main():
         last_org = f
     for fp in bank_files.values(): fp.close()
     with open(os.path.join(srcdir, 'main.asm'), 'w') as fp:
-        fp.write('; Project Dream (SNES) - reassemblable disassembly\n')
+        fp.write('; Dream: Land of Giants (SNES prototype) - reassemblable disassembly\n')
         fp.write('; build: make (see README.md); data/ is produced by tools/extract.py from your own ROM\n')
         fp.write('hirom\n\n')
         fp.write('; RAM / register symbols\n')

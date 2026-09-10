@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recursive-descent 65816 tracer for the Project Dream SNES ROM (HiROM).
+"""Recursive-descent 65816 tracer for the Dream: Land of Giants (SNES prototype) ROM (HiROM).
 
 Seeds from the vector table and follows jsr/jsl/jmp/jml/branches, tracking
 the M/X flags through rep/sep, and reads jump tables behind `jsr (abs,X)` /
@@ -512,7 +512,7 @@ def write_outputs(outdir):
             fp.write(f'7e:{a & 0xFFFF:04x} {n}\n')
     # listing
     with open(os.path.join(outdir, 'dream.asm'), 'w') as fp:
-        fp.write('; Project Dream (SNES) - traced disassembly. HiROM. addr = $C0:0000 + file offset\n')
+        fp.write('; Dream: Land of Giants (SNES prototype) - traced disassembly. HiROM. addr = $C0:0000 + file offset\n')
         f = 0
         while f < ROMSIZE:
             if f in insns:

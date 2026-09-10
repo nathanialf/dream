@@ -1,4 +1,4 @@
-# Project Dream (DREAM.sfc) data-format map
+# Dream: Land of Giants (DREAM.sfc) data-format map
 
 Derived statically with python3 from the ROM bytes and `out/dream.asm` (DMA register writes, `lda [dp],y` walkers, the bank-`$C4` frame/animation tables and the bank-`$C2` SPC tables). File offset `f` = CPU `$C0:0000 + f` (HiROM). Every byte of the 2 MiB image is covered; regions are ordered by file offset. Confidence: high = the live code reads the region with a known format, or an exact structural parse/duplicate match; medium = classifier + eyeballed render; low = classifier only.
 

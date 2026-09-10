@@ -1,6 +1,6 @@
-# project-dream
+# dream-land-of-giants
 
-A matching disassembly of **Project Dream**, the SNES prototype Rare built around 1995
+A matching disassembly of the **Dream: Land of Giants** prototype (codename Project Dream), the SNES game Rare built around 1995
 that later became *Banjo-Kazooie*. `make` rebuilds the 2 MiB ROM byte-for-byte from
 the sources here plus data extracted from your own copy of the ROM.
 

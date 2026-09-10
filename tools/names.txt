@@ -1,4 +1,4 @@
-; Project Dream (SNES) curated labels. Format:
+; Dream: Land of Giants (SNES prototype) curated labels. Format:
 ;   <24-bit addr> <name>      code entry (traced as a subroutine)
 ;   data <addr> <name>        data label only
 ;   ram <addr> <name>         WRAM / direct page variable

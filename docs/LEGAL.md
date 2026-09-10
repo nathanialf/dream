@@ -1,6 +1,6 @@
 # Legal and provenance
 
-This repository is a **disassembly** of the SNES prototype *Project Dream* (Rare, c. 1995),
+This repository is a **disassembly** of the SNES prototype *Dream: Land of Giants* (codename Project Dream; Rare, c. 1995),
 the build that later became *Banjo-Kazooie*. It is not a clean-room reimplementation: the
 source here was produced by tracing the machine code of a leaked prototype ROM and is
 therefore derived from that ROM. What we commit is the *structure* we recovered: symbol
@@ -27,4 +27,4 @@ is the game's own bytes.
 
 The ROM was released publicly on 2026-09-09 by an anonymous holder; the accompanying
 release note is not included here. The project is unaffiliated with Rare, Microsoft,
-or Nintendo. *Banjo-Kazooie* and *Project Dream* are trademarks of their respective owners.
+or Nintendo. *Banjo-Kazooie*, *Dream: Land of Giants* and *Project Dream* are trademarks of their respective owners.

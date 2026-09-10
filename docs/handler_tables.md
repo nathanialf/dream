@@ -1,4 +1,4 @@
-# Project Dream: RAM-pointer dispatch tables (`jmp ($0004)`)
+# Dream: Land of Giants: RAM-pointer dispatch tables (`jmp ($0004)`)
 
 Derived statically from `DREAM.sfc` (sha1 2675d7af...) by reading `out/dream.asm` and the raw
 bytes with python3; every candidate handler was re-decoded with `trace65816.decode()` at the
