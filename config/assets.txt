@@ -13,7 +13,7 @@
 ; Assets are sorted by start, contiguous and non-overlapping over the whole 2 MiB image
 ; (000000-200000): every byte belongs to exactly one asset. path is the file under data/
 ; that tools/extract.py writes the asset to (gitignored, like the half-bank files); it is
-; never committed. kind is one of: anim_script, anim_table, brr, code, entity_table, filler, hdma, map, metatiles, palette, sfx_bank, song, spc_table, sprite_frame, sprite_table, stale, tilemap, tileset_2bpp, tileset_4bpp, tileset_8bpp, unknown.
+; never committed. kind is one of: anim_script, anim_table, brr, code, entity_table, filler, hdma, map, metatiles, palette, sfx_bank, song, spc_table, sprite_frame, sprite_frame_alt, sprite_table, stale, tilemap, tileset_2bpp, tileset_4bpp, tileset_8bpp, unknown.
 ;
 ; See docs/data_formats.md "Asset manifest" section for the derivation of each kind.
 
@@ -1818,10 +1818,121 @@
 1cc012 1cc03c sprite_frame data/sprites/frame_1553.bin      ; sprite frame table entry(ies) -> file offset 1CC012
 1cc03c 1cc066 sprite_frame data/sprites/frame_1554.bin      ; sprite frame table entry(ies) -> file offset 1CC03C
 1cc066 1cc6aa tileset_4bpp data/gfx/tiles_between_frames.bin ; tile-like data between the last table-referenced frame and the alternate-format frames; low confidence
-1cc6aa 1f0000 sprite_frame data/sprites/sprite_frames_alt_dc.bin ; sprite frames in an ALTERNATE format not read by live code: 8-byte header + 3-byte OAM records + 4bpp tiles; 82 frames
+1cc6aa 1ccd74 sprite_frame_alt data/sprites/frame_alt_0000.bin  ; alternate-format sprite frame (header scan) -> file offset 1CC6AA
+1ccd74 1cd43e sprite_frame_alt data/sprites/frame_alt_0001.bin  ; alternate-format sprite frame (header scan) -> file offset 1CCD74
+1cd43e 1cdb08 sprite_frame_alt data/sprites/frame_alt_0002.bin  ; alternate-format sprite frame (header scan) -> file offset 1CD43E
+1cdb08 1ce89c sprite_frame_alt data/sprites/frame_alt_0003.bin  ; alternate-format sprite frame (header scan) -> file offset 1CDB08
+1ce89c 1cef5e sprite_frame_alt data/sprites/frame_alt_0004.bin  ; alternate-format sprite frame (header scan) -> file offset 1CE89C
+1cef5e 1cf620 sprite_frame_alt data/sprites/frame_alt_0005.bin  ; alternate-format sprite frame (header scan) -> file offset 1CEF5E
+1cf620 1d0000 sprite_frame_alt data/sprites/frame_alt_0006.bin  ; alternate-format sprite frame (header scan) -> file offset 1CF620
+1d0000 1d06c1 sprite_frame_alt data/sprites/frame_alt_0007.bin  ; alternate-format sprite frame (header scan) -> file offset 1D0000
+1d06c1 1d0d82 sprite_frame_alt data/sprites/frame_alt_0008.bin  ; alternate-format sprite frame (header scan) -> file offset 1D06C1
+1d0d82 1d1443 sprite_frame_alt data/sprites/frame_alt_0009.bin  ; alternate-format sprite frame (header scan) -> file offset 1D0D82
+1d1443 1d1b04 sprite_frame_alt data/sprites/frame_alt_0010.bin  ; alternate-format sprite frame (header scan) -> file offset 1D1443
+1d1b04 1d21c5 sprite_frame_alt data/sprites/frame_alt_0011.bin  ; alternate-format sprite frame (header scan) -> file offset 1D1B04
+1d21c5 1d2886 sprite_frame_alt data/sprites/frame_alt_0012.bin  ; alternate-format sprite frame (header scan) -> file offset 1D21C5
+1d2886 1d2f47 sprite_frame_alt data/sprites/frame_alt_0013.bin  ; alternate-format sprite frame (header scan) -> file offset 1D2886
+1d2f47 1d3608 sprite_frame_alt data/sprites/frame_alt_0014.bin  ; alternate-format sprite frame (header scan) -> file offset 1D2F47
+1d3608 1d3cc9 sprite_frame_alt data/sprites/frame_alt_0015.bin  ; alternate-format sprite frame (header scan) -> file offset 1D3608
+1d3cc9 1d438a sprite_frame_alt data/sprites/frame_alt_0016.bin  ; alternate-format sprite frame (header scan) -> file offset 1D3CC9
+1d438a 1d4a4b sprite_frame_alt data/sprites/frame_alt_0017.bin  ; alternate-format sprite frame (header scan) -> file offset 1D438A
+1d4a4b 1d510c sprite_frame_alt data/sprites/frame_alt_0018.bin  ; alternate-format sprite frame (header scan) -> file offset 1D4A4B
+1d510c 1d57cd sprite_frame_alt data/sprites/frame_alt_0019.bin  ; alternate-format sprite frame (header scan) -> file offset 1D510C
+1d57cd 1d5e8e sprite_frame_alt data/sprites/frame_alt_0020.bin  ; alternate-format sprite frame (header scan) -> file offset 1D57CD
+1d5e8e 1d654f sprite_frame_alt data/sprites/frame_alt_0021.bin  ; alternate-format sprite frame (header scan) -> file offset 1D5E8E
+1d654f 1d6c10 sprite_frame_alt data/sprites/frame_alt_0022.bin  ; alternate-format sprite frame (header scan) -> file offset 1D654F
+1d6c10 1d72c9 sprite_frame_alt data/sprites/frame_alt_0023.bin  ; alternate-format sprite frame (header scan) -> file offset 1D6C10
+1d72c9 1d7982 sprite_frame_alt data/sprites/frame_alt_0024.bin  ; alternate-format sprite frame (header scan) -> file offset 1D72C9
+1d7982 1d803b sprite_frame_alt data/sprites/frame_alt_0025.bin  ; alternate-format sprite frame (header scan) -> file offset 1D7982
+1d803b 1d86f4 sprite_frame_alt data/sprites/frame_alt_0026.bin  ; alternate-format sprite frame (header scan) -> file offset 1D803B
+1d86f4 1d8dac sprite_frame_alt data/sprites/frame_alt_0027.bin  ; alternate-format sprite frame (header scan) -> file offset 1D86F4
+1d8dac 1d9464 sprite_frame_alt data/sprites/frame_alt_0028.bin  ; alternate-format sprite frame (header scan) -> file offset 1D8DAC
+1d9464 1d9b1c sprite_frame_alt data/sprites/frame_alt_0029.bin  ; alternate-format sprite frame (header scan) -> file offset 1D9464
+1d9b1c 1da1cc sprite_frame_alt data/sprites/frame_alt_0030.bin  ; alternate-format sprite frame (header scan) -> file offset 1D9B1C
+1da1cc 1da87c sprite_frame_alt data/sprites/frame_alt_0031.bin  ; alternate-format sprite frame (header scan) -> file offset 1DA1CC
+1da87c 1daf2c sprite_frame_alt data/sprites/frame_alt_0032.bin  ; alternate-format sprite frame (header scan) -> file offset 1DA87C
+1daf2c 1db5dc sprite_frame_alt data/sprites/frame_alt_0033.bin  ; alternate-format sprite frame (header scan) -> file offset 1DAF2C
+1db5dc 1dbc8c sprite_frame_alt data/sprites/frame_alt_0034.bin  ; alternate-format sprite frame (header scan) -> file offset 1DB5DC
+1dbc8c 1dc9dc sprite_frame_alt data/sprites/frame_alt_0035.bin  ; alternate-format sprite frame (header scan) -> file offset 1DBC8C
+1dc9dc 1dd083 sprite_frame_alt data/sprites/frame_alt_0036.bin  ; alternate-format sprite frame (header scan) -> file offset 1DC9DC
+1dd083 1dd72a sprite_frame_alt data/sprites/frame_alt_0037.bin  ; alternate-format sprite frame (header scan) -> file offset 1DD083
+1dd72a 1dddd1 sprite_frame_alt data/sprites/frame_alt_0038.bin  ; alternate-format sprite frame (header scan) -> file offset 1DD72A
+1dddd1 1de478 sprite_frame_alt data/sprites/frame_alt_0039.bin  ; alternate-format sprite frame (header scan) -> file offset 1DDDD1
+1de478 1deb1f sprite_frame_alt data/sprites/frame_alt_0040.bin  ; alternate-format sprite frame (header scan) -> file offset 1DE478
+1deb1f 1df1c6 sprite_frame_alt data/sprites/frame_alt_0041.bin  ; alternate-format sprite frame (header scan) -> file offset 1DEB1F
+1df1c6 1df86d sprite_frame_alt data/sprites/frame_alt_0042.bin  ; alternate-format sprite frame (header scan) -> file offset 1DF1C6
+1df86d 1e0000 sprite_frame_alt data/sprites/frame_alt_0043.bin  ; alternate-format sprite frame (header scan) -> file offset 1DF86D
+1e0000 1e06a7 sprite_frame_alt data/sprites/frame_alt_0044.bin  ; alternate-format sprite frame (header scan) -> file offset 1E0000
+1e06a7 1e0d4e sprite_frame_alt data/sprites/frame_alt_0045.bin  ; alternate-format sprite frame (header scan) -> file offset 1E06A7
+1e0d4e 1e13f5 sprite_frame_alt data/sprites/frame_alt_0046.bin  ; alternate-format sprite frame (header scan) -> file offset 1E0D4E
+1e13f5 1e1a9c sprite_frame_alt data/sprites/frame_alt_0047.bin  ; alternate-format sprite frame (header scan) -> file offset 1E13F5
+1e1a9c 1e2143 sprite_frame_alt data/sprites/frame_alt_0048.bin  ; alternate-format sprite frame (header scan) -> file offset 1E1A9C
+1e2143 1e27ea sprite_frame_alt data/sprites/frame_alt_0049.bin  ; alternate-format sprite frame (header scan) -> file offset 1E2143
+1e27ea 1e2e91 sprite_frame_alt data/sprites/frame_alt_0050.bin  ; alternate-format sprite frame (header scan) -> file offset 1E27EA
+1e2e91 1e3538 sprite_frame_alt data/sprites/frame_alt_0051.bin  ; alternate-format sprite frame (header scan) -> file offset 1E2E91
+1e3538 1e3bdf sprite_frame_alt data/sprites/frame_alt_0052.bin  ; alternate-format sprite frame (header scan) -> file offset 1E3538
+1e3bdf 1e4286 sprite_frame_alt data/sprites/frame_alt_0053.bin  ; alternate-format sprite frame (header scan) -> file offset 1E3BDF
+1e4286 1e492d sprite_frame_alt data/sprites/frame_alt_0054.bin  ; alternate-format sprite frame (header scan) -> file offset 1E4286
+1e492d 1e4fcc sprite_frame_alt data/sprites/frame_alt_0055.bin  ; alternate-format sprite frame (header scan) -> file offset 1E492D
+1e4fcc 1e566b sprite_frame_alt data/sprites/frame_alt_0056.bin  ; alternate-format sprite frame (header scan) -> file offset 1E4FCC
+1e566b 1e5d0a sprite_frame_alt data/sprites/frame_alt_0057.bin  ; alternate-format sprite frame (header scan) -> file offset 1E566B
+1e5d0a 1e63a9 sprite_frame_alt data/sprites/frame_alt_0058.bin  ; alternate-format sprite frame (header scan) -> file offset 1E5D0A
+1e63a9 1e6a48 sprite_frame_alt data/sprites/frame_alt_0059.bin  ; alternate-format sprite frame (header scan) -> file offset 1E63A9
+1e6a48 1e70e7 sprite_frame_alt data/sprites/frame_alt_0060.bin  ; alternate-format sprite frame (header scan) -> file offset 1E6A48
+1e70e7 1e7786 sprite_frame_alt data/sprites/frame_alt_0061.bin  ; alternate-format sprite frame (header scan) -> file offset 1E70E7
+1e7786 1e7e25 sprite_frame_alt data/sprites/frame_alt_0062.bin  ; alternate-format sprite frame (header scan) -> file offset 1E7786
+1e7e25 1e84c3 sprite_frame_alt data/sprites/frame_alt_0063.bin  ; alternate-format sprite frame (header scan) -> file offset 1E7E25
+1e84c3 1e8b61 sprite_frame_alt data/sprites/frame_alt_0064.bin  ; alternate-format sprite frame (header scan) -> file offset 1E84C3
+1e8b61 1e91ff sprite_frame_alt data/sprites/frame_alt_0065.bin  ; alternate-format sprite frame (header scan) -> file offset 1E8B61
+1e91ff 1e989d sprite_frame_alt data/sprites/frame_alt_0066.bin  ; alternate-format sprite frame (header scan) -> file offset 1E91FF
+1e989d 1e9f3b sprite_frame_alt data/sprites/frame_alt_0067.bin  ; alternate-format sprite frame (header scan) -> file offset 1E989D
+1e9f3b 1ea5d9 sprite_frame_alt data/sprites/frame_alt_0068.bin  ; alternate-format sprite frame (header scan) -> file offset 1E9F3B
+1ea5d9 1eac77 sprite_frame_alt data/sprites/frame_alt_0069.bin  ; alternate-format sprite frame (header scan) -> file offset 1EA5D9
+1eac77 1eb315 sprite_frame_alt data/sprites/frame_alt_0070.bin  ; alternate-format sprite frame (header scan) -> file offset 1EAC77
+1eb315 1eb9b3 sprite_frame_alt data/sprites/frame_alt_0071.bin  ; alternate-format sprite frame (header scan) -> file offset 1EB315
+1eb9b3 1ec051 sprite_frame_alt data/sprites/frame_alt_0072.bin  ; alternate-format sprite frame (header scan) -> file offset 1EB9B3
+1ec051 1ec6ef sprite_frame_alt data/sprites/frame_alt_0073.bin  ; alternate-format sprite frame (header scan) -> file offset 1EC051
+1ec6ef 1ecd8d sprite_frame_alt data/sprites/frame_alt_0074.bin  ; alternate-format sprite frame (header scan) -> file offset 1EC6EF
+1ecd8d 1ed42b sprite_frame_alt data/sprites/frame_alt_0075.bin  ; alternate-format sprite frame (header scan) -> file offset 1ECD8D
+1ed42b 1edac1 sprite_frame_alt data/sprites/frame_alt_0076.bin  ; alternate-format sprite frame (header scan) -> file offset 1ED42B
+1edac1 1ee157 sprite_frame_alt data/sprites/frame_alt_0077.bin  ; alternate-format sprite frame (header scan) -> file offset 1EDAC1
+1ee157 1ee7ed sprite_frame_alt data/sprites/frame_alt_0078.bin  ; alternate-format sprite frame (header scan) -> file offset 1EE157
+1ee7ed 1eee83 sprite_frame_alt data/sprites/frame_alt_0079.bin  ; alternate-format sprite frame (header scan) -> file offset 1EE7ED
+1eee83 1ef519 sprite_frame_alt data/sprites/frame_alt_0080.bin  ; alternate-format sprite frame (header scan) -> file offset 1EEE83
+1ef519 1f0000 sprite_frame_alt data/sprites/frame_alt_0081.bin  ; alternate-format sprite frame (header scan) -> file offset 1EF519
 1f0000 1f10c0 stale        data/stale/stale_dup_metatiles_mode3.bin ; stale duplicate of 0A37A0-0A4860 (all 134 game_mode 3 metatiles)
 1f10c0 1f1100 unknown      data/unknown/unknown_gap_1f10c0.bin ; 64-byte gap between two stale-duplicate metatile regions, high entropy, no format found
 1f1100 1f2780 stale        data/stale/stale_dup_metatiles_mode2b.bin ; stale duplicate of 09C660-09DCE0 (game_mode 2 metatiles 136-315)
 1f2780 1f2e14 tileset_4bpp data/gfx/tiles_unref_1f2780.bin  ; unreferenced, tile-like, entropy 5.2
-1f2e14 1ffee5 sprite_frame data/sprites/sprite_frames_alt_ef.bin ; sprite frames, alternate format (as 1CC6AA): 31 frames at 0x684 spacing
-1ffee5 200000 sprite_frame data/sprites/sprite_frame_tail.bin ; tail: partial last alternate-format sprite frame / padding
+1f2e14 1f34a2 sprite_frame_alt data/sprites/frame_alt_0082.bin  ; alternate-format sprite frame (header scan) -> file offset 1F2E14
+1f34a2 1f3b2f sprite_frame_alt data/sprites/frame_alt_0083.bin  ; alternate-format sprite frame (header scan) -> file offset 1F34A2
+1f3b2f 1f41bc sprite_frame_alt data/sprites/frame_alt_0084.bin  ; alternate-format sprite frame (header scan) -> file offset 1F3B2F
+1f41bc 1f4849 sprite_frame_alt data/sprites/frame_alt_0085.bin  ; alternate-format sprite frame (header scan) -> file offset 1F41BC
+1f4849 1f4ed6 sprite_frame_alt data/sprites/frame_alt_0086.bin  ; alternate-format sprite frame (header scan) -> file offset 1F4849
+1f4ed6 1f5563 sprite_frame_alt data/sprites/frame_alt_0087.bin  ; alternate-format sprite frame (header scan) -> file offset 1F4ED6
+1f5563 1f5bf0 sprite_frame_alt data/sprites/frame_alt_0088.bin  ; alternate-format sprite frame (header scan) -> file offset 1F5563
+1f5bf0 1f6903 sprite_frame_alt data/sprites/frame_alt_0089.bin  ; alternate-format sprite frame (header scan) -> file offset 1F5BF0
+1f6903 1f6f88 sprite_frame_alt data/sprites/frame_alt_0090.bin  ; alternate-format sprite frame (header scan) -> file offset 1F6903
+1f6f88 1f760d sprite_frame_alt data/sprites/frame_alt_0091.bin  ; alternate-format sprite frame (header scan) -> file offset 1F6F88
+1f760d 1f7c92 sprite_frame_alt data/sprites/frame_alt_0092.bin  ; alternate-format sprite frame (header scan) -> file offset 1F760D
+1f7c92 1f8317 sprite_frame_alt data/sprites/frame_alt_0093.bin  ; alternate-format sprite frame (header scan) -> file offset 1F7C92
+1f8317 1f899c sprite_frame_alt data/sprites/frame_alt_0094.bin  ; alternate-format sprite frame (header scan) -> file offset 1F8317
+1f899c 1f9021 sprite_frame_alt data/sprites/frame_alt_0095.bin  ; alternate-format sprite frame (header scan) -> file offset 1F899C
+1f9021 1f96a5 sprite_frame_alt data/sprites/frame_alt_0096.bin  ; alternate-format sprite frame (header scan) -> file offset 1F9021
+1f96a5 1f9d29 sprite_frame_alt data/sprites/frame_alt_0097.bin  ; alternate-format sprite frame (header scan) -> file offset 1F96A5
+1f9d29 1fa3ad sprite_frame_alt data/sprites/frame_alt_0098.bin  ; alternate-format sprite frame (header scan) -> file offset 1F9D29
+1fa3ad 1faa31 sprite_frame_alt data/sprites/frame_alt_0099.bin  ; alternate-format sprite frame (header scan) -> file offset 1FA3AD
+1faa31 1fb0b5 sprite_frame_alt data/sprites/frame_alt_0100.bin  ; alternate-format sprite frame (header scan) -> file offset 1FAA31
+1fb0b5 1fb739 sprite_frame_alt data/sprites/frame_alt_0101.bin  ; alternate-format sprite frame (header scan) -> file offset 1FB0B5
+1fb739 1fbdbd sprite_frame_alt data/sprites/frame_alt_0102.bin  ; alternate-format sprite frame (header scan) -> file offset 1FB739
+1fbdbd 1fc441 sprite_frame_alt data/sprites/frame_alt_0103.bin  ; alternate-format sprite frame (header scan) -> file offset 1FBDBD
+1fc441 1fcac5 sprite_frame_alt data/sprites/frame_alt_0104.bin  ; alternate-format sprite frame (header scan) -> file offset 1FC441
+1fcac5 1fd149 sprite_frame_alt data/sprites/frame_alt_0105.bin  ; alternate-format sprite frame (header scan) -> file offset 1FCAC5
+1fd149 1fd7cd sprite_frame_alt data/sprites/frame_alt_0106.bin  ; alternate-format sprite frame (header scan) -> file offset 1FD149
+1fd7cd 1fde51 sprite_frame_alt data/sprites/frame_alt_0107.bin  ; alternate-format sprite frame (header scan) -> file offset 1FD7CD
+1fde51 1fe4d5 sprite_frame_alt data/sprites/frame_alt_0108.bin  ; alternate-format sprite frame (header scan) -> file offset 1FDE51
+1fe4d5 1feb59 sprite_frame_alt data/sprites/frame_alt_0109.bin  ; alternate-format sprite frame (header scan) -> file offset 1FE4D5
+1feb59 1ff1dd sprite_frame_alt data/sprites/frame_alt_0110.bin  ; alternate-format sprite frame (header scan) -> file offset 1FEB59
+1ff1dd 1ff861 sprite_frame_alt data/sprites/frame_alt_0111.bin  ; alternate-format sprite frame (header scan) -> file offset 1FF1DD
+1ff861 1ffee5 sprite_frame_alt data/sprites/frame_alt_0112.bin  ; alternate-format sprite frame (header scan) -> file offset 1FF861
+1ffee5 200000 sprite_frame_alt data/sprites/sprite_frame_tail.bin ; tail: partial last alternate-format sprite frame / padding; partial alt-format frame (truncated by end of ROM)

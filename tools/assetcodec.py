@@ -13,9 +13,10 @@ encode(decode(bytes)) == bytes.  tools/roundtrip_check.py enforces that over the
 manifest and maintains config/roundtrip.txt.
 
 Supported kinds: palette, tileset_2bpp, tileset_4bpp, tileset_8bpp, tilemap, metatiles,
-map, hdma, anim_script, anim_table, sprite_table, entity_table, sprite_frame, brr, song,
-sfx_bank, spc_table.  code/stale/filler/unknown are deliberately not decoded (they are
-either program text handled by src/ and spc/, or bytes with no recovered structure).
+map, hdma, anim_script, anim_table, sprite_table, entity_table, sprite_frame,
+sprite_frame_alt, brr, song, sfx_bank, spc_table.  code/stale/filler/unknown are
+deliberately not decoded (they are either program text handled by src/ and spc/, or bytes
+with no recovered structure).
 
 Only the python3 standard library is used (zlib for PNG, struct, json, wave).
 Nothing this file produces is committed; build/ is gitignored like data/.
@@ -48,6 +49,7 @@ PRIMARY_EXT = {
     'sprite_table': '.json',
     'entity_table': '.json',
     'sprite_frame': '.png',
+    'sprite_frame_alt': '.png',
     'brr': '.wav',
     'song': '.json',
     'sfx_bank': '.json',
@@ -780,6 +782,153 @@ def encode_sprite_frame(kind, primary, outpath):
 
 
 # ======================================================================================
+# sprite_frame_alt  <->  assembled-frame PNG + JSON sidecar
+# ======================================================================================
+#
+# Alternate format (docs/data_formats.md 1b-alt): unreferenced by any live code or table, so
+# there is no traced emitter to follow. Frame boundaries were established structurally by
+# tools/gen_assets.py's parse_sprite_frame_alt_region (a header-scan chain walk: the 8 bytes
+# before a maximal run of >=8 consecutive 3-byte {x,y,attr} records are a frame's header, and
+# the frame runs to the next one's header), which reproduces exactly 82 frames in
+# 1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5 -- 113 total, matching the manual header-scan count.
+# Each config/assets.txt sprite_frame_alt asset is already exactly one such frame (or, for
+# frame_alt_tail, a partial one truncated by the ROM's end), so decode only has to re-run the
+# same record-run scan locally to recover n; it always reproduces the same n the asset was
+# split on, since that scan is a pure function of the frame's own bytes.
+#
+#   header  8 bytes; byte 3 is 0x00 in every frame observed, the rest correlate loosely with
+#           the record/tile counts but not through one clean invertible formula (kept verbatim,
+#           not decoded, so nothing is lost)
+#   records n x 3 bytes {x, y, attr}; attr is a standard SNES OBJ low-attribute byte --
+#           vhoopppN: bit7 v-flip, bit6 h-flip, bits5-4 priority, bits3-1 palette, bit0 tile
+#           index bit 8 -- decomposed losslessly below (the 5 fields cover all 8 bits with no
+#           overlap, so decode+encode round-trips any byte value even though the corpus only
+#           actually uses 0x1E/0x20, i.e. v=h=0 throughout: no observed frame is flipped)
+#   tiles   4bpp, 32 bytes each; the tile *count* is not stored redundantly anywhere useful, so
+#           it is simply "whatever floors evenly out of the bytes left after the header and
+#           records", with 0-31 leftover bytes (rare) kept as a trailer -- same convention as
+#           the live format's undecoded trailer
+#
+# Tile-to-sprite assignment: the live format's known rule (4 tiles/16x16 sprite, `tile += 2`
+# wrapping every 16) does not fit here -- these frames average ~2.4 tiles per record, far
+# short of 4/record -- so each record is instead assigned exactly one 8x8 tile, in sequence
+# (record i -> tile i); any tiles beyond the record count are unclaimed and, as in the live
+# decoder, spilled into the strip below the canvas. This is a rendering guess, unvalidated by
+# any code (nothing reads this format), but it does not affect round-trip exactness: the
+# `tiles` array in the sidecar is authoritative, exactly like decode_sprite_frame.
+
+ALT_ATTR_LO, ALT_ATTR_HI = 0x1C, 0x22
+
+
+def _alt_record_run(data, off, limit=200):
+    n = 0
+    while n < limit:
+        p = off + n * 3
+        if p + 2 >= len(data) or not (ALT_ATTR_LO <= data[p + 2] <= ALT_ATTR_HI):
+            break
+        n += 1
+    return n
+
+
+def _alt_attr_decode(attr):
+    return {'vflip': bool(attr & 0x80), 'hflip': bool(attr & 0x40),
+            'priority': (attr >> 4) & 3, 'palette': (attr >> 1) & 7, 'name_bit': attr & 1}
+
+
+def _alt_attr_encode(a):
+    return ((0x80 if a['vflip'] else 0) | (0x40 if a['hflip'] else 0) |
+            ((a['priority'] & 3) << 4) | ((a['palette'] & 7) << 1) | (a['name_bit'] & 1))
+
+
+def decode_sprite_frame_alt(kind, data, outdir, stem):
+    if len(data) < 8:
+        raise CodecError('short alt frame')
+    header = data[0:8]
+    n = _alt_record_run(data, 8)
+    rec_end = 8 + 3 * n
+    if rec_end > len(data):
+        raise CodecError('alt record run runs past the asset')
+    tile_bytes = len(data) - rec_end
+    ntiles = tile_bytes // 32
+    tile_trailer = data[rec_end + 32 * ntiles:]
+    oam = [(data[8 + 3 * i], data[8 + 3 * i + 1], data[8 + 3 * i + 2]) for i in range(n)]
+    tiles_start = rec_end
+    tiles = [tile_to_pixels(data, tiles_start + 32 * i, 4) for i in range(ntiles)]
+
+    if oam:
+        ox = min(r[0] for r in oam)
+        oy = min(r[1] for r in oam)
+        cw = max(r[0] for r in oam) + 8 - ox
+        chh = max(r[1] for r in oam) + 8 - oy
+    else:
+        ox = oy = cw = chh = 0
+
+    rect = {}
+    canvas = bytearray(cw * chh) if cw and chh else bytearray()
+    claimed = bytearray(cw * chh) if cw and chh else bytearray()
+    for i, (x, y, attr) in enumerate(oam):
+        if i >= ntiles:
+            break
+        px, py = x - ox, y - oy
+        if any(claimed[(py + r) * cw + px + c] for r in range(8) for c in range(8)):
+            continue
+        for r in range(8):
+            o = (py + r) * cw + px
+            claimed[o:o + 8] = b'\x01' * 8
+        _blit(canvas, cw, px, py, tiles[i])
+        rect[i] = (px, py)
+
+    spill = [i for i in range(ntiles) if i not in rect]
+    gap = 1 if (chh and spill) else 0
+    srows = (len(spill) + 15) // 16
+    w = max(cw, 16 * 8 if spill else 0, 8)
+    h = chh + gap + srows * 8
+    out = bytearray(w * h)
+    for y in range(chh):
+        out[y * w:y * w + cw] = canvas[y * cw:(y + 1) * cw]
+    for k, bi in enumerate(spill):
+        px, py = (k % 16) * 8, chh + gap + (k // 16) * 8
+        _blit(out, w, px, py, tiles[bi])
+        rect[bi] = (px, py)
+
+    png = os.path.join(outdir, stem + '.png')
+    write_png_indexed(png, w, h, out, grey_plte(15))
+    js = os.path.join(outdir, stem + '.json')
+    _save_json(js, {
+        'kind': 'sprite_frame_alt', 'format': 'alt',
+        'note': 'PNG = a best-effort assembly (one 8x8 tile per OAM record, in order; unclaimed '
+                'tiles spilled below) of a frame from the alternate sprite format, unreferenced '
+                'by any live code -- see docs/data_formats.md 1b-alt. "tiles" is authoritative '
+                'for round-tripping regardless of the assembly guess.',
+        'header': _hex(header),
+        'canvas': {'origin_x': ox, 'origin_y': oy, 'width': cw, 'height': chh,
+                   'png_width': w, 'png_height': h, 'spill_tiles': len(spill)},
+        'oam': [dict(x=x, y=y, attr=attr, **_alt_attr_decode(attr)) for (x, y, attr) in oam],
+        'tiles': [{'i': i, 'x': rect[i][0], 'y': rect[i][1]} for i in range(ntiles)],
+        'tile_trailer': _hex(tile_trailer),
+    })
+    return png, [png, js]
+
+
+def encode_sprite_frame_alt(kind, primary, outpath):
+    base = primary
+    for ext in ('.png', '.json'):
+        if base.endswith(ext):
+            base = base[:-len(ext)]
+    meta = _load_json(base + '.json')
+    w, h, px = read_png_indexed(base + '.png')
+    out = bytearray(_unhex(meta['header']))
+    for r in meta['oam']:
+        attr = r['attr'] if 'attr' in r else _alt_attr_encode(r)
+        out += bytes((r['x'] & 0xFF, r['y'] & 0xFF, attr & 0xFF))
+    for t in meta['tiles']:
+        out += pixels_to_tile(_grab(px, w, t['x'], t['y']), 4)
+    out += _unhex(meta.get('tile_trailer', ''))
+    with open(outpath, 'wb') as fp:
+        fp.write(out)
+
+
+# ======================================================================================
 # brr  <->  16-bit mono WAV @ 32000 Hz + JSON sidecar
 # ======================================================================================
 
@@ -1206,6 +1355,7 @@ DECODERS = {
     'sprite_table': decode_sprite_table,
     'entity_table': decode_anim_table,
     'sprite_frame': decode_sprite_frame,
+    'sprite_frame_alt': decode_sprite_frame_alt,
     'brr': decode_brr,
     'song': decode_song,
     'sfx_bank': decode_spc_generic,
@@ -1226,6 +1376,7 @@ ENCODERS = {
     'sprite_table': encode_sprite_table,
     'entity_table': encode_anim_table,
     'sprite_frame': encode_sprite_frame,
+    'sprite_frame_alt': encode_sprite_frame_alt,
     'brr': encode_brr,
     'song': encode_spc,
     'sfx_bank': encode_spc,

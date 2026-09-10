@@ -112,13 +112,13 @@ Conventions: `game_mode` 0-3 are the four scenes dispatched through `game_mode_t
 | 0E8714-0E8D14 | 1536 | level map, game_mode 3: 32 columns x 24 rows (48 bytes/column) | high | $7A/$7C = $8714/$CE at $88EF, $82=-1, $86=$2FF | sub_C09FB7 |
 | 0E8D14-1CC066 | 930642 | sprite frames, live format: 1415 frames {8-byte header: n1, n2, tile-offset2, ?, ?, ntiles1, vram-offset2, ntiles2/flags; 2-byte OAM records (x,y); 4bpp tiles = (ntiles1+ntiles2)*32 bytes}; 2-40 byte trailers between frames | high | frame table 040000 entries point here; header/record/tile sizes chain contiguously | sub_C0A538 / sub_C0AE7E DMA |
 | 1CC066-1CC6AA | 1604 | tile-like data between the last table-referenced frame and the alternate-format frames | low | no header parses here | none |
-| 1CC6AA-1F0000 | 145750 | sprite frames in an ALTERNATE format not read by the live code: 8-byte header {8A-8C, xx, 2*n?, 00, xx, xx, 30, 0N} + n x 3-byte OAM records {x, y, attr $1C-$22} + 4bpp tiles (~52 tiles/frame, 1729-byte spans); 82 frames, many identical headers; no duplicates elsewhere | high | header scan (68 strict / 113 relaxed hits at regular 0x6C1/0x6A7/0x684 spacing); render below | none (unreferenced) |
+| 1CC6AA-1F0000 | 145750 | sprite frames in an ALTERNATE format not read by the live code: 8-byte header (byte 3 always 0x00, other bytes not resolved to a formula) + n x 3-byte OAM records {x, y, attr} + 4bpp tiles; frame boundaries recovered by chain-walking maximal runs of >=8 records with attr in 0x1C-0x22 (`tools/gen_assets.py:parse_sprite_frame_alt_region`); 82 frames, many identical headers; no duplicates elsewhere | high | header/record-run chain walk reproduces exactly 82 frames (confirms the older 68-strict/113-relaxed header-scan estimate); each frame is now its own `sprite_frame_alt` asset; render below | none (unreferenced) |
 | 1F0000-1F10C0 | 4288 | stale duplicate of 0A37A0-0A4860 (all 134 game_mode 3 metatiles) | high | 4288-byte exact match at delta -0x14C860 | none |
 | 1F10C0-1F1100 | 64 | 64-byte gap | low |  | none |
 | 1F1100-1F2780 | 5760 | stale duplicate of 09C660-09DCE0 (game_mode 2 metatiles 136-315) | high | 5760-byte exact match at delta -0x154AA0 | none |
 | 1F2780-1F2E14 | 1684 | unreferenced (tile-like, entropy 5.2) | low |  | none |
-| 1F2E14-1FFEE5 | 53457 | sprite frames, alternate format (as 1CC6AA): 31 frames at 0x684 spacing | high | header scan | none |
-| 1FFEE5-200000 | 283 | tail (partial last frame / padding) | low |  | none |
+| 1F2E14-1FFEE5 | 53457 | sprite frames, alternate format (as 1CC6AA): 31 frames, same chain-walk | high | reproduces exactly 31 frames; each is its own `sprite_frame_alt` asset | none |
+| 1FFEE5-200000 | 283 | partial/truncated alt-format frame, cut off by the end of the ROM: same 8-byte-header + records + tiles shape, just short (5 records, 8 whole tiles, a few leftover bytes) | high | decodes cleanly with the same `sprite_frame_alt` codec; not a separate "no structure" region | none |
 
 ### 1a. Level scene data by game_mode (cross-reference)
 
@@ -135,6 +135,57 @@ Mid-level streaming: `sub_C09C62` walks the 8-byte descriptors at `00B208` (`{vr
 ### 1b. Sprite frame format (live)
 
 `sub_C0A538`: frame id (`$07C8,X`, even) indexes `040000` -> `{ptr16, bank, y-bias}`. Frame at `bank:ptr`: header `n1, n2, tileoff2, ?, ?, ntiles1, vramoff2, ntiles2|flags` (8 bytes; frame ids < 4 use a 5-byte header), then `n1+n2` 2-byte `{x, y}` OAM records (tile numbers are sequential: +2 per 16x16 sprite, +$10 at each 16-tile row; size bits from `00A6D3`/`00A6D7`), then `(ntiles1 + ntiles2) * 32` bytes of 4bpp tiles which `sub_C0AE7E` DMAs to VRAM `($0788,X & $1FF) << 4`. 1556 frames parse; 970 abut exactly and the rest are separated by 2-40 byte trailers (e.g. `03 01 01 03 0E 0F 15 1F ...`, look like 8x1-bit masks) that no traced code reads. Frames fill the tails of banks `$C7`, `$C8` and all of `$CA:6360`-`$DC:C066` around the level data.
+
+### 1c. Sprite frame format (alternate)
+
+`1CC6AA-1F0000` and `1F2E14-1FFEE5` hold 82 + 31 = 113 frames in a second, structurally similar
+format that no traced code reads (no table anywhere in the ROM points at it): 8-byte header,
+then `n` x 3-byte `{x, y, attr}` OAM records, then 4bpp tiles. With no frame table and no traced
+emitter to follow, boundaries were recovered purely from the bytes: `attr` only ever takes
+values in a narrow band (0x1C-0x22 cleanly, with 0x1D/0x1F appearing 6 times total out of 2539
+records -- almost certainly tile bytes that coincidentally land in that band right after a real
+run ends), so a maximal run of >= 8 consecutive records with `attr` in that band is a strong,
+essentially unmistakable signal of "real OAM records here." `tools/gen_assets.py`'s
+`parse_sprite_frame_alt_region` chain-walks each region on exactly that signal: the 8 bytes
+before a qualifying run are that frame's header, and the frame runs up to the next qualifying
+run's header (folding in its own tile data and, when the byte count left over is not a multiple
+of 32, a short undecoded trailer -- same convention as the live format's trailer). This
+reproduces exactly 82 + 31 frames, matching the manual header-scan estimate already in section 1
+(68 strict / 113 relaxed hits) with no fudging. A 283-byte partial frame at `1FFEE5-200000` is
+simply this same shape cut off by the end of the ROM (5 records, 8 whole tiles, a few leftover
+bytes) -- not a separate "no structure" region.
+
+Byte 3 of the header is 0x00 in every frame; the remaining bytes correlate loosely with the
+record/tile counts but not through one invertible formula (e.g. two frames with byte-identical
+headers can have different record counts), so the header is carried through as an opaque 8-byte
+blob rather than decoded into named fields -- nothing is lost, since the codec never needs to
+parse it to find the records (their own `attr` band identifies them).
+
+`attr` decodes losslessly as a standard SNES OBJ low-attribute byte, `vhppp p N` bit for bit:
+bit 7 v-flip, bit 6 h-flip, bits 5-4 priority, bits 3-1 palette, bit 0 tile-index bit 8. Across
+all 113 frames the *only* values that appear outside the 6 likely-noise records above are 0x1E
+and 0x20 (2062 + 471 of 2539 records) -- i.e. v-flip and h-flip are 0 in every real record (no
+frame is ever mirrored), while priority and palette do vary (0x1E = priority 1, palette 6; 0x20
+= priority 2, palette 0). There is no dedicated "size" bit in this byte; SNES OBJ size comes from
+a separate high-table bit per pair of sprites, which this format does not carry at all -- see
+below for what the tile counts imply about size instead of the header.
+
+Unlike the live format there is no known VRAM-upload code to say how records map to tiles, so
+the tile-to-sprite assignment used for rendering (`tools/assetcodec.py:decode_sprite_frame_alt`)
+is a documented guess, not a derivation: records average ~2.4 tiles each (e.g. 22 records for 52
+tiles), which rules out the live format's 4-tiles/16x16-sprite rule outright (that needs 4 tiles
+per record minimum, i.e. >=88 for 22 records) and is consistent with 8x8, 1-tile sprites instead,
+so each record claims one tile in sequence and unclaimed tiles spill below the canvas exactly
+like the live decoder's spill strip. Most tiles end up spilling (median 33 of ~50 tiles per
+frame, versus 16% for the live format), so this guess is honestly a weak reconstruction of
+*layout* -- but it does not weaken round-trip exactness (the sidecar's `tiles` array is
+authoritative regardless, exactly as for the live format), and the tile art itself, once
+rendered, is unambiguously more sprite tiles in the same house style as the live frames (see the
+render below): mid-size 4bpp character/creature fragments, same tile size and similar palette
+density, not tilemap or font data. Whether any given alt frame is an earlier or later revision of
+a specific live-format character cannot be established without in-game character names or
+labels, neither of which exist in this disassembly; what can be said is that the two corpora are
+stylistically and structurally the same kind of asset.
 
 ## 2. Sample tile renders (ASCII, 4bpp/8bpp pixel value -> ` .:-=+*#%@ABCDEF`, 2bpp -> ` .:#`)
 
@@ -254,14 +305,16 @@ DKC2/DKC3 disassemblies' `Graphics/GFX_Sprite_<Name>.bin` / `Music_<Name>` extra
 
     <start6hex> <end6hex> <kind> <path>    ; note
 
-`start`/`end` are file offsets (end exclusive), `kind` is one of `sprite_frame`, `sprite_table`,
-`tileset_4bpp`, `tileset_8bpp`, `tileset_2bpp`, `tilemap`, `metatiles`, `map`, `palette`, `hdma`,
-`brr`, `song`, `sfx_bank`, `spc_table`, `anim_script`, `anim_table`, `entity_table`, `code`,
-`stale`, `filler`, `unknown`, and `path` is the file under `data/` that `tools/extract.py`
-writes the asset's bytes to (gitignored, same as the half-bank files; nothing under `data/` is
-ever committed). Coverage is total and non-overlapping: every byte of `000000-200000` belongs to
-exactly one asset. Most regions.txt rows map 1:1 to a single asset; four are subdivided by
-parsing the ROM's own code-driven structures instead of guessing at sub-boundaries:
+`start`/`end` are file offsets (end exclusive), `kind` is one of `sprite_frame`,
+`sprite_frame_alt`, `sprite_table`, `tileset_4bpp`, `tileset_8bpp`, `tileset_2bpp`, `tilemap`,
+`metatiles`, `map`, `palette`, `hdma`, `brr`, `song`, `sfx_bank`, `spc_table`, `anim_script`,
+`anim_table`, `entity_table`, `code`, `stale`, `filler`, `unknown`, and `path` is the file under
+`data/` that `tools/extract.py` writes the asset's bytes to (gitignored, same as the half-bank
+files; nothing under `data/` is ever committed). Coverage is total and non-overlapping: every
+byte of `000000-200000` belongs to exactly one asset. Most regions.txt rows map 1:1 to a single
+asset; five are subdivided by parsing the ROM's own code-driven structures (or, for the two
+alternate-format sprite regions, a header/record-run chain walk) instead of guessing at
+sub-boundaries:
 
 - **Sprite frames** (`sprite_frame_table` at `0x040000`, 1558 x 4-byte `{ptr16, bank, y_bias}`
   records): the table itself becomes one `sprite_table` asset
@@ -274,8 +327,14 @@ parsing the ROM's own code-driven structures instead of guessing at sub-boundari
   the file, folding in the 2-40 byte undecoded trailer bytes documented in 1b. Result: 1555
   `data/sprites/frame_NNNN.bin` assets, globally numbered in file order, with zero overlaps
   and gap sizes matching the documented trailer range exactly. The two alternate-format
-  regions (`1CC6AA-1F0000`, `1F2E14-1FFEE5`) are not code-referenced by any table, so they stay
-  single assets (`sprite_frame`) per the "no finer structure" rule.
+  regions (`1CC6AA-1F0000`, `1F2E14-1FFEE5`) are not code-referenced by any table -- there is no
+  table at all -- so their boundaries instead come from `parse_sprite_frame_alt_region`'s
+  header/record-run chain walk (section 1c): 82 + 31 = 113 `data/sprites/frame_alt_NNNN.bin`
+  assets of kind `sprite_frame_alt`, plus the 283-byte partial trailing frame which keeps its
+  existing `sprite_frame_tail.bin` path (there is nothing to split it into). Splitting these
+  regions changes the file each byte lands in, so `make regen` re-slices the handful of
+  `bank_DC`-`bank_DF.asm` incbins that used to reference the old whole-region blobs onto the new
+  per-frame files; `make check` still reassembles a byte-identical ROM.
 - **Animation scripts** (`anim_script_index` at `0x041858`, 174 words): kept as one `anim_table`
   asset (`data/anim/script_index.bin`); its 174 entries resolve to 96 distinct script offsets,
   one of which (`$1850`, "the empty script" in `docs/handler_tables.md`) aliases the same two
@@ -354,6 +413,7 @@ as matched. Nothing here is committed -- `build/` is gitignored like `data/` (do
 | `anim_table` | `.json` list of script offsets | - | |
 | `sprite_table` | `.json` records `{ptr, bank, y_bias}` | - | frame id = 2 x record index |
 | `sprite_frame` | `.png` of the assembled frame | `.json` header + OAM list + tile rects | see below |
+| `sprite_frame_alt` | `.png` of the assembled frame | `.json` header + OAM list (with decoded attr bits) + tile rects | see below |
 | `brr` | `.wav`, 16-bit mono, 32000 Hz | `.json` `{loop_offset, length, per-block shift/filter/loop/end, pad, trailing}` | see below |
 | `song` / `sfx_bank` / `spc_table` | `.json` | - | see below |
 
@@ -379,10 +439,35 @@ no spill at all. Editing a tile that the canvas draws twice only takes effect at
 
 Caveats worth knowing: frame ids `< 4` are emitted by `oam_emit_frame_1row` with a 5-byte header,
 so for those one or two frames the OAM list in the sidecar is shifted (the bytes still round-trip,
-since the extra header bytes simply parse as OAM records). The two alternate-format regions
-(`1CC6AA-1F0000`, `1F2E14-1FFEE5`) and the ROM tail are **kept raw**: their header semantics are
-not established, so the decoder writes a `.raw.bin` alongside a `.json` that names it, rather than
-inventing a structure. That is flagged by `format: "raw"` in the sidecar.
+since the extra header bytes simply parse as OAM records).
+
+### Alternate sprite frames
+
+`sprite_frame_alt` (section 1c) covers the two alternate-format regions plus their trailing
+partial frame, now split one-frame-per-asset. `decode_sprite_frame_alt` re-runs the same
+attr-in-0x1C-0x22 record-run scan used to find the frame's own boundary (a pure function of the
+frame's own bytes, so it always reproduces the same record count `n` the asset was split on),
+giving header (8 bytes, kept as an opaque hex blob -- see 1c for why), `n` OAM records, and
+whatever whole 32-byte tiles are left (plus a 0-31 byte `tile_trailer` when that does not divide
+evenly). Each OAM record's `attr` byte is decoded losslessly into `vflip`/`hflip`/`priority`/
+`palette`/`name_bit` (the 5 fields partition all 8 bits, so `encode` reconstructs `attr` from
+them, or from a raw `attr` field if present, with no loss for any byte value).
+
+The PNG assembles one 8x8 tile per OAM record, in record order, at that record's `(x, y)`; the
+canvas crop and spill strip work exactly like the live decoder (first tile to claim a pixel keeps
+it, everything else spills 16-wide below). This tile-per-record assignment is a **documented
+guess**, not a derivation -- no live code drives this format, so there is no emitter to confirm
+it against, and the live format's own 4-tiles/16x16-sprite rule cannot apply here (it would need
+>=4 tiles per record; these frames average ~2.4). It also does not assemble as cleanly as the
+live format: a median of 33 of ~50 tiles spill per frame, versus 16% for the live format. None of
+that affects round-trip exactness -- the sidecar's `tiles` array is authoritative regardless of
+how the canvas assembles, exactly as for `sprite_frame` -- but the assembled PNG should be read
+as "these are more 4bpp sprite tiles, laid out somewhere in this frame" rather than a confirmed
+picture of the frame as the game would have drawn it.
+
+The 283-byte partial frame at `1FFEE5-200000` decodes the same way (5 records, 8 whole tiles, a
+handful of leftover bytes go to `tile_trailer`); nothing in the manifest is left as `format:
+"raw"` any more.
 
 ### BRR samples
 
@@ -423,19 +508,21 @@ already count as matched in `tools/progress.py` for exactly that reason. `entity
 
 ### Current status
 
-`python3 tools/roundtrip_check.py --update` passes **1774 / 1774** assets across all **16**
-codec-carrying kinds, so all 16 are in `config/roundtrip.txt`: `anim_script`, `anim_table`, `brr`,
+`python3 tools/roundtrip_check.py --update` passes **1885 / 1885** assets across all **17**
+codec-carrying kinds, so all 17 are in `config/roundtrip.txt`: `anim_script`, `anim_table`, `brr`,
 `hdma`, `map`, `metatiles`, `palette`, `sfx_bank`, `song`, `spc_table`, `sprite_frame`,
-`sprite_table`, `tilemap`, `tileset_2bpp`, `tileset_4bpp`, `tileset_8bpp`. That is 1833792 bytes,
-87.4% of the 2 MiB image, now reachable as editable files (3403 files, 10070823 bytes under
-`build/assets/`).
+`sprite_frame_alt`, `sprite_table`, `tilemap`, `tileset_2bpp`, `tileset_4bpp`, `tileset_8bpp`.
+That is 1833792 bytes, 87.4% of the 2 MiB image (unchanged from before -- the alternate-format
+bytes were already counted as matched, just via the `format: "raw"` escape hatch), now reachable
+as editable files (3625 files, 10808425 bytes under `build/assets/`). No asset decodes to
+`format: "raw"` any more: every codec-carrying kind has real recovered structure.
 
 ## 4. Summary by content type
 
 | type | bytes | % of ROM |
 |---|---:|---:|
 | sprite frames, live format (4bpp tiles + OAM records) | 1176456 | 56.1% |
-| sprite frames, alternate format (unreferenced) | 199207 | 9.5% |
+| sprite frames, alternate format (unreferenced) | 199490 | 9.5% |
 | 4bpp tiles (BG/OBJ, code-referenced) | 179744 | 8.6% |
 | stale duplicate copies of other regions | 172063 | 8.2% |
 | BRR samples | 73934 | 3.5% |

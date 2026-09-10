@@ -276,4 +276,10 @@ org $DC0000
     incbin "../data/sprites/frame_1553.bin"                        ; 42 bytes (whole asset)
     incbin "../data/sprites/frame_1554.bin"                        ; 42 bytes (whole asset)
     incbin "../data/gfx/tiles_between_frames.bin"                        ; 1604 bytes (whole asset)
-    incbin "../data/sprites/sprite_frames_alt_dc.bin":$0000..$3956        ; 14678 bytes
+    incbin "../data/sprites/frame_alt_0000.bin"                        ; 1738 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0001.bin"                        ; 1738 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0002.bin"                        ; 1738 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0003.bin"                        ; 3476 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0004.bin"                        ; 1730 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0005.bin"                        ; 1730 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0006.bin"                        ; 2528 bytes (whole asset)

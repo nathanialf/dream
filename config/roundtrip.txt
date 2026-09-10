@@ -17,12 +17,9 @@ sfx_bank
 song
 spc_table
 sprite_frame
+sprite_frame_alt
 sprite_table
 tilemap
 tileset_2bpp
 tileset_4bpp
 tileset_8bpp
-; assets whose editable form is a raw byte dump: exact, but not counted as round-tripping
-raw data/sprites/sprite_frames_alt_dc.bin
-raw data/sprites/sprite_frames_alt_ef.bin
-raw data/sprites/sprite_frame_tail.bin

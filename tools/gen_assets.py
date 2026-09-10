@@ -20,9 +20,9 @@ import re, sys, os
 ROM_SIZE = 0x200000
 
 KINDS = {
-    'sprite_frame', 'sprite_table', 'tileset_4bpp', 'tileset_8bpp', 'tileset_2bpp', 'tilemap',
-    'metatiles', 'map', 'palette', 'hdma', 'brr', 'song', 'sfx_bank', 'spc_table', 'anim_script',
-    'anim_table', 'entity_table', 'code', 'stale', 'filler', 'unknown',
+    'sprite_frame', 'sprite_frame_alt', 'sprite_table', 'tileset_4bpp', 'tileset_8bpp',
+    'tileset_2bpp', 'tilemap', 'metatiles', 'map', 'palette', 'hdma', 'brr', 'song', 'sfx_bank',
+    'spc_table', 'anim_script', 'anim_table', 'entity_table', 'code', 'stale', 'filler', 'unknown',
 }
 
 LINE_RE = re.compile(
@@ -68,6 +68,49 @@ def parse_sprite_frame_table(rom, start, end):
         fo = ((bank & 0x3F) << 16) | ptr
         addrs.append((i, fo))
     return addrs
+
+
+ALT_ATTR_LO, ALT_ATTR_HI = 0x1C, 0x22  # observed range of the alt-format {x,y,attr} 3rd byte
+
+
+def _alt_record_run(rom, f, limit=200):
+    """Count consecutive 3-byte {x,y,attr} records starting at f, attr in [ALT_ATTR_LO,HI]."""
+    n = 0
+    while n < limit:
+        p = f + n * 3
+        if not (ALT_ATTR_LO <= rom[p + 2] <= ALT_ATTR_HI):
+            break
+        n += 1
+    return n
+
+
+def parse_sprite_frame_alt_region(rom, start, end, thresh=8):
+    """Chain-walk one alternate-format sprite-frame region (docs/data_formats.md 1b, alt
+    format): unlike the live format there is no frame table pointing into these bytes, so
+    frame boundaries are found by scanning for maximal runs (>=thresh records) of 3-byte
+    {x, y, attr} OAM records with attr in 0x1C-0x22; the 8 bytes immediately before a run's
+    first record are that frame's header, and each frame runs up to the next one's header
+    (folding in its own 4bpp tile data plus any short undecoded trailer -- same convention as
+    the live format's trailer). Returns a sorted list of (start, end) frame spans covering
+    [start, end) exactly. Validated against baserom/DREAM.sfc: reproduces exactly 82 frames in
+    1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5, matching the header-scan count in the docs."""
+    anchors = []
+    f = start
+    while f < end - 3:
+        if ALT_ATTR_LO <= rom[f + 2] <= ALT_ATTR_HI:
+            n = _alt_record_run(rom, f, limit=200)
+            if n >= thresh:
+                anchors.append(f - 8)
+                f += n * 3
+                continue
+        f += 1
+    assert anchors and anchors[0] == start, \
+        f'alt sprite-frame chain must start exactly at {start:06X} (first anchor {anchors[0] if anchors else None})'
+    frames = []
+    for i, a in enumerate(anchors):
+        nxt = anchors[i + 1] if i + 1 < len(anchors) else end
+        frames.append((a, nxt))
+    return frames
 
 
 def sprite_frame_len(rom, fo):
@@ -193,6 +236,12 @@ SPRITE_REGION_SLUGS = {
     'sprite_frames_ce',
 }
 
+# The two alternate-format sprite-frame mega-regions (unreferenced by any table): split by
+# parse_sprite_frame_alt_region's header-scan chain walk into one asset per detected frame,
+# using a path prefix distinct from the live-format frame_NNNN.bin series above so that the
+# 1555 already-established live-frame paths (and their numbering) are left untouched.
+SPRITE_ALT_REGION_SLUGS = {'sprite_frames_alt_dc', 'sprite_frames_alt_ef'}
+
 
 def build_assets(rom, rows):
     assets = []  # (start, end, kind, path, note)
@@ -203,7 +252,24 @@ def build_assets(rom, rows):
     song_starts = None
 
     frame_counter = 0
+    alt_frame_counter = 0
     for (start, end, cls, slug, note) in rows:
+        if slug in SPRITE_ALT_REGION_SLUGS:
+            region_frames = parse_sprite_frame_alt_region(rom, start, end)
+            for (a, b) in region_frames:
+                assets.append((a, b, 'sprite_frame_alt',
+                                f'data/sprites/frame_alt_{alt_frame_counter:04d}.bin',
+                                f'alternate-format sprite frame (header scan) -> file offset {a:06X}'))
+                alt_frame_counter += 1
+            continue
+        if slug == 'sprite_frame_tail':
+            # 283-byte partial/truncated alt-format frame at the ROM's very end (header +
+            # a handful of OAM records + a partial tile blob, cut off by the 0x200000 edge);
+            # genuinely partial, but it is the *same* structure, so it gets the same kind and
+            # keeps its existing path (nothing to split it into).
+            assets.append((start, end, 'sprite_frame_alt', f'data/sprites/{slug}.bin',
+                            note + '; partial alt-format frame (truncated by end of ROM)'))
+            continue
         if slug == 'sprite_frame_table':
             assets.append((start, end, 'sprite_table', 'data/sprites/frame_table.bin',
                             note + '; 1558 x 4-byte {ptr16,bank,y_bias} records'))

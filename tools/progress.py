@@ -50,7 +50,7 @@ CODE_KIND = {'code', 'sound_iface', 'spc700'}
 RECOMP = ROOT / 'config' / 'recomp.txt'
 ASSETS = ROOT / 'config' / 'assets.txt'
 ROUNDTRIP = ROOT / 'config' / 'roundtrip.txt'
-KIND_CLASS = {'sprite_frame': 'sprites', 'sprite_table': 'sprites', 'tileset_4bpp': 'tiles', 'tileset_8bpp': 'tiles',
+KIND_CLASS = {'sprite_frame': 'sprites', 'sprite_frame_alt': 'sprites', 'sprite_table': 'sprites', 'tileset_4bpp': 'tiles', 'tileset_8bpp': 'tiles',
               'tileset_2bpp': 'tiles', 'tilemap': 'maps', 'metatiles': 'maps', 'map': 'maps', 'hdma': 'maps',
               'palette': 'palettes', 'brr': 'brr', 'song': 'music', 'sfx_bank': 'music', 'spc_table': 'music',
               'anim_script': 'anim', 'anim_table': 'anim', 'stale': 'stale', 'filler': 'filler', 'unknown': 'unknown'}
