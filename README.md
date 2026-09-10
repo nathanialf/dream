@@ -16,8 +16,9 @@ the sources here plus data extracted from your own copy of the ROM.
 
 The end goal is a **recomp**: a C reimplementation of the game that runs natively and
 is verified by executing it in lockstep with the original ROM in an emulator, comparing
-WRAM, VRAM and OAM every frame under scripted input (the approach that produced native
-ports of other SNES titles). There was no compiler in 1995, so byte-matching C is not a
+WRAM, VRAM, CGRAM, OAM, ARAM, the DSP and the SPC700 registers every frame under scripted
+input (the approach that produced native ports of other SNES titles). That target is
+reached for everything the game executes; see the table below for what is left. There was no compiler in 1995, so byte-matching C is not a
 meaningful goal on this platform; a byte-identical *disassembly* is the foundation, and
 behaviour-matching C is the target.
 

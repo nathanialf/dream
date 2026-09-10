@@ -683,6 +683,11 @@ int main(int argc, char** argv) {
   m.sps.spc = m.snes->apu->spc;
   m.snes->apu->spc->hook = app_spc_hook;
   m.snes->apu->spc->hookCtx = &m;
+  /* The game is the C bodies: neither emulated CPU fetches an instruction. The
+   * scheduler in the harness sources resolves every pc through the tables above
+   * (recomp/README.md, "Running without the CPUs"). */
+  ss_nocpu_enable(&m.ss, true);
+  sps_nocpu_enable(&m.sps, true);
 
   SDL_Gamepad* pad = NULL;
   SDL_Gamepad* pad2 = NULL;
@@ -825,7 +830,7 @@ int main(int argc, char** argv) {
       }
       machine_set_input(&m, state, state2);
 
-      snes_runFrame(m.snes);
+      ss_nocpu_run_frame(&m.ss);
 
       /* Nudge the sample count by ~1% when the queue drifts a frame off its
        * target: dsp_getSamples() resamples to whatever is asked for, so this costs
