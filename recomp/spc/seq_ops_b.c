@@ -196,19 +196,27 @@ static void seq_set_note_E0(SpcState* sp) {
 /* ---------------------------------------------------------------------------
  * seq_set_note_E1 — $0E97   seq cmd $1D: the note event $E1 plays
  * ------------------------------------------------------------------------- */
-static void seq_set_note_E1(SpcState* sp) {
+/* Entered in its middle as well: loc_0E9E. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_set_note_E1_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0E9E) goto loc_0E9E;
 
   S(0x0E97, 1); x = s_pop(sp);                           /* 0E97 pop x */
   S(0x0E98, 2); y = 0x01; sps_set_zn(sp, y);             /* 0E98 mov y,#$01 */
   S(0x0E9A, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));  /* 0E9A mov a,($00)+y */
   S(0x0E9C, 2); s_movs(sp, s_adr_dpx(sp, 0x14, x), a);   /* 0E9C mov $14+x,a */
+loc_0E9E:
   S(0x0E9E, 3);                                          /* 0E9E call seq_retrigger */
   if(call_sub(sp, 0x0EA1, SEQ_RETRIGGER)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
   S(0x0EA1, 3);                                          /* 0EA1 jmp loc_0B78 */
   S_GOTO(LOC_0B78);
 }
+
+static void seq_set_note_E1(SpcState* sp) { seq_set_note_E1_at(sp, 0x0E97); }
+static void loc_0E9E(SpcState* sp) { seq_set_note_E1_at(sp, 0x0E9E); }
 
 /* ---------------------------------------------------------------------------
  * seq_finetune — $0EA4   seq cmd $12: finetune[x], signed 1/256-semitone steps
@@ -297,8 +305,12 @@ static void seq_echo_setup(SpcState* sp) {
  * loc_0F09, the one-byte tail four other handlers jump to, is the last two
  * instructions of this routine.
  * ------------------------------------------------------------------------- */
-static void seq_echo_on(SpcState* sp) {
+/* Entered in its middle as well: loc_0F09. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_echo_on_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0F09) goto loc_0F09;
 
   if(call_seq_pop_x(sp, 0x0EF7, &a, &x, &y)) return;       /* 0EF7 call seq_pop_x */
   S(0x0EFA, 3); s_movs(sp, sps_dp(sp, SPS_DSPADDR), 0x4D); /* 0EFA !DSPADDR = EON */
@@ -310,10 +322,14 @@ static void seq_echo_on(SpcState* sp) {
   S(0x0F04, 2); a = 0x01; sps_set_zn(sp, a);               /* 0F04 mov a,#$01 */
   S(0x0F06, 3); s_idx(sp);                                 /* 0F06 mov $0294+x,a */
   s_movs(sp, (uint16_t) (0x0294 + x), a);
+loc_0F09:
   S(0x0F09, 3); s_movs(sp, sps_dp(sp, 0x00), 0x01);        /* 0F09 mov $00,#$01 */
   S(0x0F0C, 3);                                            /* 0F0C jmp loc_0B7B */
   S_GOTO(LOC_0B7B);
 }
+
+static void seq_echo_on(SpcState* sp) { seq_echo_on_at(sp, 0x0EF7); }
+static void loc_0F09(SpcState* sp) { seq_echo_on_at(sp, 0x0F09); }
 
 /* ---------------------------------------------------------------------------
  * seq_echo_off — $0F0F   seq cmd $17 (and the stale entries $30 and $32)
@@ -399,8 +415,12 @@ static void seq_noise_clock(SpcState* sp) {
  *
  * loc_0F61, its two-instruction tail, is where seq_noise_off comes back in.
  * ------------------------------------------------------------------------- */
-static void seq_noise_on(SpcState* sp) {
+/* Entered in its middle as well: loc_0F61. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_noise_on_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0F61) goto loc_0F61;
 
   S(0x0F56, 1); x = s_pop(sp);                             /* 0F56 pop x */
   S(0x0F57, 3); s_movs(sp, sps_dp(sp, SPS_DSPADDR), 0x3D); /* 0F57 !DSPADDR = NON */
@@ -409,12 +429,16 @@ static void seq_noise_on(SpcState* sp) {
   S(0x0F5D, 2);                                            /* 0F5D or a,!DSPDATA */
   a = s_or(sp, a, s_read(sp, sps_dp(sp, SPS_DSPDATA)));
   S(0x0F5F, 2); s_movs(sp, sps_dp(sp, SPS_DSPDATA), a);    /* 0F5F !DSPDATA = a */
+loc_0F61:
   S(0x0F61, 3);                                            /* 0F61 call seq_retrigger */
   if(call_sub(sp, 0x0F64, SEQ_RETRIGGER)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
   S(0x0F64, 3);                                            /* 0F64 jmp loc_0F09 */
   S_GOTO(LOC_0F09);
 }
+
+static void seq_noise_on(SpcState* sp) { seq_noise_on_at(sp, 0x0F56); }
+static void loc_0F61(SpcState* sp) { seq_noise_on_at(sp, 0x0F61); }
 
 /* ---------------------------------------------------------------------------
  * seq_noise_off — $0F67   seq cmd $1B
@@ -459,12 +483,17 @@ static void orphan_slide_up2(SpcState* sp) {
  *
  * Falls through into seq_advance5.
  * ------------------------------------------------------------------------- */
-static void orphan_slide_down2(SpcState* sp) {
+/* Entered in its middle as well: loc_0F86. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void orphan_slide_down2_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0F86) goto loc_0F86;
 
   S(0x0F81, 1); x = s_pop(sp);                             /* 0F81 pop x */
   S(0x0F82, 2); y = 0x04; sps_set_zn(sp, y);               /* 0F82 mov y,#$04 */
   S(0x0F84, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));    /* 0F84 mov a,($00)+y */
+loc_0F86:
   S(0x0F86, 3); s_idx(sp);                                 /* 0F86 mov $01B0+x,a */
   s_movs(sp, (uint16_t) (0x01B0 + x), a);
   S(0x0F89, 3); s_idx(sp);                                 /* 0F89 mov a,$0150+x */
@@ -491,6 +520,9 @@ static void orphan_slide_down2(SpcState* sp) {
   s_movs(sp, (uint16_t) (0x0180 + x), a);
   S_GOTO(SEQ_ADVANCE5);                                    /* falls into seq_advance5 */
 }
+
+static void orphan_slide_down2(SpcState* sp) { orphan_slide_down2_at(sp, 0x0F81); }
+static void loc_0F86(SpcState* sp) { orphan_slide_down2_at(sp, 0x0F86); }
 
 /* ---------------------------------------------------------------------------
  * seq_advance5 — $0FA9   the five-byte tail
@@ -544,18 +576,22 @@ static const SpcRecompEntry kSeqOpsB[] = {
   { 0x0e5a, "seq_master_volume",   seq_master_volume },
   { 0x0e8d, "seq_set_note_E0",     seq_set_note_E0 },
   { 0x0e97, "seq_set_note_E1",     seq_set_note_E1 },
+  { 0x0e9e, "loc_0E9E",           loc_0E9E },
   { 0x0ea4, "seq_finetune",        seq_finetune },
   { 0x0eae, "seq_transpose",       seq_transpose },
   { 0x0ebb, "seq_transpose_add",   seq_transpose_add },
   { 0x0eca, "seq_echo_setup",      seq_echo_setup },
   { 0x0ef7, "seq_echo_on",         seq_echo_on },
+  { 0x0f09, "loc_0F09",           loc_0F09 },
   { 0x0f0f, "seq_echo_off",        seq_echo_off },
   { 0x0f29, "seq_fir",             seq_fir },
   { 0x0f43, "seq_noise_clock",     seq_noise_clock },
   { 0x0f56, "seq_noise_on",        seq_noise_on },
+  { 0x0f61, "loc_0F61",           loc_0F61 },
   { 0x0f67, "seq_noise_off",       seq_noise_off },
   { 0x0f77, "orphan_slide_up2",    orphan_slide_up2 },
   { 0x0f81, "orphan_slide_down2",  orphan_slide_down2 },
+  { 0x0f86, "loc_0F86",           loc_0F86 },
   { 0x0fa9, "seq_advance5",        seq_advance5 },
   { 0x0faf, "orphan_gate_on",      orphan_gate_on },
   { 0x0fb9, "orphan_gate_off",     orphan_gate_off },

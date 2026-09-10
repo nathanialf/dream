@@ -10,7 +10,7 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-profile app sdl3
+.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-check-nocpu recomp-profile app sdl3
 
 all: check
 
@@ -80,6 +80,13 @@ build/sdl3/lib/cmake/SDL3/SDL3Config.cmake:
 # script mismatches; reports the per-routine hook call counts either way.
 recomp-check: harness
 	python3 tools/recomp_verify.py
+
+# The same gate with the candidate machine executing no instructions at all: the
+# C bodies are the program and the registry resolves every pc hand-off. A pc with
+# no body stops the run, so a pass is also the port's dead-code check.
+# See recomp/README.md, "Running without the CPUs".
+recomp-check-nocpu: harness
+	python3 tools/recomp_verify.py --no-cpu
 
 # Re-measure config/recomp_cycles.txt (the per-routine cycle charge). Only needed
 # when a routine is added that does not model its own timing; see recomp/README.md.

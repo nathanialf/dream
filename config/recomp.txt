@@ -57,6 +57,7 @@ entity_spawn_transform_c
 entity_update_tick
 entity_upload_pending_tiles
 execute_spc_sound_engine
+loc_C08001
 loc_C08012
 loc_C08042
 loc_C0805E
@@ -65,8 +66,13 @@ loc_C08BE4
 loc_C08E2B
 loc_C08E39
 loc_C08E7F
+loc_C09679
+loc_C097DD
 loc_C0A4E9
 loc_C0A4F5
+loc_C0A4FD
+loc_C0A6CD
+loc_C0BB81
 mode0_camera_zone_update
 mode0_level_init
 mode0_particle_draw_dispatch
@@ -143,6 +149,15 @@ dsp_init
 loader_block_loop
 loader_jump
 loader_reset_dsp
+loc_078E
+loc_0B78
+loc_0B7B
+loc_0BBC
+loc_0CF1
+loc_0CF4
+loc_0D6A
+loc_0DDF
+loc_0F09
 main_loop
 orphan_gate_off
 orphan_gate_on
@@ -194,6 +209,7 @@ tick_wait
 ;   anim_rate_3_32
 ;   anim_rate_3_8
 ;   entity_clear_anim_unused
+;   loc_C0A4FE
 ;   oam_emit_frame_1row
 ;   oam_emit_frame_1row_flip
 ;   unused_vec
@@ -207,6 +223,10 @@ tick_wait
 ;   cmd4_pitch_offset
 ;   cmd5_voice5_volume
 ;   dsp_step_toward_zero
+;   loc_0DF2
+;   loc_0E9E
+;   loc_0F61
+;   loc_0F86
 ;   orphan_slide_down2
 ;   orphan_slide_up2
 ;   orphan_volume_preset2

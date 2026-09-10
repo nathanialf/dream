@@ -15,7 +15,18 @@ registers, so one pass proves both.
 
     python3 tools/recomp_verify.py                    # report only, exit 1 on failure
     python3 tools/recomp_verify.py --spc-hooks off    # the 65816 side alone
+    python3 tools/recomp_verify.py --no-cpu           # candidate = the no-cpu machine
     python3 tools/recomp_verify.py --update           # also rewrite config/recomp.txt
+
+`--no-cpu` runs every script with the candidate machine executing no instructions
+at all on either processor: the C bodies are the program and the scheduler in
+recomp/harness/snes_state.c resolves every pc hand-off through the registry (see
+"Running without the CPUs" in recomp/README.md). A pc with no body is a fatal
+error naming the pc and the body that handed it over, so a pass is also the
+port's dead-code check. The instruction count each script executed is printed
+next to its result. It cannot `--update`: the call counts it reports are the
+scheduler's dispatches, which are fewer than the ordinary run's wherever the ROM
+used to re-enter a routine after a yield.
 
 `--update` writes config/recomp.txt (which tools/progress.py credits to the
 `recomp` badge) with the routines that were both called and passing, from both
@@ -63,7 +74,11 @@ def run_script(path: Path, frames: int, extra: list[str],
     calls: dict[str, int] = {}
     spc_calls: dict[str, int] = {}
     detail = ''
+    nocpu = ''
     for line in proc.stdout.splitlines():
+        if line.startswith('no-cpu: ') and 'instructions executed' in line:
+            nocpu = line.strip()
+            continue
         m = HOOK_LINE.match(line.strip())
         if m:
             calls[m.group(2)] = int(m.group(3))
@@ -73,9 +88,9 @@ def run_script(path: Path, frames: int, extra: list[str],
             spc_calls[m.group(2)] = int(m.group(3))
         elif line.startswith('MISMATCH'):
             detail = line.strip()
-    if proc.returncode == 2:
+    if proc.returncode != 0:
         detail = detail or (proc.stderr.strip() or 'harness error')
-    return proc.returncode == 0, calls, spc_calls, detail
+    return proc.returncode == 0, calls, spc_calls, detail or nocpu
 
 
 def main() -> int:
@@ -89,11 +104,25 @@ def main() -> int:
                     help='pass through to the harness: install only these routines')
     ap.add_argument('--spc-hooks', choices=('on', 'off'), default='on',
                     help='install the SPC700 routines too (default on)')
+    ap.add_argument('--no-cpu', action='store_true',
+                    help='run the candidate with neither CPU core executing an '
+                         'instruction (the C bodies are the program)')
     args = ap.parse_args()
 
     if args.update and args.spc_hooks == 'off':
         print('recomp_verify: --update needs --spc-hooks on, or the SPC routines '
               'would be written out as unverified', file=sys.stderr)
+        return 2
+
+    if args.update and args.no_cpu:
+        print('recomp_verify: --update writes config/recomp.txt from the ordinary '
+              'run, not the --no-cpu one, whose call counts are the scheduler\'s '
+              'dispatches', file=sys.stderr)
+        return 2
+
+    if args.no_cpu and args.only:
+        print('recomp_verify: --no-cpu needs the whole table, so not --only',
+              file=sys.stderr)
         return 2
 
     if not HARNESS.exists():
@@ -106,6 +135,8 @@ def main() -> int:
         return 2
 
     extra = ['--only', args.only] if args.only else []
+    if args.no_cpu:
+        extra += ['--no-cpu']
     # one table per processor: 65816 routines from recomp/src, SPC700 routines
     # from recomp/spc. They are gated identically and in the same run.
     totals: dict[str, dict[str, int]] = {'65816': {}, 'spc700': {}}

@@ -61,6 +61,9 @@ void cpu_free(Cpu* cpu);
 void cpu_reset(Cpu* cpu, bool hard);
 void cpu_handleState(Cpu* cpu, StateHandler* sh);
 void cpu_runOpcode(Cpu* cpu);
+// dream: the non-instruction half of cpu_runOpcode (reset, stp/wai, interrupt
+// entry). True when it ran one of them; false when an instruction would follow.
+bool cpu_runNonInstruction(Cpu* cpu);
 void cpu_nmi(Cpu* cpu);
 void cpu_setIrq(Cpu* cpu, bool state);
 // dream: latch pending interrupts the way the last cycle of an instruction does,

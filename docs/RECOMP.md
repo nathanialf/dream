@@ -73,6 +73,8 @@ installed and one without, compared byte for byte after every frame.
     make harness
     ./build/recomp/dream_harness --lockstep --hooks on --frames 600 \
         --input recomp/harness/inputs/title_start_right.txt
+    ./build/recomp/dream_harness --lockstep --no-cpu --frames 600 \
+        --input recomp/harness/inputs/title_start_right.txt
 
 Build, CLI, the hook API (`recomp/include/snes_state.h`) and the lockstep protocol
 are documented in `recomp/README.md`.
@@ -121,6 +123,33 @@ A hook is atomic where the routine it replaces is not, so every loop offers the
 ROM the chance to take the rest of the routine back (`ss_yield_wanted`) at the top
 of each iteration. That is what keeps a several-thousand-cycle routine honest when
 the frame boundary or an interrupt lands inside it.
+
+## Running without the CPUs
+
+The end state of the port is that the C *is* the program, and `--no-cpu` is that
+state made runnable and checkable. In it neither emulated processor executes an
+instruction: a scheduler starts at the reset body and follows every pc the machine
+hands over — a tail `jmp`, a return, a callee frame, interrupt entry, the
+resumption of a routine that stopped at a frame boundary — by looking up the body
+that owns the address in the registry. The PPU, DMA and HDMA, the DSP, the APU
+timers and the port handshake keep running out of the vendored core, driven by the
+cycles the bodies already charge, so the frame timing is identical rather than
+close: every gate script passes `--lockstep` against full emulation at +0 master
+cycles and +0 APU cycles with 0 instructions executed.
+
+Two consequences shape it. A pc with no body is a fatal error naming the pc and the
+body that handed it over, which makes the mode the port's dead-code check: it cannot
+run at all until every address the program reaches has a body, and where the program
+jumps into the middle of a routine that address needs a registry row and a body that
+can start there. And a body cannot be handed back to the ROM half-finished, because
+there is no ROM: a dispatched body chain runs on a stack of its own and a yield
+suspends that stack instead of unwinding it, so the scheduler stops exactly where
+the reference CPU stops and resumes the routine from inside the yield.
+
+`recomp/README.md` ("Running without the CPUs") documents the scheduler, the
+interrupt rules, the SPC700 side and the one exception — the SPC700's IPL boot ROM,
+the console's firmware rather than this ROM's program, which has no body and still
+executes on the core at power-on.
 
 ## The sound driver
 

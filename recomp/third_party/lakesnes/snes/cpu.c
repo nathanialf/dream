@@ -83,7 +83,13 @@ void cpu_handleState(Cpu* cpu, StateHandler* sh) {
   sh_handleWords(sh, &cpu->a, &cpu->x, &cpu->y, &cpu->sp, &cpu->pc, &cpu->dp, NULL);
 }
 
-void cpu_runOpcode(Cpu* cpu) {
+// dream: everything cpu_runOpcode does that is not an instruction -- the reset
+// sequence, the stp/wai park, and interrupt entry. Returns true when it did one
+// of them, false when the cpu is standing at an instruction boundary and would
+// fetch next. Factored out unchanged so the recomp's --no-cpu scheduler can run
+// the machine's non-instruction steps without a copy of them (see
+// recomp/harness/snes_state.c, ss_nocpu_step).
+bool cpu_runNonInstruction(Cpu* cpu) {
   if(cpu->resetWanted) {
     cpu->resetWanted = false;
     // reset: brk/interrupt without writes
@@ -99,11 +105,11 @@ void cpu_runOpcode(Cpu* cpu) {
     cpu_setFlags(cpu, cpu_getFlags(cpu)); // updates x and m flags, clears upper half of x and y if needed
     cpu->k = 0;
     cpu->pc = cpu_readWord(cpu, 0xfffc, 0xfffd, false);
-    return;
+    return true;
   }
   if(cpu->stopped) {
     cpu_idleWait(cpu);
-    return;
+    return true;
   }
   if(cpu->waiting) {
     if(cpu->irqWanted || cpu->nmiWanted) {
@@ -111,22 +117,27 @@ void cpu_runOpcode(Cpu* cpu) {
       cpu_idle(cpu);
       cpu_checkInt(cpu);
       cpu_idle(cpu);
-      return;
+      return true;
     } else {
       cpu_idleWait(cpu);
-      return;
+      return true;
     }
   }
   // not stopped or waiting, execute a opcode or go to interrupt
   if(cpu->intWanted) {
     cpu_read(cpu, (cpu->k << 16) | cpu->pc);
     cpu_doInterrupt(cpu);
-  } else {
-    // dream: give the recomp hook table a chance to replace the routine at this pc
-    if(cpu->hook != NULL && cpu->hook(cpu->hookCtx, cpu, (cpu->k << 16) | cpu->pc)) return;
-    uint8_t opcode = cpu_readOpcode(cpu);
-    cpu_doOpcode(cpu, opcode);
+    return true;
   }
+  return false;
+}
+
+void cpu_runOpcode(Cpu* cpu) {
+  if(cpu_runNonInstruction(cpu)) return;
+  // dream: give the recomp hook table a chance to replace the routine at this pc
+  if(cpu->hook != NULL && cpu->hook(cpu->hookCtx, cpu, (cpu->k << 16) | cpu->pc)) return;
+  uint8_t opcode = cpu_readOpcode(cpu);
+  cpu_doOpcode(cpu, opcode);
 }
 
 void cpu_nmi(Cpu* cpu) {

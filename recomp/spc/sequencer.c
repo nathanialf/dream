@@ -65,8 +65,12 @@ static bool call_hooked(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
  * timer tick becomes a music tick and an sfx tick at different rates. Falls
  * into channel_loop with X = 0.
  * ------------------------------------------------------------------------- */
-static void tick_wait(SpcState* sp) {
+/* Entered in its middle as well: loc_078E. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void tick_wait_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x078E) goto loc_078E;
 
   S(0x0781, 2); a = s_load(sp, sps_dp(sp, 0x1C));       /* 0781 mov a,$1C */
   bool playing = !sps_z(sp);
@@ -81,6 +85,7 @@ static void tick_wait(SpcState* sp) {
     sps_write8(sp, sps_dp(sp, SPS_T0TARGET), v); }
   S(0x078B, 3); s_movs(sp, sps_dp(sp, SPS_CONTROL), 0x01); /* 078B mov !CONTROL,#$01 */
   for(;;) {                                             /* loc_078E */
+loc_078E:
     S(0x078E, 2); a = s_load(sp, sps_dp(sp, SPS_T0OUT));/* 078E mov a,!T0OUT */
     bool wait = sps_z(sp);
     S(0x0790, 2); s_branch(sp, wait);                   /* 0790 beq loc_078E */
@@ -100,6 +105,9 @@ static void tick_wait(SpcState* sp) {
   S(0x07A7, 2); x = 0x00; sps_set_zn(sp, x);            /* 07A7 mov x,#$00 */
   S_GOTO(0x07A9);                                       /* falls into channel_loop */
 }
+
+static void tick_wait(SpcState* sp) { tick_wait_at(sp, 0x0781); }
+static void loc_078E(SpcState* sp) { tick_wait_at(sp, 0x078E); }
 
 /* ---------------------------------------------------------------------------
  * channel_loop — $07A9
@@ -1179,6 +1187,7 @@ loc_1144:
 
 static const SpcRecompEntry kSequencer[] = {
   { 0x0781, "tick_wait",        tick_wait },
+  { 0x078e, "loc_078E",           loc_078E },
   { 0x07a9, "channel_loop",     channel_loop },
   { 0x0813, "seq_step",         seq_step },
   { 0x0850, "seq_fetch",        seq_fetch },

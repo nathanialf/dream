@@ -1153,6 +1153,18 @@ loc_A6CD: ;
   oam_frame_exit(ss, 0xA6CD);
 }
 
+/* loc_C0A6CD — the tail on its own, because an emitter reaches it from outside.
+ *
+ * Every emitter's "OAM is full" exit is `pla ; jmp loc_C0A6CD`: it throws away
+ * the jsr's return address and lands here, four instructions into a routine
+ * whose entry is $A538. The address therefore has to be dispatchable in its own
+ * right -- it was the ROM's code until --no-cpu, which resolves every pc
+ * through the registry. The body is the same `pea $8080 ; plb ; plb ; rtl` the
+ * label above runs, entered with A/X/Y already published by the emitter. */
+void oam_frame_tail(SnesState* ss) {
+  oam_frame_exit(ss, 0xA6CD);
+}
+
 /* ---------------------------------------------------------------------------
  * entity_render_order_reset — $C0:AEB9
  *
@@ -1184,6 +1196,7 @@ void entity_render_order_reset(SnesState* ss) {
 
 static const RecompEntry kOamEmit[] = {
   { 0xc0a538, "entity_build_oam_frame",   entity_build_oam_frame },
+  { 0xc0a6cd, "loc_C0A6CD",               oam_frame_tail },
   { 0xc0a757, "oam_emit_frame_1row",      oam_emit_frame_1row },
   { 0xc0a772, "oam_emit_frame_2row",      oam_emit_frame_2row },
   { 0xc0a8f6, "oam_emit_frame_1row_flip", oam_emit_frame_1row_flip },

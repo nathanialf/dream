@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include "sps_internal.h"
+#include "ss_internal.h"    /* SsCoro: the one suspended stack --no-cpu needs */
 
 /* ---- registers -------------------------------------------------------- */
 uint8_t  sps_a(const SpcState* sp)  { return sp->spc->a; }
@@ -224,10 +225,14 @@ int sps_op_cycles(uint8_t opcode) {
 /* Completion is the stack pointer coming back above the frame we pushed: a `ret`
  * pops exactly that far. The SPC stack is one page, so the comparison is 8-bit;
  * a callee that unbalanced it downward would hang, hence the guard. */
+static void sps_nocpu_inner_step(SpcState* sp);
+
 void sps_run_until_return(SpcState* sp, uint8_t spBefore) {
   unsigned long guard = 0;
   while(sp->spc->sp < spBefore) {
-    spc_runOpcode(sp->spc);
+    /* --no-cpu: the callee is a chain of bodies entered through the registry on
+     * this same stack, so a slice boundary anywhere in it suspends all of it. */
+    if(sp->nocpu) sps_nocpu_inner_step(sp); else spc_runOpcode(sp->spc);
     if(++guard > 100000000ul) {
       fprintf(stderr, "spc_state: sps_call did not return (sp %02X, want %02X)\n",
               sp->spc->sp, spBefore);
@@ -239,7 +244,7 @@ void sps_run_until_return(SpcState* sp, uint8_t spBefore) {
 bool sps_run_callee(SpcState* sp, uint8_t spBefore) {
   while(sp->spc->sp < spBefore) {
     if(sps_yield_wanted(sp)) return true;
-    spc_runOpcode(sp->spc);
+    if(sp->nocpu) sps_nocpu_inner_step(sp); else spc_runOpcode(sp->spc);
   }
   return false;
 }
@@ -272,9 +277,19 @@ void sps_leave_hook(SpcState* sp) {
 int sps_hook_depth(const SpcState* sp) { return sp->depth; }
 int sps_hook_max_depth(const SpcState* sp) { return sp->maxDepth; }
 
+static void sps_nocpu_suspend(SpcState* sp);
+
 bool sps_yield_wanted(const SpcState* sp) {
   /* Signed difference: apu->cycles is a 32-bit counter and wraps. */
-  return (int32_t) (sp->apu->cycles - sp->apu->sliceEnd) >= 0;
+  const bool want = (int32_t) (sp->apu->cycles - sp->apu->sliceEnd) >= 0;
+  if(!sp->nocpu) return want;
+  /* --no-cpu: there is no driver to hand the rest of the routine to. The slice
+   * boundary still has to stop the body exactly where the reference SPC700
+   * stops -- apu_runCycles() returns there and the 65816 gets its turn -- so
+   * suspend the stack the body runs on and answer false; the next catch-up
+   * step resumes it on this instruction. */
+  if(want && sp->running) sps_nocpu_suspend((SpcState*) sp);
+  return false;
 }
 
 /* ---- routine registry ------------------------------------------------- */
@@ -306,3 +321,120 @@ const SpcRecompEntry* recomp_spc_registry(unsigned* count) {
   *count = gRegistryCount;
   return gRegistry;
 }
+
+/* ---- the --no-cpu scheduler -------------------------------------------- */
+/* The driver's stack. 256 KB: the deepest chain here is
+ * main_loop -> cmd_dispatch -> a handler -> sps_run_callee -> dsp_init. */
+#define SPS_NOCPU_STACK (256u * 1024u)
+
+/* The SPC700's own IPL boot ROM, overlaid at $FFC0 while apu->romReadable. It
+ * is the console's firmware, not this ROM's program: it receives the loader
+ * block at power-on, jumps to it, and is never entered again (the driver's
+ * "back to the loader" command jumps to $04F3 in ARAM). There is no body for
+ * it, and --no-cpu lets the core execute it rather than inventing one; the
+ * count is reported separately so the claim stays checkable. */
+static bool sps_in_ipl(const SpcState* sp, uint16_t pc) {
+  return sp->apu->romReadable && pc >= 0xffc0;
+}
+
+static void sps_nocpu_no_body(SpcState* sp, uint16_t pc) {
+  fprintf(stderr,
+          "dream_harness: --no-cpu: no SPC700 C body at %04X, %d bod%s in flight\n",
+          pc, sp->depth, sp->depth == 1 ? "y" : "ies");
+  exit(3);
+}
+
+/* Run the one body that owns this pc, through the harness's own dispatcher --
+ * the same callback the SPC700 core calls -- so a body is entered and counted
+ * exactly as it is with the core running. */
+static void sps_nocpu_call_body(SpcState* sp, uint16_t pc) {
+  sp->dispatches++;
+  if(sp->inner == NULL || !sp->inner(sp->innerCtx, sp->spc, pc)) sps_nocpu_no_body(sp, pc);
+}
+
+/* A step taken from inside a body chain (sps_run_callee / sps_run_until_return).
+ * The SPC700's only non-instruction states are the power-on reset and `stop`;
+ * spc_runOpcode handles both without fetching, and neither can be reached from
+ * inside a chain, so this is a body dispatch and nothing else. */
+static void sps_nocpu_inner_step(SpcState* sp) {
+  Spc* s = sp->spc;
+  if(s->resetWanted || s->stopped) { spc_runOpcode(s); return; }
+  if(sps_in_ipl(sp, s->pc)) { sp->iplInstructions++; spc_runOpcode(s); return; }
+  sps_nocpu_call_body(sp, s->pc);
+}
+
+typedef struct { SpcState* sp; uint16_t pc; } SpsNoCpuStart;
+static SpsNoCpuStart gSpsStart;
+
+static void sps_nocpu_trampoline(void* arg) {
+  (void) arg;
+  SpsNoCpuStart s = gSpsStart;
+  sps_nocpu_call_body(s.sp, s.pc);
+}
+
+static void sps_nocpu_suspend(SpcState* sp) {
+  sp->suspendPc = sp->spc->pc;
+  sp->suspended = true;
+  sp->suspensions++;
+  ss_coro_yield(sp->co);
+  sp->suspended = false;
+}
+
+/* The hook the SPC700 core calls before every instruction fetch, standing in
+ * front of the harness's own. It never lets the core fetch: either the driver's
+ * suspended stack is resumed on the instruction it stopped at, or the body that
+ * owns this pc is entered on a fresh one. */
+static bool sps_nocpu_hook(void* ctx, Spc* spc, uint16_t pc) {
+  SpcState* sp = (SpcState*) ctx;
+  if(sps_in_ipl(sp, pc)) {
+    sp->iplInstructions++;
+    /* still through the harness's dispatcher, so the instruction is counted and
+     * traced exactly as it is with the core running */
+    return sp->inner != NULL ? sp->inner(sp->innerCtx, spc, pc) : false;
+  }
+  const bool resume = sp->suspended && sp->suspendPc == pc;
+  if(sp->suspended && !resume) {
+    fprintf(stderr, "dream_harness: --no-cpu: the SPC700 stopped at %04X but is "
+                    "being asked to run %04X\n", sp->suspendPc, pc);
+    exit(2);
+  }
+  sp->running = true;
+  if(resume) {
+    ss_coro_resume(sp->co);
+  } else {
+    gSpsStart.sp = sp;
+    gSpsStart.pc = pc;
+    ss_coro_start(sp->co, sps_nocpu_trampoline, NULL);
+  }
+  sp->running = false;
+  (void) spc;
+  return true;
+}
+
+void sps_nocpu_enable(SpcState* sp, bool on) {
+  if(on) {
+    if(sp->co == NULL) sp->co = ss_coro_new(SPS_NOCPU_STACK);
+    sp->inner = sp->spc->hook;
+    sp->innerCtx = sp->spc->hookCtx;
+    sp->spc->hook = sps_nocpu_hook;
+    sp->spc->hookCtx = sp;
+    sp->nocpu = true;
+  } else if(sp->nocpu) {
+    sp->spc->hook = sp->inner;
+    sp->spc->hookCtx = sp->innerCtx;
+    sp->nocpu = false;
+  }
+}
+
+bool sps_nocpu_enabled(const SpcState* sp) { return sp->nocpu; }
+
+/* the driver's stack, back to the allocator (harness teardown only) */
+void sps_nocpu_free(SpcState* sp) {
+  ss_coro_free(sp->co);
+  sp->co = NULL;
+  sp->nocpu = false;
+}
+
+uint64_t sps_nocpu_dispatches(const SpcState* sp)  { return sp->dispatches; }
+uint64_t sps_nocpu_suspensions(const SpcState* sp) { return sp->suspensions; }
+uint64_t sps_nocpu_ipl_instructions(const SpcState* sp) { return sp->iplInstructions; }

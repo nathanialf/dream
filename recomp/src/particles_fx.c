@@ -10,10 +10,10 @@
  * is what frees them all.
  *
  * Three variants of the same integrate/cull/emit loop exist, one per game mode;
- * this file has the mode-0 one (particle_update_and_draw_mode0) and the smaller
- * mode-1 "sparkle" array at $7F:0E86 (sparkle_update_and_draw). The mode-1 and
- * mode-2 tails at loc_C09679 and loc_C097DD are not converted yet, so the two
- * dispatchers here jump to them and the ROM runs them.
+ * this file has the mode-0 one (particle_update_and_draw_mode0), the smaller
+ * mode-1 "sparkle" array at $7F:0E86 (sparkle_update_and_draw), and the mode-1
+ * and mode-2 loops themselves at loc_C09679 and loc_C097DD, which the two
+ * dispatchers here tail-jump to.
  *
  * Two things in here are worth knowing before reading a body:
  *
@@ -103,8 +103,8 @@ static bool call_converted(SnesState* ss, uint8_t pb, uint16_t ret,
  * mode1_particle_dispatch — $C0:922A
  *
  * jtbl_C08282[1]: draw the sparkle array, then tail-jump into loc_C09679, the
- * mode-1 spawn/cull loop, which is not converted. The jmp leaves no return of
- * its own, so loc_C09679's rts is what returns to the dispatch site.
+ * mode-1 spawn/cull loop below. The jmp leaves no return of its own, so
+ * loc_C09679's rts is what returns to the dispatch site.
  *
  * sparkle_update_and_draw is converted, a few lines down, but the jsr goes
  * through the registry rather than straight to the C: the harness's hook
@@ -139,7 +139,7 @@ void mode1_particle_dispatch(SnesState* ss) {
  * mode2_particle_dispatch — $C0:9230
  *
  * jtbl_C08282[2]: a bare tail jump into loc_C097DD, the mode-2 variant of the
- * same loop, which is not converted. Registers and flags pass through.
+ * same loop, below. Registers and flags pass through.
  * ------------------------------------------------------------------------- */
 void mode2_particle_dispatch(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
@@ -1277,6 +1277,402 @@ void particle_spawn_random(SnesState* ss) {
   ss_rts(ss);
 }
 
+/* ---------------------------------------------------------------------------
+ * loc_C09679 — the mode-1 spawn / integrate / cull / emit loop
+ *
+ * mode1_particle_dispatch tail-jumps here, so the routine's rts is what returns
+ * to the `jsr (jtbl_C08282,X)` that reached the dispatcher. It walks the slot
+ * table from the highest slot that still has room in the OAM buffer:
+ *
+ *   $7F0906 < 0 (bit 15 set)   the slot is skipped
+ *   $7F0906 > 0               a live particle: age it, add the two velocity
+ *                             table entries out of data_C46588 to the position,
+ *                             integrate the two sub-pixel accumulators
+ *   $7F0906 = 0               a free slot: when its respawn timer $7F0986 has
+ *                             run out, seed both from random_next, otherwise
+ *                             count the timer down and drift $7F0C06
+ *
+ * and then emits one 4-byte OAM entry per particle whose screen position is on
+ * screen, with the tile index taken from a 32-step triangle of $7F0C07.
+ *
+ * The routine was the ROM's own code until --no-cpu: the dispatcher above
+ * pointed the pc at it and the 65816 ran it. Written from out/dream.asm
+ * $9679-$9780, instruction for instruction.
+ * ------------------------------------------------------------------------- */
+void particle_update_mode1(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+  const uint16_t dp = ss_dp(ss);
+  uint16_t v;
+  bool t;
+
+  S(0x9679, 2);                             /* C09679 lda oam_write_ptr */
+  a = t_read16(ss, dp + oam_write_ptr); ss_set_nz16(ss, a);
+  SI(0x967B); y = a; ss_set_nz16(ss, y);    /* C0967B tay */
+  SI(0x967C); ss_set_c(ss, true);           /* C0967C sec */
+  S(0x967D, 3); a = alu_sbc16(ss, a, 0x0400);  /* C0967D sbc #$0400 */
+  t = ss_n(ss);
+  S(0x9680, 1); t_branch(ss, t);            /* C09680 bmi loc_C09683 */
+  if(!t) {
+    ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
+    S(0x9682, 1); ss_rts(ss);               /* C09682 rts */
+    return;
+  }
+
+  /* loc_C09683 — the buffer's free space, in slots, capped at the last one */
+  S(0x9683, 3); a = alu_eor16(ss, a, 0xFFFF);  /* C09683 eor #$FFFF */
+  SI(0x9686); a = alu_inc16(ss, a);            /* C09686 inc A */
+  SI(0x9687); a = alu_lsr16(ss, a);            /* C09687 lsr A */
+  S(0x9688, 3); alu_cmp16(ss, a, 0x003C);      /* C09688 cmp #$003C */
+  t = !ss_c(ss);
+  S(0x968B, 1); t_branch(ss, t);               /* C0968B bcc loc_C09690 */
+  if(!t) { S(0x968D, 3); a = 0x003A; ss_set_nz16(ss, a); }  /* lda #$003A */
+  /* loc_C09690 */
+  SI(0x9690); x = a; ss_set_nz16(ss, x);       /* C09690 tax */
+
+loc_9691: ;
+  S(0x9691, 4);                             /* C09691 lda $7F0906,X */
+  a = t_read16(ss, (0x7F0906u + x) & 0xffffff); ss_set_nz16(ss, a);
+  t = ss_n(ss);
+  S(0x9695, 1); t_branch(ss, t);            /* C09695 bmi loc_C096C8 */
+  if(t) goto loc_96C8;
+  t = !ss_z(ss);
+  S(0x9697, 1); t_branch(ss, t);            /* C09697 bne loc_C096CF */
+  if(t) goto loc_96CF;
+
+  S(0x9699, 4);                             /* C09699 lda $7F0986,X */
+  a = t_read16(ss, (0x7F0986u + x) & 0xffffff); ss_set_nz16(ss, a);
+  t = !ss_z(ss);
+  S(0x969D, 1); t_branch(ss, t);            /* C0969D bne loc_C096B6 */
+  if(!t) {
+    JSRC(0x969F, 0xA212, random_next);      /* C0969F jsr random_next */
+    S(0x96A2, 2);                           /* C096A2 lda init_magic_AA55 */
+    a = t_read16(ss, dp + init_magic_AA55); ss_set_nz16(ss, a);
+    S(0x96A4, 3); a = alu_and16(ss, a, 0x00FF);  /* C096A4 and #$00FF */
+    S(0x96A7, 3); a = alu_adc16(ss, a, 0x0080);  /* C096A7 adc #$0080 */
+    S(0x96AA, 4); t_write16(ss, (0x7F0906u + x) & 0xffffff, a);
+    S(0x96AE, 2);                           /* C096AE lda init_magic_FFFF */
+    a = t_read16(ss, dp + init_magic_FFFF); ss_set_nz16(ss, a);
+    S(0x96B0, 3); a = alu_and16(ss, a, 0x007F);  /* C096B0 and #$007F */
+    S(0x96B3, 3); a = alu_adc16(ss, a, 0x0080);  /* C096B3 adc #$0080 */
+  }
+  /* loc_C096B6 */
+  SI(0x96B6); a = alu_dec16(ss, a);         /* C096B6 dec A */
+  S(0x96B7, 4); t_write16(ss, (0x7F0986u + x) & 0xffffff, a);
+  S(0x96BB, 4);                             /* C096BB lda $7F0C06,X */
+  a = t_read16(ss, (0x7F0C06u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x96BF, 3); a = alu_adc16(ss, a, 0x0080);  /* C096BF adc #$0080 */
+  S(0x96C2, 4); t_write16(ss, (0x7F0C06u + x) & 0xffffff, a);
+  S(0x96C6, 1); t_branch(ss, true);         /* C096C6 bra loc_C09729 */
+  goto loc_9729;
+
+loc_96C8: ;
+  SI(0x96C8); x = alu_dec16(ss, x);         /* C096C8 dex */
+  SI(0x96C9); x = alu_dec16(ss, x);         /* C096C9 dex */
+  t = !ss_n(ss);
+  S(0x96CA, 1); t_branch(ss, t);            /* C096CA bpl loc_C09691 */
+  if(t) goto loc_9691;
+  S(0x96CC, 3);                             /* C096CC jmp loc_C0977E */
+  goto loc_977E;
+
+loc_96CF: ;
+  SI(0x96CF); a = alu_dec16(ss, a);         /* C096CF dec A */
+  S(0x96D0, 4); t_write16(ss, (0x7F0906u + x) & 0xffffff, a);
+  S(0x96D4, 4);                             /* C096D4 lda $7F0C06,X */
+  a = t_read16(ss, (0x7F0C06u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x96D8, 3); a = alu_adc16(ss, a, 0x0100);  /* C096D8 adc #$0100 */
+  S(0x96DB, 4); t_write16(ss, (0x7F0C06u + x) & 0xffffff, a);
+  S(0x96DF, 4);                             /* C096DF lda $7F0D87,X */
+  a = t_read16(ss, (0x7F0D87u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x96E3, 3); a = alu_and16(ss, a, 0x00FF);  /* C096E3 and #$00FF */
+  SI(0x96E6); a = alu_asl16(ss, a);         /* C096E6 asl A */
+  S(0x96E7, 2); t_write16(ss, dp + 0x0006, x); /* C096E7 stx $06 */
+  SI(0x96E9); x = a; ss_set_nz16(ss, x);    /* C096E9 tax */
+  S(0x96EA, 4);                             /* C096EA lda data_C46588,X */
+  a = t_read16(ss, (0xC46588u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x96EE, 2);                             /* C096EE ldx $06 */
+  x = t_read16(ss, dp + 0x0006); ss_set_nz16(ss, x);
+  S(0x96F0, 4);                             /* C096F0 adc $7F0B06,X */
+  v = t_read16(ss, (0x7F0B06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x96F4, 4); t_write16(ss, (0x7F0B06u + x) & 0xffffff, a);
+  S(0x96F8, 4);                             /* C096F8 lda $7F0E07,X */
+  a = t_read16(ss, (0x7F0E07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x96FC, 3); a = alu_and16(ss, a, 0x00FF);  /* C096FC and #$00FF */
+  SI(0x96FF); a = alu_asl16(ss, a);         /* C096FF asl A */
+  SI(0x9700); x = a; ss_set_nz16(ss, x);    /* C09700 tax */
+  S(0x9701, 4);                             /* C09701 lda data_C46588,X */
+  a = t_read16(ss, (0xC46588u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9705, 2);                             /* C09705 ldx $06 */
+  x = t_read16(ss, dp + 0x0006); ss_set_nz16(ss, x);
+  S(0x9707, 4);                             /* C09707 adc $7F0B86,X */
+  v = t_read16(ss, (0x7F0B86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x970B, 4); t_write16(ss, (0x7F0B86u + x) & 0xffffff, a);
+  S(0x970F, 4);                             /* C0970F lda $7F0D86,X */
+  a = t_read16(ss, (0x7F0D86u + x) & 0xffffff); ss_set_nz16(ss, a);
+  SI(0x9713); ss_set_c(ss, false);          /* C09713 clc */
+  S(0x9714, 4);                             /* C09714 adc $7F0C86,X */
+  v = t_read16(ss, (0x7F0C86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x9718, 4); t_write16(ss, (0x7F0D86u + x) & 0xffffff, a);
+  S(0x971C, 4);                             /* C0971C lda $7F0E06,X */
+  a = t_read16(ss, (0x7F0E06u + x) & 0xffffff); ss_set_nz16(ss, a);
+  SI(0x9720); ss_set_c(ss, false);          /* C09720 clc */
+  S(0x9721, 4);                             /* C09721 adc $7F0D06,X */
+  v = t_read16(ss, (0x7F0D06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x9725, 4); t_write16(ss, (0x7F0E06u + x) & 0xffffff, a);
+
+loc_9729: ;
+  S(0x9729, 4);                             /* C09729 lda $7F0B07,X */
+  a = t_read16(ss, (0x7F0B07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x972D, 3); a = alu_and16(ss, a, 0x00FF);  /* C0972D and #$00FF */
+  SI(0x9730); ss_set_c(ss, false);          /* C09730 clc */
+  S(0x9731, 4);                             /* C09731 adc $7F0A06,X */
+  v = t_read16(ss, (0x7F0A06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  SI(0x9735); ss_set_c(ss, true);           /* C09735 sec */
+  S(0x9736, 2);                             /* C09736 sbc camera_x */
+  v = t_read16(ss, dp + camera_x); a = alu_sbc16(ss, a, v);
+  t = ss_n(ss);
+  S(0x9738, 1); t_branch(ss, t);            /* C09738 bmi loc_C096C8 */
+  if(t) goto loc_96C8;
+  S(0x973A, 3); alu_cmp16(ss, a, 0x0100);   /* C0973A cmp #$0100 */
+  t = ss_c(ss);
+  S(0x973D, 1); t_branch(ss, t);            /* C0973D bcs loc_C096C8 */
+  if(t) goto loc_96C8;
+  S(0x973F, 3); t_index(ss);                /* C0973F sta nmi_handler_ptr,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (nmi_handler_ptr + y)), a);
+  S(0x9742, 4);                             /* C09742 lda $7F0B87,X */
+  a = t_read16(ss, (0x7F0B87u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9746, 3); a = alu_and16(ss, a, 0x00FF);  /* C09746 and #$00FF */
+  S(0x9749, 4);                             /* C09749 adc $7F0A86,X */
+  v = t_read16(ss, (0x7F0A86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  SI(0x974D); ss_set_c(ss, true);           /* C0974D sec */
+  S(0x974E, 2);                             /* C0974E sbc camera_y */
+  v = t_read16(ss, dp + camera_y); a = alu_sbc16(ss, a, v);
+  t = ss_n(ss);
+  S(0x9750, 1); t_branch(ss, t);            /* C09750 bmi loc_C09777 */
+  if(t) goto loc_9777;
+  S(0x9752, 3); alu_cmp16(ss, a, 0x00E0);   /* C09752 cmp #$00E0 */
+  t = ss_c(ss);
+  S(0x9755, 1); t_branch(ss, t);            /* C09755 bcs loc_C09777 */
+  if(t) goto loc_9777;
+  S(0x9757, 3); t_index(ss);                /* C09757 sta $0001,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (0x0001 + y)), a);
+  S(0x975A, 4);                             /* C0975A lda $7F0C07,X */
+  a = t_read16(ss, (0x7F0C07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x975E, 3); a = alu_and16(ss, a, 0x001F);  /* C0975E and #$001F */
+  S(0x9761, 3); alu_cmp16(ss, a, 0x0010);   /* C09761 cmp #$0010 */
+  t = !ss_c(ss);
+  S(0x9764, 1); t_branch(ss, t);            /* C09764 bcc loc_C0976C */
+  if(!t) {
+    S(0x9766, 3); a = alu_eor16(ss, a, 0x000F);  /* C09766 eor #$000F */
+    S(0x9769, 3); a = alu_and16(ss, a, 0x000F);  /* C09769 and #$000F */
+  }
+  /* loc_C0976C */
+  SI(0x976C); ss_set_c(ss, false);          /* C0976C clc */
+  S(0x976D, 3); a = alu_adc16(ss, a, 0x2FF0);  /* C0976D adc #$2FF0 */
+  S(0x9770, 3); t_index(ss);                /* C09770 sta dma_pending_mask,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (dma_pending_mask + y)), a);
+  SI(0x9773); y = alu_inc16(ss, y);         /* C09773 iny */
+  SI(0x9774); y = alu_inc16(ss, y);         /* C09774 iny */
+  SI(0x9775); y = alu_inc16(ss, y);         /* C09775 iny */
+  SI(0x9776); y = alu_inc16(ss, y);         /* C09776 iny */
+
+loc_9777: ;
+  SI(0x9777); x = alu_dec16(ss, x);         /* C09777 dex */
+  SI(0x9778); x = alu_dec16(ss, x);         /* C09778 dex */
+  t = ss_n(ss);
+  S(0x9779, 1); t_branch(ss, t);            /* C09779 bmi loc_C0977E */
+  if(!t) { S(0x977B, 3); goto loc_9691; }   /* C0977B jmp loc_C09691 */
+
+loc_977E: ;
+  S(0x977E, 2); t_write16(ss, dp + oam_write_ptr, y);  /* C0977E sty oam_write_ptr */
+  ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
+  S(0x9780, 1); ss_rts(ss);                 /* C09780 rts */
+}
+
+/* ---------------------------------------------------------------------------
+ * loc_C097DD — the mode-2 variant of the same loop
+ *
+ * mode2_particle_dispatch is a bare tail jump to here. Same shape as
+ * loc_C09679 with three differences: there is no "skip the slot" test on bit 15
+ * (every non-zero slot is live), a free slot is respawned with a fixed $0400
+ * velocity whose sign comes from bit 15 of the RNG word rather than a random
+ * magnitude, and the tile index is a plain 16-step wrap of $7F0C07 added to
+ * $29F0 instead of the triangle. Written from out/dream.asm $97DD-$98D9.
+ * ------------------------------------------------------------------------- */
+void particle_update_mode2(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+  const uint16_t dp = ss_dp(ss);
+  uint16_t v;
+  bool t;
+
+  S(0x97DD, 2);                             /* C097DD lda oam_write_ptr */
+  a = t_read16(ss, dp + oam_write_ptr); ss_set_nz16(ss, a);
+  SI(0x97DF); y = a; ss_set_nz16(ss, y);    /* C097DF tay */
+  SI(0x97E0); ss_set_c(ss, true);           /* C097E0 sec */
+  S(0x97E1, 3); a = alu_sbc16(ss, a, 0x0400);  /* C097E1 sbc #$0400 */
+  t = ss_n(ss);
+  S(0x97E4, 1); t_branch(ss, t);            /* C097E4 bmi loc_C097EE */
+  if(!t) {
+    ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
+    S(0x97E6, 1); ss_rts(ss);               /* C097E6 rts */
+    return;
+  }
+
+  /* loc_C097EE */
+  S(0x97EE, 3); a = alu_eor16(ss, a, 0xFFFF);  /* C097EE eor #$FFFF */
+  SI(0x97F1); a = alu_inc16(ss, a);            /* C097F1 inc A */
+  SI(0x97F2); a = alu_lsr16(ss, a);            /* C097F2 lsr A */
+  S(0x97F3, 3); alu_cmp16(ss, a, 0x003C);      /* C097F3 cmp #$003C */
+  t = !ss_c(ss);
+  S(0x97F6, 1); t_branch(ss, t);               /* C097F6 bcc loc_C097FB */
+  if(!t) { S(0x97F8, 3); a = 0x003A; ss_set_nz16(ss, a); }  /* lda #$003A */
+  /* loc_C097FB */
+  SI(0x97FB); x = a; ss_set_nz16(ss, x);       /* C097FB tax */
+
+loc_97FC: ;
+  S(0x97FC, 4);                             /* C097FC lda $7F0906,X */
+  a = t_read16(ss, (0x7F0906u + x) & 0xffffff); ss_set_nz16(ss, a);
+  t = !ss_z(ss);
+  S(0x9800, 1); t_branch(ss, t);            /* C09800 bne loc_C0983E */
+  if(t) goto loc_983E;
+  S(0x9802, 4);                             /* C09802 lda $7F0986,X */
+  a = t_read16(ss, (0x7F0986u + x) & 0xffffff); ss_set_nz16(ss, a);
+  t = ss_z(ss);
+  S(0x9806, 1); t_branch(ss, t);            /* C09806 beq loc_C09810 */
+  if(!t) {
+    SI(0x9808); a = alu_dec16(ss, a);       /* C09808 dec A */
+    S(0x9809, 4); t_write16(ss, (0x7F0986u + x) & 0xffffff, a);
+    S(0x980D, 3);                           /* C0980D jmp loc_C0988D */
+    goto loc_988D;
+  }
+
+  /* loc_C09810 */
+  JSRC(0x9810, 0xA212, random_next);        /* C09810 jsr random_next */
+  S(0x9813, 2);                             /* C09813 lda init_magic_AA55 */
+  a = t_read16(ss, dp + init_magic_AA55); ss_set_nz16(ss, a);
+  S(0x9815, 3); a = alu_and16(ss, a, 0x00FF);  /* C09815 and #$00FF */
+  S(0x9818, 4); t_write16(ss, (0x7F0986u + x) & 0xffffff, a);
+  S(0x981C, 3); a = 0x0400; ss_set_nz16(ss, a);  /* C0981C lda #$0400 */
+  S(0x981F, 2);                             /* C0981F bit init_magic_AA55 */
+  v = t_read16(ss, dp + init_magic_AA55); alu_bit16(ss, a, v);
+  t = !ss_n(ss);
+  S(0x9821, 1); t_branch(ss, t);            /* C09821 bpl loc_C09827 */
+  if(!t) {
+    S(0x9823, 3); a = alu_eor16(ss, a, 0xFFFF);  /* C09823 eor #$FFFF */
+    SI(0x9826); a = alu_inc16(ss, a);            /* C09826 inc A */
+  }
+  /* loc_C09827 */
+  S(0x9827, 4); t_write16(ss, (0x7F0C86u + x) & 0xffffff, a);
+  S(0x982B, 3); a = 0x0800; ss_set_nz16(ss, a);  /* C0982B lda #$0800 */
+  S(0x982E, 4); t_write16(ss, (0x7F0D06u + x) & 0xffffff, a);
+  SI(0x9832); a = ss_dp(ss); ss_set_nz16(ss, a); /* C09832 tdc */
+  S(0x9833, 4); t_write16(ss, (0x7F0D86u + x) & 0xffffff, a);
+  S(0x9837, 4); t_write16(ss, (0x7F0E06u + x) & 0xffffff, a);
+  S(0x983B, 3); a = 0x0021; ss_set_nz16(ss, a);  /* C0983B lda #$0021 */
+
+loc_983E: ;
+  SI(0x983E); a = alu_dec16(ss, a);         /* C0983E dec A */
+  S(0x983F, 4); t_write16(ss, (0x7F0906u + x) & 0xffffff, a);
+  S(0x9843, 4);                             /* C09843 lda $7F0D87,X */
+  a = t_read16(ss, (0x7F0D87u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9847, 3); a = alu_and16(ss, a, 0x00FF);  /* C09847 and #$00FF */
+  SI(0x984A); a = alu_asl16(ss, a);         /* C0984A asl A */
+  S(0x984B, 2); t_write16(ss, dp + 0x0006, x); /* C0984B stx $06 */
+  SI(0x984D); x = a; ss_set_nz16(ss, x);    /* C0984D tax */
+  S(0x984E, 4);                             /* C0984E lda data_C46588,X */
+  a = t_read16(ss, (0xC46588u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9852, 2);                             /* C09852 ldx $06 */
+  x = t_read16(ss, dp + 0x0006); ss_set_nz16(ss, x);
+  S(0x9854, 4);                             /* C09854 adc $7F0B06,X */
+  v = t_read16(ss, (0x7F0B06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x9858, 4); t_write16(ss, (0x7F0B06u + x) & 0xffffff, a);
+  S(0x985C, 4);                             /* C0985C lda $7F0E07,X */
+  a = t_read16(ss, (0x7F0E07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9860, 3); a = alu_and16(ss, a, 0x00FF);  /* C09860 and #$00FF */
+  SI(0x9863); a = alu_asl16(ss, a);         /* C09863 asl A */
+  SI(0x9864); x = a; ss_set_nz16(ss, x);    /* C09864 tax */
+  S(0x9865, 4);                             /* C09865 lda data_C46588,X */
+  a = t_read16(ss, (0xC46588u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9869, 2);                             /* C09869 ldx $06 */
+  x = t_read16(ss, dp + 0x0006); ss_set_nz16(ss, x);
+  S(0x986B, 4);                             /* C0986B adc $7F0B86,X */
+  v = t_read16(ss, (0x7F0B86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x986F, 4); t_write16(ss, (0x7F0B86u + x) & 0xffffff, a);
+  S(0x9873, 4);                             /* C09873 lda $7F0D86,X */
+  a = t_read16(ss, (0x7F0D86u + x) & 0xffffff); ss_set_nz16(ss, a);
+  SI(0x9877); ss_set_c(ss, false);          /* C09877 clc */
+  S(0x9878, 4);                             /* C09878 adc $7F0C86,X */
+  v = t_read16(ss, (0x7F0C86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x987C, 4); t_write16(ss, (0x7F0D86u + x) & 0xffffff, a);
+  S(0x9880, 4);                             /* C09880 lda $7F0E06,X */
+  a = t_read16(ss, (0x7F0E06u + x) & 0xffffff); ss_set_nz16(ss, a);
+  SI(0x9884); ss_set_c(ss, false);          /* C09884 clc */
+  S(0x9885, 4);                             /* C09885 adc $7F0D06,X */
+  v = t_read16(ss, (0x7F0D06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  S(0x9889, 4); t_write16(ss, (0x7F0E06u + x) & 0xffffff, a);
+
+loc_988D: ;
+  S(0x988D, 4);                             /* C0988D lda $7F0B07,X */
+  a = t_read16(ss, (0x7F0B07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x9891, 3); a = alu_and16(ss, a, 0x00FF);  /* C09891 and #$00FF */
+  SI(0x9894); ss_set_c(ss, false);          /* C09894 clc */
+  S(0x9895, 4);                             /* C09895 adc $7F0A06,X */
+  v = t_read16(ss, (0x7F0A06u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  SI(0x9899); ss_set_c(ss, true);           /* C09899 sec */
+  S(0x989A, 2);                             /* C0989A sbc camera_x */
+  v = t_read16(ss, dp + camera_x); a = alu_sbc16(ss, a, v);
+  t = ss_n(ss);
+  S(0x989C, 1); t_branch(ss, t);            /* C0989C bmi loc_C098D0 */
+  if(t) goto loc_98D0;
+  S(0x989E, 3); alu_cmp16(ss, a, 0x0100);   /* C0989E cmp #$0100 */
+  t = ss_c(ss);
+  S(0x98A1, 1); t_branch(ss, t);            /* C098A1 bcs loc_C098D0 */
+  if(t) goto loc_98D0;
+  S(0x98A3, 3); t_index(ss);                /* C098A3 sta nmi_handler_ptr,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (nmi_handler_ptr + y)), a);
+  S(0x98A6, 4);                             /* C098A6 lda $7F0B87,X */
+  a = t_read16(ss, (0x7F0B87u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x98AA, 3); a = alu_and16(ss, a, 0x00FF);  /* C098AA and #$00FF */
+  S(0x98AD, 4);                             /* C098AD adc $7F0A86,X */
+  v = t_read16(ss, (0x7F0A86u + x) & 0xffffff); a = alu_adc16(ss, a, v);
+  SI(0x98B1); ss_set_c(ss, true);           /* C098B1 sec */
+  S(0x98B2, 2);                             /* C098B2 sbc camera_y */
+  v = t_read16(ss, dp + camera_y); a = alu_sbc16(ss, a, v);
+  t = ss_n(ss);
+  S(0x98B4, 1); t_branch(ss, t);            /* C098B4 bmi loc_C098D0 */
+  if(t) goto loc_98D0;
+  S(0x98B6, 3); alu_cmp16(ss, a, 0x00E0);   /* C098B6 cmp #$00E0 */
+  t = ss_c(ss);
+  S(0x98B9, 1); t_branch(ss, t);            /* C098B9 bcs loc_C098D0 */
+  if(t) goto loc_98D0;
+  S(0x98BB, 3); t_index(ss);                /* C098BB sta $0001,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (0x0001 + y)), a);
+  S(0x98BE, 4);                             /* C098BE lda $7F0C07,X */
+  a = t_read16(ss, (0x7F0C07u + x) & 0xffffff); ss_set_nz16(ss, a);
+  S(0x98C2, 3); a = alu_and16(ss, a, 0x000F);  /* C098C2 and #$000F */
+  SI(0x98C5); ss_set_c(ss, false);          /* C098C5 clc */
+  S(0x98C6, 3); a = alu_adc16(ss, a, 0x29F0);  /* C098C6 adc #$29F0 */
+  S(0x98C9, 3); t_index(ss);                /* C098C9 sta dma_pending_mask,Y */
+  t_write16(ss, ss_abs(ss, (uint16_t) (dma_pending_mask + y)), a);
+  SI(0x98CC); y = alu_inc16(ss, y);         /* C098CC iny */
+  SI(0x98CD); y = alu_inc16(ss, y);         /* C098CD iny */
+  SI(0x98CE); y = alu_inc16(ss, y);         /* C098CE iny */
+  SI(0x98CF); y = alu_inc16(ss, y);         /* C098CF iny */
+
+loc_98D0: ;
+  SI(0x98D0); x = alu_dec16(ss, x);         /* C098D0 dex */
+  SI(0x98D1); x = alu_dec16(ss, x);         /* C098D1 dex */
+  t = ss_n(ss);
+  S(0x98D2, 1); t_branch(ss, t);            /* C098D2 bmi loc_C098D7 */
+  if(!t) { S(0x98D4, 3); goto loc_97FC; }   /* C098D4 jmp loc_C097FC */
+
+  /* loc_C098D7 */
+  S(0x98D7, 2); t_write16(ss, dp + oam_write_ptr, y);  /* C098D7 sty oam_write_ptr */
+  ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
+  S(0x98D9, 1); ss_rts(ss);                 /* C098D9 rts */
+}
+
 static const RecompEntry kParticlesFx[] = {
   { 0xc0922a, "mode1_particle_dispatch", mode1_particle_dispatch },
   { 0xc09230, "mode2_particle_dispatch", mode2_particle_dispatch },
@@ -1286,6 +1682,8 @@ static const RecompEntry kParticlesFx[] = {
   { 0xc094e4, "sparkle_array_init", sparkle_array_init },
   { 0xc09521, "sparkle_update_and_draw", sparkle_update_and_draw },
   { 0xc095e3, "particle_spawn_from_table", particle_spawn_from_table },
+  { 0xc09679, "loc_C09679", particle_update_mode1 },
   { 0xc09781, "particle_spawn_random", particle_spawn_random },
+  { 0xc097dd, "loc_C097DD", particle_update_mode2 },
 };
 RECOMP_REGISTER(kParticlesFx)

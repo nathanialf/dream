@@ -4,15 +4,24 @@
  * the very functions the CPU core hands to cpu_init(), so a hook that replays a
  * routine's bus transactions costs the emulator exactly what the routine cost:
  * the same access times, the same DMA/HDMA interleaving, the same open-bus.
+ *
+ * The second half of the file is the --no-cpu scheduler: the same machine with
+ * the instruction fetch taken out, so the C bodies *are* the program. See
+ * "Running without the CPUs" in recomp/README.md.
  */
+/* makecontext/swapcontext, the one suspended stack --no-cpu needs */
+#define _XOPEN_SOURCE 700
+
 #include <stdint.h>
 #include <stdbool.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ucontext.h>
 
 #include "ss_internal.h"
 #include "dma.h"
+#include "apu.h"
 
 /* ---- registers -------------------------------------------------------- */
 uint16_t ss_a(const SnesState* ss)  { return ss->snes->cpu->a; }
@@ -289,13 +298,17 @@ void ss_push16(SnesState* ss, uint16_t v) {
  * pushed: an rts/rtl pops exactly that far, while an NMI taken inside the callee
  * pushes below it and is therefore invisible to the test. The return address we
  * push is never executed, because the loop stops on the return itself. */
+static void ss_nocpu_inner_step(SnesState* ss);
+
 void ss_run_until_return(SnesState* ss, uint16_t spBefore) {
   Cpu* c = ss->snes->cpu;
   /* the sp comparison is unsigned and the stack lives near $01FF; a callee that
    * unbalances the stack downward would hang, so bound the run generously. */
   unsigned long guard = 0;
   while(c->sp < spBefore) {
-    cpu_runOpcode(c);
+    /* --no-cpu: the callee is a chain of bodies, entered through the registry
+     * on this same stack. Everything else about the frame is unchanged. */
+    if(ss->nocpu) ss_nocpu_inner_step(ss); else cpu_runOpcode(c);
     if(++guard > 100000000ul) {
       fprintf(stderr, "snes_state: ss_call_* did not return (sp %04X, want %04X)\n", c->sp, spBefore);
       exit(2);
@@ -306,8 +319,10 @@ void ss_run_until_return(SnesState* ss, uint16_t spBefore) {
 bool ss_run_callee(SnesState* ss, uint16_t spBefore) {
   Cpu* c = ss->snes->cpu;
   while(c->sp < spBefore) {
+    /* With no CPU a yield suspends this whole stack rather than reporting back,
+     * so ss_yield_wanted() answers false and the caller is resumed inside it. */
     if(ss_yield_wanted(ss)) return true;
-    cpu_runOpcode(c);
+    if(ss->nocpu) ss_nocpu_inner_step(ss); else cpu_runOpcode(c);
   }
   return false;
 }
@@ -347,6 +362,10 @@ void ss_enter_hook(SnesState* ss) {
   }
   ss->entry[ss->depth].vblank = ss->snes->inVblank;
   ss->entry[ss->depth].frames = ss->snes->frames;
+  /* the body's own entry address: --no-cpu names it when a pc it hands over has
+   * no body of its own */
+  ss->entry[ss->depth].pc24 =
+    (uint32_t) ((ss->snes->cpu->k << 16) | ss->snes->cpu->pc);
   ss->depth++;
   if(ss->depth > ss->maxDepth) ss->maxDepth = ss->depth;
 }
@@ -362,15 +381,39 @@ void ss_leave_hook(SnesState* ss) {
 int ss_hook_depth(const SnesState* ss) { return ss->depth; }
 int ss_hook_max_depth(const SnesState* ss) { return ss->maxDepth; }
 
+static void ss_nocpu_suspend(SnesState* ss);
+static bool ss_nocpu_frame_ends_here(SnesState* ss);
+
 bool ss_yield_wanted(const SnesState* ss) {
   const Snes* snes = ss->snes;
-  if(snes->cpu->intWanted) return true;
+  bool want;
+  if(snes->cpu->intWanted) want = true;
   /* Outside a hook there is no routine to hand back, and no snapshot to compare
    * against; only the latched interrupt above is meaningful. */
-  if(ss->depth <= 0) return false;
-  const SsHookEntry* e = &ss->entry[ss->depth - 1];
-  if(snes->frames != e->frames) return true;
-  return snes->inVblank && !e->vblank;
+  else if(ss->depth <= 0) want = false;
+  else {
+    const SsHookEntry* e = &ss->entry[ss->depth - 1];
+    want = snes->frames != e->frames || (snes->inVblank && !e->vblank);
+  }
+  if(!ss->nocpu) return want;
+  /* --no-cpu: there is no ROM to hand the rest of the routine to, so the answer
+   * is always "carry on". What the yield point is used for instead is to stop
+   * the body exactly where the reference machine stops -- by suspending the
+   * stack it runs on, which the scheduler resumes at this same instruction.
+   *
+   * Two boundaries need the machine back, and they are the two the reference
+   * stops at: an interrupt, which the 65816 services between two instructions,
+   * and the end of a frame, which is where snes_runFrame() returns and the
+   * harness and the app sample the machine. Every other yield the ROM would
+   * have been offered is invisible from outside the routine -- the ROM would
+   * simply have finished it, which is what the body now does itself -- so
+   * suspending for one would cost a context switch and change nothing. */
+  SnesState* m = (SnesState*) ss;
+  if(m->running != NULL && (snes->cpu->intWanted || ss_nocpu_frame_ends_here(m))) {
+    ss_nocpu_suspend(m);
+  }
+  (void) want;
+  return false;
 }
 
 /* ---- DMA ---------------------------------------------------------------- */
@@ -444,4 +487,332 @@ unsigned recomp_hooks_count(const RecompHook* table) {
   unsigned n = 0;
   while(table[n].fn != NULL) n++;
   return n;
+}
+
+/* ---- instructions the hook API cannot otherwise perform ---------------- */
+/* xce, LakeSnes cpu.c case 0xfb minus the opcode fetch. cpu_adrImp turns the
+ * internal cycle into a read from pc when an interrupt is already latched, so
+ * this reproduces both. cpu_setFlags(cpu_getFlags()) is ss_set_p(ss_p()): it is
+ * what re-applies emulation mode's own masking after e has moved. */
+void ss_xce(SnesState* ss) {
+  Cpu* c = ss->snes->cpu;
+  cpu_checkIntPublic(c);
+  if(c->intWanted) snes_cpuRead(ss->snes, (uint32_t) ((c->k << 16) | c->pc));
+  else ss_idle(ss);
+  const bool carry = c->c;
+  c->c = c->e;
+  c->e = carry;
+  ss_set_p(ss, ss_p(ss));
+}
+
+/* wai, LakeSnes cpu.c case 0xcb minus the opcode fetch: two internal cycles and
+ * the park. The machine idles in cpu_runOpcode / ss_nocpu_step from here until
+ * an interrupt lifts it. */
+void ss_wai(SnesState* ss) {
+  ss->snes->cpu->waiting = true;
+  ss_idle(ss);
+  ss_idle(ss);
+}
+
+/* ---- registry lookup --------------------------------------------------- */
+/* Entry addresses are written in the disassembly's canonical $C0:0000+offset
+ * form; this ROM runs most of its code through the $80/$81 mirror banks, so a
+ * pc is folded before it is matched (the same fold harness/main.c performs). */
+static uint32_t ss_canon(uint32_t pc24) {
+  const uint8_t b = (uint8_t) ((pc24 >> 16) & 0x7f);
+  const uint16_t adr = (uint16_t) pc24;
+  if(b >= 0x40 || adr >= 0x8000) {
+    const uint32_t off = (uint32_t) (((b & 0x3f) << 16) | adr);
+    if(off < 0x200000u) return 0xc00000u + off;
+  }
+  return pc24;
+}
+
+const RecompEntry* recomp_find(uint32_t pc24) {
+  const uint32_t key = ss_canon(pc24);
+  for(unsigned i = 0; i < gRegistryCount; i++) {
+    if(gRegistry[i].addr == key) return &gRegistry[i];
+  }
+  return NULL;
+}
+
+/* ---- one stack per body chain ------------------------------------------ */
+struct SsCoro {
+  ucontext_t ctx;       /* the body chain's own stack */
+  ucontext_t back;      /* whoever resumed it */
+  char* stack;
+  size_t stackSize;
+  void (*fn)(void*);
+  void* arg;
+  bool done;
+};
+
+static SsCoro* gCoroStarting;   /* makecontext takes ints, not pointers */
+
+static void ss_coro_trampoline(void) {
+  SsCoro* co = gCoroStarting;
+  co->fn(co->arg);
+  co->done = true;              /* uc_link swaps back to co->back */
+}
+
+SsCoro* ss_coro_new(size_t stackSize) {
+  SsCoro* co = calloc(1, sizeof(*co));
+  if(co == NULL) { fprintf(stderr, "snes_state: out of memory\n"); exit(2); }
+  co->stack = malloc(stackSize);
+  if(co->stack == NULL) { fprintf(stderr, "snes_state: out of memory\n"); exit(2); }
+  co->stackSize = stackSize;
+  co->done = true;
+  return co;
+}
+
+void ss_coro_free(SsCoro* co) {
+  if(co == NULL) return;
+  free(co->stack);
+  free(co);
+}
+
+void ss_coro_start(SsCoro* co, void (*fn)(void*), void* arg) {
+  co->fn = fn;
+  co->arg = arg;
+  co->done = false;
+  if(getcontext(&co->ctx) != 0) { fprintf(stderr, "snes_state: getcontext failed\n"); exit(2); }
+  co->ctx.uc_stack.ss_sp = co->stack;
+  co->ctx.uc_stack.ss_size = co->stackSize;
+  co->ctx.uc_link = &co->back;
+  makecontext(&co->ctx, ss_coro_trampoline, 0);
+  gCoroStarting = co;
+  swapcontext(&co->back, &co->ctx);
+}
+
+void ss_coro_resume(SsCoro* co) {
+  swapcontext(&co->back, &co->ctx);
+}
+
+void ss_coro_yield(SsCoro* co) {
+  swapcontext(&co->ctx, &co->back);
+}
+
+bool ss_coro_done(const SsCoro* co) { return co->done; }
+
+/* ---- the --no-cpu scheduler -------------------------------------------- */
+#define SS_NOCPU_STACK (512u * 1024u)
+
+void ss_nocpu_enable(SnesState* ss, bool on) {
+  ss->nocpu = on;
+  ss->nctx = 0;
+  ss->running = NULL;
+  ss->flPhase = 0;
+}
+
+bool ss_nocpu_enabled(const SnesState* ss) { return ss->nocpu; }
+
+/* Give the body chains' stacks back. Only the harness's teardown calls this;
+ * a suspended chain is simply dropped, which is safe because a body owns
+ * nothing but its own stack frames. */
+void ss_nocpu_free(SnesState* ss) {
+  for(int i = 0; i < SS_NOCPU_CTX_MAX; i++) {
+    ss_coro_free(ss->ctx[i].co);
+    ss->ctx[i].co = NULL;
+  }
+  ss->nctx = 0;
+  ss->running = NULL;
+  ss->nocpu = false;
+}
+
+uint64_t ss_nocpu_dispatches(const SnesState* ss)  { return ss->dispatches; }
+uint64_t ss_nocpu_suspensions(const SnesState* ss) { return ss->suspensions; }
+uint64_t ss_nocpu_abandoned(const SnesState* ss)   { return ss->abandoned; }
+int      ss_nocpu_max_contexts(const SnesState* ss){ return ss->maxCtx; }
+
+/* Would ss_nocpu_run_frame() return at this instruction boundary?
+ *
+ * It is snes_runFrame()'s own stopping rule written as a test instead of two
+ * loops. The first loop runs the machine out of vblank and can never end a
+ * frame; the second begins when it does, remembers the frame counter, and ends
+ * the frame the moment vblank starts or that counter moves. The phase moves on
+ * here rather than in the frame loop because most of these calls come from
+ * inside a body, which does not return to the frame loop between two
+ * instructions. */
+static bool ss_nocpu_frame_ends_here(SnesState* ss) {
+  const Snes* snes = ss->snes;
+  if(ss->flPhase == 0) {
+    if(snes->inVblank) return false;
+    ss->flPhase = 1;
+    ss->flFrameMark = snes->frames;
+    return false;
+  }
+  return snes->inVblank || snes->frames != ss->flFrameMark;
+}
+
+/* A pc the registry does not name. In --no-cpu that is the whole point of the
+ * mode: it is either dead code the port never had to convert, or a routine that
+ * is still the ROM's. Name the body that handed the pc over, so the gap can be
+ * read off the message. */
+static void ss_nocpu_no_body(SnesState* ss, uint32_t pc24) {
+  const char* from = "(the reset vector)";
+  /* the body in flight if there is one, otherwise the last one that ran: a tail
+   * jmp hands the pc over after its body has already returned */
+  uint32_t fromPc = ss->depth > 0 ? ss->entry[ss->depth - 1].pc24 : ss->lastDispatch;
+  if(fromPc != 0) {
+    const RecompEntry* e = recomp_find(fromPc);
+    from = e != NULL ? e->name : "(an unregistered pc)";
+  }
+  fprintf(stderr,
+          "dream_harness: --no-cpu: no C body at %02X:%04X (canonical %06X)\n"
+          "               handed over by %s",
+          (unsigned) ((pc24 >> 16) & 0xff), (unsigned) (pc24 & 0xffff),
+          ss_canon(pc24), from);
+  if(fromPc != 0) fprintf(stderr, " at %06X", ss_canon(fromPc));
+  fprintf(stderr, ", %d bod%s in flight\n", ss->depth, ss->depth == 1 ? "y" : "ies");
+  exit(3);
+}
+
+/* Run the one body that owns this pc. The dispatcher is the harness's own hook
+ * callback -- the same one the CPU core calls -- so a body is entered, counted
+ * and charged exactly as it is with the CPU running. */
+static void ss_nocpu_call_body(SnesState* ss, uint32_t pc24) {
+  Cpu* c = ss->snes->cpu;
+  ss->dispatches++;
+  if(c->hook == NULL || !c->hook(c->hookCtx, c, pc24)) ss_nocpu_no_body(ss, pc24);
+  ss->lastDispatch = pc24;   /* set on the way out: the message wants the caller */
+}
+
+/* A step taken from inside a body chain (ss_run_callee / ss_run_until_return):
+ * the callee's own bodies run on the caller's stack, so a yield anywhere in the
+ * chain suspends all of it at once. */
+static void ss_nocpu_inner_step(SnesState* ss) {
+  Cpu* c = ss->snes->cpu;
+  if(cpu_runNonInstruction(c)) return;
+  ss_nocpu_call_body(ss, (uint32_t) ((c->k << 16) | c->pc));
+}
+
+static void ss_nocpu_trampoline(void* arg) {
+  SsNoCpuCtx* ctx = (SsNoCpuCtx*) arg;
+  ss_nocpu_call_body(ctx->ss, ctx->startPc);
+}
+
+static void ss_nocpu_suspend(SnesState* ss) {
+  SsNoCpuCtx* ctx = ss->running;
+  Cpu* c = ss->snes->cpu;
+  ctx->pc24 = (uint32_t) ((c->k << 16) | c->pc);
+  ctx->sp = c->sp;
+  ctx->suspended = true;
+  ss->suspensions++;
+  ss_coro_yield(ctx->co);
+  ctx->suspended = false;
+}
+
+/* A suspended context an interrupt displaced is reachable again only through an
+ * rti that lands on its pc with its stack pointer. Once the stack pointer is
+ * back at or above where it stood, the frame that rti would pop is gone and the
+ * routine has been abandoned -- which is what this game's NMI handler does two
+ * instructions in, with `ldx #$01FF ; txs`. Free the stack and put the hook
+ * snapshot depth back where the chain found it. */
+static void ss_nocpu_reap(SnesState* ss) {
+  const Cpu* c = ss->snes->cpu;
+  while(ss->nctx > 0) {
+    SsNoCpuCtx* top = &ss->ctx[ss->nctx - 1];
+    if(!top->suspended || !top->displaced) break;
+    const uint32_t pc24 = (uint32_t) ((c->k << 16) | c->pc);
+    if(c->sp < top->sp || pc24 == top->pc24) break;   /* an rti could still land */
+    ss->depth = top->depth;
+    ss->abandoned++;
+    ss->nctx--;
+  }
+}
+
+static SsNoCpuCtx* ss_nocpu_push(SnesState* ss, uint32_t pc24) {
+  if(ss->nctx >= SS_NOCPU_CTX_MAX) {
+    fprintf(stderr, "dream_harness: --no-cpu: more than %d suspended body chains\n",
+            SS_NOCPU_CTX_MAX);
+    exit(2);
+  }
+  SsNoCpuCtx* ctx = &ss->ctx[ss->nctx++];
+  if(ss->nctx > ss->maxCtx) ss->maxCtx = ss->nctx;
+  if(ctx->co == NULL) ctx->co = ss_coro_new(SS_NOCPU_STACK);
+  ctx->ss = ss;
+  ctx->startPc = pc24;
+  ctx->pc24 = pc24;
+  ctx->sp = ss->snes->cpu->sp;
+  ctx->depth = ss->depth;
+  ctx->suspended = false;
+  ctx->displaced = false;
+  return ctx;
+}
+
+/* One step of the machine with nothing fetching an instruction.
+ *
+ * cpu_runNonInstruction() is the core's own reset / stp / wai / interrupt-entry
+ * path, factored out of cpu_runOpcode so the frame an interrupt pushes and the
+ * cycles it spends are the core's, not a copy of them. Everything else is a pc,
+ * and a pc is a body. */
+static void ss_nocpu_step(SnesState* ss) {
+  Cpu* c = ss->snes->cpu;
+  /* The IRQ path is not part of this program and --no-cpu says so rather than
+   * assuming it: NMITIMEN's shadow at $34 is only ever $00, $01 or $81, so the
+   * h/v timer enables are never set, no `cop` or `brk` is executed, and the
+   * `rti` at unused_vec ($C0:A442) that every non-NMI vector points at is never
+   * reached. If any of that stops being true the machine would take an
+   * interrupt whose frame no body pops, so stop instead of running on. */
+  if(c->irqWanted || ss->snes->hIrqEnabled || ss->snes->vIrqEnabled) {
+    fprintf(stderr, "dream_harness: --no-cpu: an IRQ was enabled or raised"
+                    " (irqWanted %d, hIrq %d, vIrq %d); this ROM never uses one\n",
+            c->irqWanted, ss->snes->hIrqEnabled, ss->snes->vIrqEnabled);
+    exit(3);
+  }
+  ss_nocpu_reap(ss);
+  const bool takingInt = c->intWanted && !c->resetWanted && !c->stopped && !c->waiting;
+  if(cpu_runNonInstruction(c)) {
+    if(takingInt && ss->nctx > 0 && ss->ctx[ss->nctx - 1].suspended) {
+      ss->ctx[ss->nctx - 1].displaced = true;
+    }
+    return;
+  }
+  const uint32_t pc24 = (uint32_t) ((c->k << 16) | c->pc);
+  SsNoCpuCtx* ctx = NULL;
+  if(ss->nctx > 0) {
+    SsNoCpuCtx* top = &ss->ctx[ss->nctx - 1];
+    if(top->suspended && top->pc24 == pc24 && top->sp == c->sp) {
+      ctx = top;                          /* the routine that stopped here */
+    } else if(top->suspended && !top->displaced) {
+      /* Nothing but an interrupt can move the machine away from a suspended
+       * routine: it stopped between two instructions and the scheduler was the
+       * only thing running since. If this fires, a body left the pc somewhere
+       * other than where it suspended. */
+      fprintf(stderr, "dream_harness: --no-cpu: a body suspended at %06X sp %04X"
+                      " but the machine is at %06X sp %04X\n",
+              ss_canon(top->pc24), top->sp, ss_canon(pc24), c->sp);
+      exit(2);
+    }
+  }
+  SsNoCpuCtx* prev = ss->running;
+  if(ctx != NULL) {
+    ss->running = ctx;
+    ss_coro_resume(ctx->co);
+  } else {
+    ctx = ss_nocpu_push(ss, pc24);
+    ss->running = ctx;
+    ss_coro_start(ctx->co, ss_nocpu_trampoline, ctx);
+  }
+  ss->running = prev;
+  if(ss_coro_done(ctx->co)) {
+    /* the chain ran to its end: its stack is free for the next dispatch */
+    ss->nctx--;
+  }
+}
+
+/* snes_catchupApu(), which is static in the core: the APU is run for the cycles
+ * the CPU has spent since it last was. */
+static void ss_nocpu_catchup_apu(Snes* snes) {
+  const int catchupCycles = (int) snes->apuCatchupCycles;
+  const int ranCycles = apu_runCycles(snes->apu, catchupCycles);
+  snes->apuCatchupCycles -= (double) ranCycles;
+}
+
+/* snes_runFrame()'s twin: run to the same instruction boundary, catch the APU
+ * up at the same point. */
+void ss_nocpu_run_frame(SnesState* ss) {
+  ss->flPhase = 0;
+  while(!ss_nocpu_frame_ends_here(ss)) ss_nocpu_step(ss);
+  ss_nocpu_catchup_apu(ss->snes);
 }

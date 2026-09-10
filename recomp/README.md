@@ -100,6 +100,10 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
                                 config/recomp_cycles.txt; 'none' disables it)
       --profile FILE            measure the charge and write FILE (see below)
       --lockstep                run hooks-off vs hooks-on, compare every frame
+      --no-cpu                  run the C bodies with neither CPU core executing
+                                an instruction (see below); implies --hooks on
+                                --spc-hooks on, and is the candidate under
+                                --lockstep
       --test-nesting            self-test: a hook entered inside another hook's
                                 callee keeps its own yield snapshot (see below)
       --test-spc-timing         self-test: sps_op_cycles() against the SPC700
@@ -107,7 +111,9 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
       --quiet                   suppress the per-frame lines
       --help
 
-Exit status is 0 on success, 1 on a lockstep mismatch, 2 on a usage or I/O error.
+Exit status is 0 on success, 1 on a lockstep mismatch, 2 on a usage or I/O error,
+3 on a `--no-cpu` run that reached a pc with no C body (or an IRQ, which this ROM
+never enables).
 
 ### Per-frame output
 
@@ -229,9 +235,10 @@ the routine whether the ROM reaches it as `$C0:A500` or `$80:A500`.
 | bus, timed | `ss_bus_r8`, `ss_bus_w8`, `ss_bus_w16`, `ss_fetch`, `ss_idle` |
 | stack | `ss_push8/16`, `ss_pull8/16` |
 | callees | `ss_call_sub`, `ss_call_long`, `ss_run_callee`, `ss_run_until_return` |
-| control | `ss_rts`, `ss_rtl`, `ss_check_int`, `ss_int_pending`, `ss_yield_wanted` |
+| control | `ss_rts`, `ss_rtl`, `ss_xce`, `ss_wai`, `ss_check_int`, `ss_int_pending`, `ss_yield_wanted` |
 | cycles | `ss_cycles`, `ss_consume_cycles` |
-| registry | `recomp_register`, `recomp_registry`, `RECOMP_REGISTER` |
+| registry | `recomp_register`, `recomp_registry`, `recomp_find`, `RECOMP_REGISTER` |
+| no-cpu | `ss_nocpu_enable`, `ss_nocpu_enabled`, `ss_nocpu_run_frame` |
 
 The timed accessors are the reason a hook can be cycle-exact: they go through the
 same `snes_cpuRead`/`snes_cpuWrite`/`snes_cpuIdle` entry points the CPU core itself
@@ -416,6 +423,197 @@ must see nothing to hand back -- it has only just started -- and the outer hook
 must *still* want to yield afterwards. It exits 0 on pass, 1 on fail, and prints
 one line per check.
 
+## Running without the CPUs
+
+    ./build/recomp/dream_harness --no-cpu --lockstep --quiet \
+        --frames 900 --input recomp/harness/inputs/level_walk_jump.txt
+    python3 tools/recomp_verify.py --no-cpu
+
+In `--no-cpu` nothing fetches an instruction. The C bodies are the program: a
+scheduler starts at the reset body and follows every pc the machine hands over
+-- a tail `jmp`, an `rts`, a callee frame, interrupt entry, the resumption of a
+routine that stopped at a frame boundary -- by looking up the body that owns
+that address in the registry and running it. `cpu_runOpcode` is never called at
+all, and `spc_runOpcode` never reaches its fetch -- except in the SPC700's IPL
+boot ROM, the one documented exception below. The run report says so as a
+measurement rather than a claim:
+
+    no-cpu: 0 65816 instructions and 53547 SPC700 instructions executed by the
+            emulated cores (53547 of them the IPL boot ROM)
+    no-cpu: 38187 bodies dispatched, 152 suspended at a frame boundary or an
+            interrupt, 0 abandoned by an interrupt, 1 stack at once
+    no-cpu: spc 20206 bodies dispatched, 515307 suspended at a catch-up slice
+            boundary
+    no-cpu: the reference executed 6629318 65816 and 4352740 SPC700 instructions
+            over the same run
+
+Everything else is the same machine. The PPU, DMA and HDMA, the DSP, the APU
+timers and the port handshake all keep running out of the vendored core, driven
+by the cycles the bodies charge through the timed accessors, which is why the
+frame timing is identical to the reference's rather than merely close: every
+script passes `--lockstep` at `+0 master cycles and +0 APU cycles`.
+
+### The scheduler
+
+`ss_nocpu_run_frame()` (`harness/snes_state.c`) stands in for `snes_runFrame()`
+-- same stopping point, same APU catch-up at the end -- and its step is:
+
+1. `cpu_runNonInstruction()`, the core's own reset / `stp` / `wai` / interrupt
+   entry path. It is factored out of `cpu_runOpcode` in the vendored core (one
+   more `// dream:` change) rather than copied, so the frame `cpu_doInterrupt`
+   pushes and the cycles it spends are the core's, exactly as they are with the
+   CPU running. It returns false when the machine is standing at an instruction
+   boundary and would fetch next.
+2. Otherwise the pc is a body. It is resolved through the same hook callback the
+   CPU core calls, so a body is entered, counted and cycle-charged identically.
+
+A pc the registry does not name is a fatal error naming the pc and the body that
+handed it over:
+
+    dream_harness: --no-cpu: no C body at 80:9679 (canonical C09679)
+                   handed over by mode1_particle_dispatch at C0922A, 0 bodies in flight
+
+which is what makes the mode the port's **dead-code check**: it cannot run at
+all until every address the program actually reaches has a body. Running it
+until it stopped saying that is what added `loc_C08001`, `loc_C0A4FD`,
+`loc_C0A4FE`, `loc_C0BB81`, `loc_C0A6CD`, `loc_C09679` and `loc_C097DD` on the
+65816 side, and thirteen interior entries on the SPC700 side (below).
+
+### Suspending a routine instead of handing it back
+
+A body is not a resumable object. It is straight-line C that `return`s when
+`ss_yield_wanted()` says the machine has moved on underneath it, leaving the ROM
+to finish the routine from the address it stopped at -- and that address is in
+the middle of a routine, which the registry does not name. With no ROM there is
+nothing to finish it.
+
+So a dispatched body chain runs on a stack of its own (`SsCoro`,
+`makecontext`/`swapcontext`), and a yield *suspends* that stack instead of
+unwinding it. The scheduler gets control back at exactly the instruction
+boundary the reference CPU stops on; resuming continues the body from inside
+`ss_yield_wanted()`, which then answers false. One suspended context is the
+whole of the "resume at an interior address" problem, and it needs no change to
+any body.
+
+Only two boundaries need the machine back, and they are the two the reference
+stops at:
+
+* **an interrupt**, which the 65816 services between two instructions, and
+* **the end of a frame**, where `snes_runFrame()` returns and the harness and
+  the app sample the machine.
+
+Every other yield the ROM would have been offered is invisible from outside the
+routine -- the ROM would simply have finished it, which is what the body now
+does itself -- so suspending for one would cost a context switch and change
+nothing. A 900-frame script suspends about 150 times, because the machine is
+parked on the `wai` at `loc_C0A4FD` at almost every frame boundary and there is
+no body in flight to stop; the ones that do are the boot's long routines and the
+frames where the NMI handler overruns.
+
+A suspension an interrupt displaces is kept, not dropped: an `rti` landing on
+its pc with its stack pointer would resume it. This game's NMI handler resets S
+and parks instead of returning, so the context is reclaimed two instructions
+into the handler (`ldx #$01FF ; txs`), and the hook-snapshot depth the abandoned
+chain was holding goes back with it. The report's "abandoned by an interrupt"
+count is that; it is zero in the current scripts.
+
+### Interrupts
+
+NMI is raised by the PPU at the start of vblank and taken by the core's own
+`cpu_doInterrupt`, before any hook is consulted -- that has always been true of
+the `nmi` body, which is *entered* with PB, PC and P already pushed rather than
+called, and `--no-cpu` changes nothing about it. `--no-cpu` additionally
+*checks* the other half of the story on every step: the IRQ path is never used.
+NMITIMEN's shadow at `$34` is only ever `$00`, `$01` or `$81`, so the h/v timer
+enables are never set; no `cop` or `brk` is executed; and the `rti` at
+`unused_vec` ($C0:A442) that every non-NMI vector points at is never reached. If
+an IRQ is ever enabled or raised the mode stops with an error rather than
+running on.
+
+### The SPC700 side
+
+The catch-up loop drives the driver's bodies the same way, and needs no change
+to the core at all: `sps_nocpu_enable()` puts its own dispatcher in front of the
+harness's on `spc->hook`, and that hook never lets `spc_runOpcode` reach a
+fetch. `apu_runCycles()` calls `spc_runOpcode` until its budget is spent; each
+call either resumes the driver's suspended stack on the instruction it stopped
+at or starts the body that owns the pc, and the body suspends when
+`sps_yield_wanted()` sees the slice end. So the interleaving between the two
+processors is the reference's, instruction boundary for instruction boundary,
+which is what the upload handshake needs: `upload_spc_block` on the 65816 side
+busy-waits against `loader_block_loop` on this one.
+
+It needs one context and never more: the SPC700 takes no interrupts here and
+nothing else moves its pc, so a suspension is always resumed where it stopped.
+
+The **IPL boot ROM** is the one exception in the whole mode. `$FFC0-$FFFF` while
+`apu->romReadable` is the console's own firmware, not this ROM's program: it
+receives the 136-byte loader block at power-on, jumps to it, and is never
+entered again (the driver's "back to the loader" command jumps to `$04F3` in
+ARAM). There is no body for it and `--no-cpu` does not invent one; those
+instructions execute on the core and are counted separately in the report --
+53547 of them, the same number in every script, all of them before the title
+screen appears.
+
+### Interior entry points
+
+The registry names routine entry addresses, and a body starts at its own first
+instruction. Where the program jumps into the *middle* of a routine, the address
+needs a row of its own and a body that can start there -- the shape
+`reset_native_at(ss, entry)` has always used for `loc_C08012` and `loc_C0805E`.
+`--no-cpu` needs it wherever the ROM's own code used to pick the pc up:
+
+| side | entry | inside | reached from |
+|---|---|---|---|
+| 65816 | `loc_C08001` | `reset` | the `xce` after `reset`'s `clc` |
+| 65816 | `loc_C0A4FD` / `loc_C0A4FE` | the park loop | `loc_C0A4F5`'s tail |
+| 65816 | `loc_C0A6CD` | `entity_build_oam_frame` | every emitter's "OAM is full" exit |
+| SPC700 | `loc_0B78` | `seq_instrument` | nine handlers' tails ($0BFF, $0C56, $0CD4, $0DF5, $0EA1, $0EAB, $0EB8, $0EC7, $0F53) |
+| SPC700 | `loc_0B7B` | `seq_instrument` | ten more ($0BB3, $0BBF, $0D6D, $0D8C, $0DD3, $0DE8, $0E8A, $0F0C, $0F40, $0FAC) |
+| SPC700 | `loc_0BBC` | `seq_volume` | `seq_adsr` ($0E4B) |
+| SPC700 | `loc_0CF1`, `loc_0CF4` | `seq_call` | `seq_call_once` ($0D0B, $0D19) |
+| SPC700 | `loc_0D6A` | `seq_return` | $0D4C, `seq_vibrato_delay`, `seq_echo_setup` |
+| SPC700 | `loc_0DDF` | `seq_slide_off` | `seq_slide_up` / `seq_slide_down` ($0D98, $0E0E) |
+| SPC700 | `loc_0DF2` | `seq_tempo` | `seq_tempo_add` ($0E02) |
+| SPC700 | `loc_0E9E` | `seq_set_note_E1` | `seq_set_note_E0` ($0E94) |
+| SPC700 | `loc_0F09` | `seq_echo_on` | seven, including `seq_echo_off`, `seq_fir` and `loc_0F61` |
+| SPC700 | `loc_0F61` | `seq_noise_on` | `seq_noise_off` ($0F74) |
+| SPC700 | `loc_0F86` | `orphan_slide_down2` | `orphan_slide_up2` ($0F7F) |
+| SPC700 | `loc_078E` | `tick_wait` | `cmd6_play` ($0779) and $0790 |
+
+Three of the addresses the check named were not interior at all: they were whole
+routines the port had left to the ROM because a tail `jmp` was the only way in
+and the ROM was still there to take it. They are bodies now, like any other --
+`loc_C0BB81`, the title screen's init that `reset` jumps to, in
+`src/top_level.c`; and `loc_C09679` and `loc_C097DD`, the mode-1 and mode-2
+particle spawn/cull loops the two dispatchers jump to, in `src/particles_fx.c`.
+
+### Two instructions that needed C equivalents
+
+`ss_xce()` and `ss_wai()` (`include/snes_state.h`) are the 65816's `xce` and
+`wai`, each mirroring LakeSnes' own case body minus the opcode fetch. They exist
+because both instructions move state no other accessor reaches -- the emulation
+flag, and the CPU's `waiting` park -- and both are executed by this ROM, so
+without them `--no-cpu` could not get past the third instruction of the program
+or past the end of the first frame. `wai` leaves the machine idling in the
+emulator's own `waiting` path, which `cpu_runNonInstruction()` runs for the
+scheduler exactly as `cpu_runOpcode` runs it for the CPU.
+
+### In the app
+
+`dream` links the same `harness/snes_state.c` and `harness/spc_state.c`, so the
+mode is already in its build. A front end turns it on with
+
+```c
+ss_nocpu_enable(&m->ss, true);      /* after the hook tables are installed */
+sps_nocpu_enable(&m->sps, true);
+...
+ss_nocpu_run_frame(&m->ss);         /* in place of snes_runFrame(m->snes) */
+```
+
+`ss_nocpu_run_frame()` is a drop-in for `snes_runFrame()`: it returns at the
+same instruction boundary and catches the APU up at the same point.
+
 ## The SPC700 hook API
 
 The sound driver is the ROM's other program: 3514 bytes of SPC700 code
@@ -505,6 +703,7 @@ The name is the label in `spc/driver.asm`, because that is what
 | callees | `sps_call`, `sps_run_until_return`, `sps_run_callee` |
 | yield | `sps_yield_wanted` |
 | registry | `recomp_spc_register`, `recomp_spc_registry`, `RECOMP_SPC_REGISTER` |
+| no-cpu | `sps_nocpu_enable`, `sps_nocpu_enabled` |
 
 `spc/spc_time.h` is the SPC700 counterpart of `src/dream_time.h`: one helper per
 opcode form the driver uses, each reproducing that opcode's access sequence from

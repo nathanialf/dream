@@ -214,6 +214,9 @@ typedef struct {
   uint8_t* cov;              /* NULL when not tracing */
   uint64_t covNonRom;        /* PCs seen outside the cart map */
   uint64_t instructions;
+  bool nocpu;                /* --no-cpu: no instruction is ever fetched */
+  uint64_t emulated;         /* 65816 instructions the core actually executed */
+  uint64_t emulatedSpc;      /* SPC700 instructions the core actually executed */
   /* profiling */
   bool profiling;            /* reference pass: measure the ROM's cost */
   bool measureSpend;         /* candidate pass: measure what the hook itself costs */
@@ -368,11 +371,19 @@ static void prof_close(Machine* m, uint16_t sp, uint32_t pc24) {
   }
 }
 
+/* The hook declined: the core is about to fetch and execute the instruction at
+ * this pc. Counting the declines counts exactly the instructions the emulated
+ * 65816 runs, which is the figure --no-cpu exists to drive to zero. */
+static bool harness_hook_declined(Machine* m) {
+  m->emulated++;
+  return false;
+}
+
 static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   Machine* m = (Machine*) ctx;
   m->instructions++;
   if(m->cov != NULL) m->cov[pc24 >> 3] |= (uint8_t) (1u << (pc24 & 7));
-  if(m->hooks == NULL) return false;
+  if(m->hooks == NULL) return harness_hook_declined(m);
 
   if(m->profiling) {
     prof_close(m, cpu->sp, pc24);
@@ -389,12 +400,12 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
         m->profDropped++;               /* reported, never silently dropped */
       }
     }
-    return false;
+    return harness_hook_declined(m);
   }
 
-  if(!m->hooksActive) return false;
+  if(!m->hooksActive) return harness_hook_declined(m);
   int idx = machine_find_hook(m, pc24);
-  if(idx < 0) return false;
+  if(idx < 0) return harness_hook_declined(m);
   const Installed* h = &m->hooks[idx];
   uint64_t before = m->snes->cycles;
   uint16_t spBefore = cpu->sp;
@@ -406,7 +417,7 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
     h->fn(&m->ss);
   } else if(!h->hookFn(&m->ss)) {
     ss_leave_hook(&m->ss);
-    return false;                       /* the hook declined */
+    return harness_hook_declined(m);    /* the hook declined */
   }
   ss_leave_hook(&m->ss);
   recomp_hook_hits[idx]++;
@@ -449,15 +460,17 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
 static bool harness_spc_hook(void* ctx, Spc* spc, uint16_t pc) {
   Machine* m = (Machine*) ctx;
   (void) spc;
-  if(!m->spcHooksActive || m->spcHooks == NULL) return false;
-  for(unsigned i = 0; i < m->spcHookCount; i++) {
-    if(m->spcHooks[i].addr != pc) continue;
-    sps_enter_hook(&m->sps);
-    m->spcHooks[i].fn(&m->sps);
-    sps_leave_hook(&m->sps);
-    recomp_spc_hook_hits[i]++;
-    return true;
+  if(m->spcHooksActive && m->spcHooks != NULL) {
+    for(unsigned i = 0; i < m->spcHookCount; i++) {
+      if(m->spcHooks[i].addr != pc) continue;
+      sps_enter_hook(&m->sps);
+      m->spcHooks[i].fn(&m->sps);
+      sps_leave_hook(&m->sps);
+      recomp_spc_hook_hits[i]++;
+      return true;
+    }
   }
+  m->emulatedSpc++;                     /* the core will fetch this one */
   return false;
 }
 
@@ -506,6 +519,7 @@ static void machine_install_spc(Machine* m, SpcInstalled* table, unsigned count,
 }
 
 static void machine_free(Machine* m) {
+  if(m->nocpu) { ss_nocpu_free(&m->ss); sps_nocpu_free(&m->sps); }
   free(m->cov);
   free(m->profCycles);
   free(m->profCalls);
@@ -514,6 +528,14 @@ static void machine_free(Machine* m) {
   free(m->profNoReturn);
   free(m->profRomTail);
   snes_free(m->snes);
+}
+
+/* One frame. In --no-cpu the scheduler stands in for snes_runFrame(): same
+ * stopping point, same APU catch-up at the end (see recomp/README.md, "Running
+ * without the CPUs"). */
+static void machine_run_frame(Machine* m) {
+  if(m->nocpu) ss_nocpu_run_frame(&m->ss);
+  else snes_runFrame(m->snes);
 }
 
 static void machine_set_input(Machine* m, uint16_t state, uint16_t state2) {
@@ -629,6 +651,10 @@ static void usage(void) {
     "                     with hooks off and write FILE; implies --hooks off\n"
     "  --only A,B,C       install only these routines, by name (bisecting a failure)\n"
     "  --lockstep         run hooks-off vs hooks-on and compare every frame\n"
+    "  --no-cpu           run the C bodies with neither CPU core executing an\n"
+    "                     instruction: the registry resolves every pc hand-off and\n"
+    "                     a pc with no body is a fatal error. Implies --hooks on\n"
+    "                     --spc-hooks on; with --lockstep it is the candidate\n"
     "  --test-nesting     self-test: a hook entered inside another hook's callee\n"
     "                     keeps its own yield snapshot (exits 0 on pass, 1 on fail)\n"
     "  --test-spc-timing  self-test: sps_op_cycles() against the SPC700 core's own\n"
@@ -1120,6 +1146,7 @@ int main(int argc, char** argv) {
   bool testNesting = false;
   bool testSpcTiming = false;
   bool spcHooksOn = false;
+  bool noCpu = false;
   const char* tableName = "all";
 
   for(int i = 1; i < argc; i++) {
@@ -1152,6 +1179,7 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--cycles") == 0 && hasNext) cyclesPath = argv[++i];
     else if(strcmp(a, "--only") == 0 && hasNext) onlyList = argv[++i];
     else if(strcmp(a, "--lockstep") == 0) lockstep = true;
+    else if(strcmp(a, "--no-cpu") == 0) noCpu = true;
     else if(strcmp(a, "--test-nesting") == 0) testNesting = true;
     else if(strcmp(a, "--test-spc-timing") == 0) testSpcTiming = true;
     else if(strcmp(a, "--quiet") == 0) quiet = true;
@@ -1179,6 +1207,24 @@ int main(int argc, char** argv) {
     free(rom);
     free(script.ev);
     return rc;
+  }
+
+  if(noCpu) {
+    /* The mode is "the C bodies are the program", so every body has to be
+     * installed on both processors; a narrowed table would report a routine the
+     * port has as missing. --profile measures the ROM's own code, which is the
+     * one thing this mode does not run. */
+    if(profilePath != NULL) {
+      fprintf(stderr, "dream_harness: --no-cpu and --profile are exclusive\n");
+      return 2;
+    }
+    if(onlyList != NULL || strcmp(tableName, "all") != 0) {
+      fprintf(stderr, "dream_harness: --no-cpu needs the whole table"
+                      " (no --only, no --hook-table)\n");
+      return 2;
+    }
+    hooksOn = true;
+    spcHooksOn = true;
   }
 
   unsigned tableCount = 0;
@@ -1228,6 +1274,16 @@ int main(int argc, char** argv) {
     machine_init(&cand, rom, romLen, table, tableCount, true, false);
     machine_install_spc(&cand, spcTable, spcTableCount, lockstep ? spcHooksOn : false);
   }
+  /* --no-cpu applies to the candidate under --lockstep -- the reference is
+   * always the ROM running on both cores -- and to the single machine
+   * otherwise. Enable it after the tables are installed: the SPC side steps in
+   * front of the harness's own dispatcher. */
+  if(noCpu) {
+    Machine* nc = twin ? &cand : &ref;
+    nc->nocpu = true;
+    ss_nocpu_enable(&nc->ss, true);
+    sps_nocpu_enable(&nc->sps, true);
+  }
   if(profilePath != NULL) {
     unsigned n = tableCount ? tableCount : 1;
     ref.profiling = true;
@@ -1254,7 +1310,9 @@ int main(int argc, char** argv) {
   printf("mode: %s, hooks %s, spc-hooks %s, table %s (%u entr%s, %d cycle-costed,"
          " %u spc), frames %d, input %s\n",
          profilePath ? "profile (hooks off, measuring)" :
-           lockstep ? "lockstep (reference=hooks off, candidate=hooks on)" : "single",
+           lockstep ? (noCpu ? "lockstep (reference=both CPUs, candidate=no-cpu)"
+                             : "lockstep (reference=hooks off, candidate=hooks on)")
+                    : (noCpu ? "single (no-cpu)" : "single"),
          lockstep || hooksOn ? "on" : "off",
          spcHooksOn ? "on" : "off",
          tableName, tableCount, tableCount == 1 ? "y" : "ies", charged, spcTableCount,
@@ -1269,14 +1327,14 @@ int main(int argc, char** argv) {
     uint16_t state, state2;
     input_state_at(&script, frame, &state, &state2);
     machine_set_input(&ref, state, state2);
-    snes_runFrame(ref.snes);
+    machine_run_frame(&ref);
     machine_snapshot(&ref);
     Region rr[REGION_COUNT];
     machine_regions(&ref, rr);
 
     if(twin) {
       machine_set_input(&cand, state, state2);
-      snes_runFrame(cand.snes);
+      machine_run_frame(&cand);
       machine_snapshot(&cand);
       Region cr[REGION_COUNT];
       machine_regions(&cand, cr);
@@ -1362,9 +1420,38 @@ int main(int argc, char** argv) {
              recomp_spc_hook_hits[i], recomp_spc_hook_hits[i] == 1 ? "" : "s");
     }
   }
-  printf("%d frames in %.3f s = %.1f fps (%.2fx realtime), %" PRIu64 " instructions\n",
+  if(noCpu) {
+    const Machine* nc = twin ? &cand : &ref;
+    /* The whole claim of the mode, as a measurement rather than an assertion:
+     * the number of instructions the emulated processors fetched and executed.
+     * Every one of them would have been a hook that declined, and in this mode
+     * a decline is a fatal error, so the only figure that can survive to here
+     * is zero -- except for the SPC700's IPL boot ROM, which is the console's
+     * firmware and has no body (see recomp/README.md). */
+    printf("no-cpu: %" PRIu64 " 65816 instructions and %" PRIu64 " SPC700 instructions"
+           " executed by the emulated cores (%" PRIu64 " of them the IPL boot ROM)\n",
+           nc->emulated, nc->emulatedSpc, sps_nocpu_ipl_instructions(&nc->sps));
+    printf("no-cpu: %" PRIu64 " bodies dispatched, %" PRIu64 " suspended at a frame"
+           " boundary or an interrupt, %" PRIu64 " abandoned by an interrupt,"
+           " %d stack%s at once\n",
+           ss_nocpu_dispatches(&nc->ss), ss_nocpu_suspensions(&nc->ss),
+           ss_nocpu_abandoned(&nc->ss), ss_nocpu_max_contexts(&nc->ss),
+           ss_nocpu_max_contexts(&nc->ss) == 1 ? "" : "s");
+    printf("no-cpu: spc %" PRIu64 " bodies dispatched, %" PRIu64 " suspended at a"
+           " catch-up slice boundary\n",
+           sps_nocpu_dispatches(&nc->sps), sps_nocpu_suspensions(&nc->sps));
+    if(twin)
+      printf("no-cpu: the reference executed %" PRIu64 " 65816 and %" PRIu64
+             " SPC700 instructions over the same run\n", ref.emulated, ref.emulatedSpc);
+  }
+  /* ref.instructions counts the instruction boundaries the dispatcher was
+   * offered. With a CPU running that is the instruction count; in a --no-cpu
+   * run without a reference machine there are no instructions and the same
+   * counter is the number of bodies the scheduler entered, so say which. */
+  printf("%d frames in %.3f s = %.1f fps (%.2fx realtime), %" PRIu64 " %s\n",
          ranFrames, secs, secs > 0 ? ranFrames / secs : 0.0,
-         secs > 0 ? (ranFrames / secs) / 60.0988 : 0.0, ref.instructions);
+         secs > 0 ? (ranFrames / secs) / 60.0988 : 0.0, ref.instructions,
+         noCpu && !twin ? "body dispatches" : "instructions");
 
   machine_free(&ref);
   if(twin) machine_free(&cand);

@@ -176,6 +176,35 @@ bool ss_run_callee(SnesState* ss, uint16_t spBefore);
  * is what keeps a hook from being atomic over more than one of them. */
 bool ss_yield_wanted(const SnesState* ss);
 
+/* ---- instructions the hook API cannot otherwise perform ----------------- *
+ *
+ * Two 65816 instructions move state no other accessor reaches, and this ROM
+ * executes both. Without them a body has to hand the instruction back to the
+ * emulated CPU, which is exactly what --no-cpu cannot do.
+ *
+ * ss_xce mirrors LakeSnes cpu.c case 0xfb and ss_wai case 0xcb, in each case
+ * minus the opcode fetch the body supplies. `wai` parks the CPU: the machine
+ * idles until an interrupt is raised, which the scheduler (or the core's own
+ * cpu_runOpcode) handles from the `waiting` flag, so the body simply returns
+ * afterwards with the pc on the instruction after it. */
+void ss_xce(SnesState* ss);
+void ss_wai(SnesState* ss);
+
+/* ---- running with no CPU (--no-cpu) ------------------------------------- *
+ *
+ * The C bodies are the program: nothing fetches an instruction, and every pc
+ * hand-off -- a tail jmp, a return, a callee frame, interrupt entry, the
+ * resumption of a yielded routine -- is resolved through the registry instead.
+ * A pc with no body is a fatal error naming the pc and the body that handed it
+ * over, which is what makes --no-cpu the port's dead-code check.
+ *
+ * ss_nocpu_run_frame() stands in for snes_runFrame(): same stopping point, same
+ * APU catch-up at the end of the frame. Enable the mode once, after the hook
+ * table is installed, on both processors (sps_nocpu_enable is its twin). */
+void ss_nocpu_enable(SnesState* ss, bool on);
+bool ss_nocpu_enabled(const SnesState* ss);
+void ss_nocpu_run_frame(SnesState* ss);
+
 /* ---- DMA ---------------------------------------------------------------- */
 /* Let a transfer the hook just started actually run. A write to MDMAEN only
  * arms the channel; the emulator performs the transfer on the next bus cycle
@@ -207,6 +236,11 @@ typedef struct RecompEntry {
  * is a fatal error. */
 void recomp_register(uint32_t entry_addr, const char* name, RecompFn fn);
 const RecompEntry* recomp_registry(unsigned* count);
+
+/* The registry entry that owns a running 24-bit pc, or NULL. The pc is folded
+ * through the $80/$81 mirror banks onto the canonical $C0:0000+offset form
+ * first, so one entry catches the routine however the ROM reached it. */
+const RecompEntry* recomp_find(uint32_t pc24);
 
 /* Boilerplate for a file's static table:
  *     static const RecompEntry kEntries[] = { { 0xc0a500, "clear_sprite_table", clear_sprite_table } };

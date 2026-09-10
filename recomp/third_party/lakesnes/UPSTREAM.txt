@@ -22,12 +22,19 @@ Not copied: main.c (SDL frontend), tracing.[ch], zip/, resources/, Makefile.
 Local modifications (all marked with a "// dream:" comment)
 -----------------------------------------------------------
 1. cpu.h  — added the CpuHookHandler typedef, the `hook` / `hookCtx` fields on
-            struct Cpu, and the cpu_checkIntPublic() declaration.
+            struct Cpu, and the cpu_checkIntPublic() / cpu_runNonInstruction()
+            declarations.
 2. cpu.c  — cpu_init() clears hook/hookCtx; cpu_runOpcode() calls the hook with the
             24-bit PC before fetching an opcode and returns early if it reports the
             instruction handled; added cpu_checkIntPublic(), a public wrapper around
             the static cpu_checkInt() so a hook can end a replaced routine with the
-            same interrupt latch the real last cycle performs.
+            same interrupt latch the real last cycle performs; and split the
+            non-instruction half of cpu_runOpcode() out into cpu_runNonInstruction()
+            (the reset sequence, the stp/wai park and interrupt entry, unchanged and
+            in the same order), which cpu_runOpcode() now calls first. The recomp's
+            --no-cpu scheduler runs the machine's non-instruction steps through it,
+            so the frame an NMI pushes and the cycles it spends are the core's own
+            rather than a copy (recomp/README.md, "Running without the CPUs").
 3. spc.h  — added the SpcHookHandler typedef and the `hook` / `hookCtx` fields on
             struct Spc: the SPC700 twin of 1, for the sound driver's recomp.
 4. spc.c  — spc_init() clears hook/hookCtx; spc_runOpcode() calls the hook with the

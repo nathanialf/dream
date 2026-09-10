@@ -219,6 +219,19 @@ bool sps_run_callee(SpcState* sp, uint8_t spBefore);
  * more than one of them. */
 bool sps_yield_wanted(const SpcState* sp);
 
+/* ---- running with no CPU (--no-cpu) ------------------------------------- *
+ *
+ * The driver's C bodies as the program: the catch-up loop in the APU drives
+ * them instead of the SPC700's instruction fetch, and a pc with no body is a
+ * fatal error. Enable it once, after the SPC hook table is installed; the
+ * 65816's twin is ss_nocpu_enable() in snes_state.h and both must be on.
+ *
+ * The SPC700's IPL boot ROM is the one exception: it is the console's firmware,
+ * runs only to receive the loader block at power-on, and has no body. Those
+ * instructions still execute on the core and are counted separately. */
+void sps_nocpu_enable(SpcState* sp, bool on);
+bool sps_nocpu_enabled(const SpcState* sp);
+
 /* ---- routine registry ------------------------------------------------- */
 /* An SPC recomped routine: it always handles the call, and is responsible for
  * leaving the pc where the SPC700 routine would have (sps_ret, or an explicit

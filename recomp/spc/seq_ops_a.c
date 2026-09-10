@@ -120,15 +120,22 @@ static bool call_seq_pop_x(SpcState* sp, uint16_t at,
  * long. loc_0B78 and loc_0B7B are its tail and the driver's most-jumped-to
  * address: $00/$01 is the length to add to the slot's sequence pointer.
  * ------------------------------------------------------------------------- */
-static void seq_instrument(SpcState* sp) {
+/* Entered in its middle as well: loc_0B78, loc_0B7B. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_instrument_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0B78) goto loc_0B78;
+  if(entry == 0x0B7B) goto loc_0B7B;
 
   if(call_seq_pop_x(sp, 0x0B72, &a, &x, &y)) return;      /* 0B72 call seq_pop_x */
   S(0x0B75, 3);                                           /* 0B75 call seq_load_srcn */
   if(call_sub(sp, 0x0B78, SEQ_LOAD_SRCN)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
+loc_0B78:
 
   S(0x0B78, 3); s_movs(sp, sps_dp(sp, 0x00), 0x02);       /* 0B78 mov $00,#$02 */
+loc_0B7B:
   S(0x0B7B, 3); s_movs(sp, sps_dp(sp, 0x01), 0x00);       /* 0B7B mov $01,#$00 */
   S(0x0B7E, 2); a = s_load(sp, s_adr_dpx(sp, 0x44, x));   /* 0B7E mov a,$44+x */
   S(0x0B80, 2); y = s_load(sp, s_adr_dpx(sp, 0x54, x));   /* 0B80 mov y,$54+x */
@@ -140,6 +147,10 @@ static void seq_instrument(SpcState* sp) {
   S(0x0B88, 2); a = 0x01; sps_set_zn(sp, a);              /* 0B88 mov a,#$01 */
   S(0x0B8A, 1); S_PUB(); sps_ret(sp);                     /* 0B8A ret */
 }
+
+static void seq_instrument(SpcState* sp) { seq_instrument_at(sp, 0x0B72); }
+static void loc_0B78(SpcState* sp) { seq_instrument_at(sp, 0x0B78); }
+static void loc_0B7B(SpcState* sp) { seq_instrument_at(sp, 0x0B7B); }
 
 /* ---------------------------------------------------------------------------
  * seq_load_srcn -- $0B8B
@@ -199,16 +210,24 @@ static void seq_instr_full(SpcState* sp) {
  * Two bytes, L and R. loc_0BBC (the three-byte event length) is its tail and
  * seq_adsr jumps into it.
  * ------------------------------------------------------------------------- */
-static void seq_volume(SpcState* sp) {
+/* Entered in its middle as well: loc_0BBC. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_volume_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0BBC) goto loc_0BBC;
 
   if(call_seq_pop_x(sp, 0x0BB6, &a, &x, &y)) return;      /* 0BB6 call seq_pop_x */
   S(0x0BB9, 3);                                           /* 0BB9 call seq_read_volume */
   if(call_sub(sp, 0x0BBC, SEQ_READ_VOLUME)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
+loc_0BBC:
   S(0x0BBC, 3); s_movs(sp, sps_dp(sp, 0x00), 0x03);       /* 0BBC mov $00,#$03 */
   S(0x0BBF, 3); S_GOTO(LOC_0B7B);                         /* 0BBF jmp loc_0B7B */
 }
+
+static void seq_volume(SpcState* sp) { seq_volume_at(sp, 0x0BB6); }
+static void loc_0BBC(SpcState* sp) { seq_volume_at(sp, 0x0BBC); }
 
 /* ---------------------------------------------------------------------------
  * seq_read_volume -- $0BC2
@@ -547,8 +566,13 @@ static void seq_jump(SpcState* sp) {
  * slot's own eight-deep stack ($0334/$03B4/$0434, indexed by seq_sp $D4+x) and
  * the pointer takes the target.
  * ------------------------------------------------------------------------- */
-static void seq_call(SpcState* sp) {
+/* Entered in its middle as well: loc_0CF1, loc_0CF4. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_call_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0CF1) goto loc_0CF1;
+  if(entry == 0x0CF4) goto loc_0CF4;
 
   if(call_seq_pop_x(sp, 0x0CE6, &a, &x, &y)) return;      /* 0CE6 call seq_pop_x */
   S(0x0CE9, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));   /* 0CE9 mov a,($00)+y */
@@ -557,8 +581,10 @@ static void seq_call(SpcState* sp) {
   S(0x0CEE, 3);                                           /* 0CEE call seq_push_return */
   if(call_sub(sp, 0x0CF1, SEQ_PUSH_RETURN)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
+loc_0CF1:
   S(0x0CF1, 3); s_idx(sp);                                /* 0CF1 mov $0334+y,a */
   s_movs(sp, (uint16_t) (0x0334 + y), a);
+loc_0CF4:
   S(0x0CF4, 2); s_inc_mem(sp, s_adr_dpx(sp, 0xD4, x));    /* 0CF4 inc $D4+x */
   S(0x0CF6, 2);                                           /* 0CF6 movw ya,$02 */
   { uint16_t ya = s_movw_load(sp, 0x02); a = (uint8_t) ya; y = (uint8_t) (ya >> 8); }
@@ -567,6 +593,10 @@ static void seq_call(SpcState* sp) {
   S(0x0CFC, 2); a = 0x01; sps_set_zn(sp, a);              /* 0CFC mov a,#$01 */
   S(0x0CFE, 1); S_PUB(); sps_ret(sp);                     /* 0CFE ret */
 }
+
+static void seq_call(SpcState* sp) { seq_call_at(sp, 0x0CE6); }
+static void loc_0CF1(SpcState* sp) { seq_call_at(sp, 0x0CF1); }
+static void loc_0CF4(SpcState* sp) { seq_call_at(sp, 0x0CF4); }
 
 /* ---------------------------------------------------------------------------
  * seq_call_once -- $0CFF, seq command $21
@@ -635,8 +665,12 @@ static void seq_push_return(SpcState* sp) {
  * again -- so this doubles as the loop end; when it reaches zero the sequence
  * carries on after the call through loc_0D6A.
  * ------------------------------------------------------------------------- */
-static void seq_return(SpcState* sp) {
+/* Entered in its middle as well: loc_0D6A. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_return_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0D6A) goto loc_0D6A;
 
   if(call_seq_pop_x(sp, 0x0D34, &a, &x, &y)) return;      /* 0D34 call seq_pop_x */
   S(0x0D37, 2); s_dec_mem(sp, s_adr_dpx(sp, 0xD4, x));    /* 0D37 dec $D4+x */
@@ -655,6 +689,7 @@ static void seq_return(SpcState* sp) {
   bool done = sps_z(sp);
   S(0x0D4C, 2); s_branch(sp, done);                       /* 0D4C beq loc_0D6A */
   if(done) {
+loc_0D6A:
     S(0x0D6A, 3); s_movs(sp, sps_dp(sp, 0x00), 0x04);     /* 0D6A mov $00,#$04 */
     S(0x0D6D, 3); S_GOTO(LOC_0B7B);                       /* 0D6D jmp loc_0B7B */
   }
@@ -677,6 +712,9 @@ static void seq_return(SpcState* sp) {
   S(0x0D67, 2); a = 0x01; sps_set_zn(sp, a);              /* 0D67 mov a,#$01 */
   S(0x0D69, 1); S_PUB(); sps_ret(sp);                     /* 0D69 ret */
 }
+
+static void seq_return(SpcState* sp) { seq_return_at(sp, 0x0D34); }
+static void loc_0D6A(SpcState* sp) { seq_return_at(sp, 0x0D6A); }
 
 /* ---------------------------------------------------------------------------
  * seq_set_length -- $0D70, seq command $06
@@ -799,8 +837,12 @@ static void seq_slide_down(SpcState* sp) {
  * Clears the slide flag and falls into loc_0DDF, the one-byte-event tail that
  * seq_clear_length and seq_vibrato_off jump to.
  * ------------------------------------------------------------------------- */
-static void seq_slide_off(SpcState* sp) {
+/* Entered in its middle as well: loc_0DDF. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_slide_off_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0DDF) goto loc_0DDF;
 
   S(0x0DD6, 1); x = s_pop(sp);                            /* 0DD6 pop x */
   S(0x0DD7, 3); s_idx(sp);                                /* 0DD7 mov a,$0150+x */
@@ -808,6 +850,7 @@ static void seq_slide_off(SpcState* sp) {
   S(0x0DDA, 2); a = s_and(sp, a, 0xFE);                   /* 0DDA and a,#$FE */
   S(0x0DDC, 3); s_idx(sp);                                /* 0DDC mov $0150+x,a */
   s_movs(sp, (uint16_t) (0x0150 + x), a);
+loc_0DDF:
   S(0x0DDF, 2); a = 0x01; sps_set_zn(sp, a);              /* 0DDF mov a,#$01 */
   S(0x0DE1, 2); s_movs(sp, sps_dp(sp, 0x00), a);          /* 0DE1 mov $00,a */
   S(0x0DE3, 2); s_movs(sp, s_adr_dpx(sp, 0x34, x), a);    /* 0DE3 mov $34+x,a */
@@ -816,24 +859,35 @@ static void seq_slide_off(SpcState* sp) {
   S(0x0DE8, 3); S_GOTO(LOC_0B7B);                         /* 0DE8 jmp loc_0B7B */
 }
 
+static void seq_slide_off(SpcState* sp) { seq_slide_off_at(sp, 0x0DD6); }
+static void loc_0DDF(SpcState* sp) { seq_slide_off_at(sp, 0x0DDF); }
+
 /* ---------------------------------------------------------------------------
  * seq_tempo -- $0DEB, seq command $0B
  *
  * The tick accumulator's increment ($1F), which tick_wait adds up eighty times
  * a second to decide when the sequencer advances. loc_0DF2 is its tail.
  * ------------------------------------------------------------------------- */
-static void seq_tempo(SpcState* sp) {
+/* Entered in its middle as well: loc_0DF2. --no-cpu resolves every pc
+ * through the registry, so an address the driver jumps into needs a body that
+ * can start there. */
+static void seq_tempo_at(SpcState* sp, uint16_t entry) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
+  if(entry == 0x0DF2) goto loc_0DF2;
 
   S(0x0DEB, 1); x = s_pop(sp);                            /* 0DEB pop x */
   S(0x0DEC, 2); y = 0x01; sps_set_zn(sp, y);              /* 0DEC mov y,#$01 */
   S(0x0DEE, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));   /* 0DEE mov a,($00)+y */
   S(0x0DF0, 2); s_movs(sp, sps_dp(sp, 0x1F), a);          /* 0DF0 mov $1F,a */
+loc_0DF2:
   S(0x0DF2, 3);                                           /* 0DF2 call seq_retrigger */
   if(call_sub(sp, 0x0DF5, SEQ_RETRIGGER)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
   S(0x0DF5, 3); S_GOTO(LOC_0B78);                         /* 0DF5 jmp loc_0B78 */
 }
+
+static void seq_tempo(SpcState* sp) { seq_tempo_at(sp, 0x0DEB); }
+static void loc_0DF2(SpcState* sp) { seq_tempo_at(sp, 0x0DF2); }
 
 /* ---------------------------------------------------------------------------
  * seq_tempo_add -- $0DF8, seq command $0C
@@ -933,9 +987,12 @@ static void seq_read_vibrato(SpcState* sp) {
 
 static const SpcRecompEntry kSeqOpsA[] = {
   { 0x0b72, "seq_instrument",        seq_instrument },
+  { 0x0b78, "loc_0B78",           loc_0B78 },
+  { 0x0b7b, "loc_0B7B",           loc_0B7B },
   { 0x0b8b, "seq_load_srcn",         seq_load_srcn },
   { 0x0b97, "seq_instr_full",        seq_instr_full },
   { 0x0bb6, "seq_volume",            seq_volume },
+  { 0x0bbc, "loc_0BBC",           loc_0BBC },
   { 0x0bc2, "seq_read_volume",       seq_read_volume },
   { 0x0bcc, "sub_0BCC",              sub_0BCC },
   { 0x0bf0, "seq_volume_mono",       seq_volume_mono },
@@ -947,15 +1004,20 @@ static const SpcRecompEntry kSeqOpsA[] = {
   { 0x0ca0, "seq_echo_delay",        seq_echo_delay },
   { 0x0cd7, "seq_jump",              seq_jump },
   { 0x0ce6, "seq_call",              seq_call },
+  { 0x0cf1, "loc_0CF1",           loc_0CF1 },
+  { 0x0cf4, "loc_0CF4",           loc_0CF4 },
   { 0x0cff, "seq_call_once",         seq_call_once },
   { 0x0d1c, "seq_push_return",       seq_push_return },
   { 0x0d34, "seq_return",            seq_return },
+  { 0x0d6a, "loc_0D6A",           loc_0D6A },
   { 0x0d70, "seq_set_length",        seq_set_length },
   { 0x0d8f, "seq_clear_length",      seq_clear_length },
   { 0x0d9b, "seq_slide_up",          seq_slide_up },
   { 0x0da2, "seq_slide_down",        seq_slide_down },
   { 0x0dd6, "seq_slide_off",         seq_slide_off },
+  { 0x0ddf, "loc_0DDF",           loc_0DDF },
   { 0x0deb, "seq_tempo",             seq_tempo },
+  { 0x0df2, "loc_0DF2",           loc_0DF2 },
   { 0x0df8, "seq_tempo_add",         seq_tempo_add },
   { 0x0e05, "seq_vibrato_off",       seq_vibrato_off },
   { 0x0e11, "seq_vibrato",           seq_vibrato },

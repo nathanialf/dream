@@ -22,13 +22,13 @@
  * `rti` every other vector points at -- and it does pop that frame, in
  * LakeSnes' own order (two idles, P, PC, latch, PB).
  *
- * `reset` and the emulation flag. `clc ; xce` is the one instruction pair the
- * hook API cannot perform: nothing in snes_state.h clears the 65816's
- * emulation bit, and leaving it set would force m and x back to 1 on every
- * later `rep`. So the body models the `clc`, hands the `xce` back to the ROM
- * by pointing the pc at it, and picks the routine up again at `$8002` from a
- * second registered entry. One ROM instruction runs; the rest of the 244 bytes
- * are C. The routine has three more entry addresses. Two are there because the
+ * `reset` and the emulation flag. `clc ; xce` is two entries rather than two
+ * lines, because the yield between them has to have an address to land on:
+ * `reset` models the `clc` and points the pc at the `xce`, `loc_C08001` models
+ * the `xce` with `ss_xce()` and points it at `$8002`, and `reset_native` picks
+ * the routine up there. (`ss_xce()` exists because e is the one bit of 65816
+ * state no other accessor reaches, and leaving it set would force m and x back
+ * to 1 on every later `rep`.) The routine has three more entry addresses. Two are there because the
  * ROM jumps into its middle: `loc_C08042` (the mode restart, from
  * `nmi_handler_title_fade`) and `loc_C0805E` (the per-mode re-init, from
  * `nmi_handler_gameplay`). The third, `loc_C08012`, is the head of the WRAM
@@ -38,11 +38,12 @@
  * ROM's forever. With it the clear takes 26 hand-backs and the rest of the
  * routine runs as C.
  *
- * The park loop. `wai` puts the CPU into a state the hook API has no way to
- * enter, so `loc_C0A4F5` stops one instruction short of it and hands the two
- * instruction loop at `loc_C0A4FD` back to the ROM. That is the only code in
- * this file the 65816 executes on its own by design, and it executes it
- * because a hook gave it the pc.
+ * The park loop. `wai` puts the CPU into a state only the core can leave, so
+ * `loc_C0A4FD` models the instruction with `ss_wai()` and returns: the machine
+ * then idles in the emulator's own `waiting` path -- `cpu_runOpcode`'s, or the
+ * `--no-cpu` scheduler's, both the same code -- until the next NMI lifts it.
+ * `loc_C0A4FE` is the `bra` back to it, which only an IRQ this game never
+ * enables could ever reach.
  *
  * Calls to converted callees go through the emulator with a real pushed frame
  * (the JSR / JSL / JSR_IAX macros below), so the callee's own hook fires at its
@@ -116,6 +117,12 @@
 #define MEMSEL    0x420D
 #define RDNMI     0x4210
 #define TIMEUP    0x4211
+#define TMW       0x212E
+#define DMAP1     0x4310
+#define A1TL1     0x4312
+#define A1B1      0x4314
+#define DASB1     0x4317
+#define NTRL1     0x431A
 #define DMAP2     0x4320
 #define A1TL2     0x4322
 #define A1B2      0x4324
@@ -534,10 +541,9 @@ static void nmi_install_handler(SnesState* ss) {
  * ($8267 and $C00A) arrives 16-bit, which makes the store to NMITIMEN write
  * WRIO as well and the stz to JOYSER0 cover $4017. Both are modelled.
  *
- * The `wai` at loc_C0A4FD is the one instruction the hook API cannot perform,
- * so the body stops here and hands the two-instruction park loop back to the
- * ROM by pointing the pc at it. The next NMI lifts the CPU out of it and the
- * `nmi` hook above runs again. */
+ * The two-instruction park loop at loc_C0A4FD is its own entry below: the body
+ * stops here and points the pc at it. The next NMI lifts the CPU out of the
+ * `wai` and the `nmi` hook above runs again. */
 static void nmi_park(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
@@ -561,7 +567,35 @@ static void nmi_park(SnesState* ss) {
     S(0xA4FA, 3);                           /* C0A4FA stz JOYSER0 */
     t_write16(ss, ss_abs(ss, JOYSER0), 0);
   }
-  TAIL(pb, 0xA4FD);                         /* loc_C0A4FD: wai / bra, the ROM's */
+  TAIL(pb, 0xA4FD);                         /* into the wai park loop below */
+}
+
+/* loc_C0A4FD — the park loop itself, `wai ; bra loc_C0A4FD`.
+ *
+ * `wai` stops the 65816 until an interrupt is raised; the machine idles there
+ * for the rest of the frame and the next NMI lifts it, so the frame line's pc
+ * is $80:A4FE, the `bra` the interrupt is taken on. ss_wai() is the instruction
+ * (LakeSnes cpu.c case 0xcb, minus the opcode fetch): both bodies exist so that
+ * --no-cpu has no instruction left to hand to a CPU. The `bra` runs only if
+ * something lifts the park without an interrupt being taken, which needs an IRQ
+ * this game never enables -- it is modelled because the address is reachable,
+ * not because it is reached. */
+static void nmi_wai(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+
+  S(0xA4FD, 1);                             /* C0A4FD wai */
+  ss_wai(ss);
+  TAIL(pb, 0xA4FE);
+}
+
+static void nmi_park_loop(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+
+  S(0xA4FE, 1);                             /* C0A4FE bra loc_C0A4FD */
+  t_branch(ss, true);
+  TAIL(pb, 0xA4FD);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1455,6 +1489,261 @@ static void ppu_regs_default_8E39(SnesState* ss) { ppu_regs_default_at(ss, 0x8E3
 static void ppu_regs_default_8E7F(SnesState* ss) { ppu_regs_default_at(ss, 0x8E7F); }
 
 /* ---------------------------------------------------------------------------
+ * loc_C0BB81 — the title screen's init, and the last routine `reset` reaches
+ *
+ * `reset` ends `jmp loc_C0BB81`, and this is where the program spends its first
+ * two seconds: it clears the twelve words of the fade table at $0F43, seeds the
+ * six title parameters in $7F0F86, sets the PPU up for mode 3 with BG1 alone,
+ * copies 512 bytes of palette into CGRAM (keeping a copy at $7F0F91 for the
+ * fade DMA to re-upload from), and then fills VRAM: 40 KB of tiles from
+ * $C6:002B, 4 KB of $0030 fill, and four tilemaps whose entries are the ROM's
+ * word plus $0030. It finishes by arming HDMA channel 1 on the $C00D table,
+ * clearing the two interrupt latches, arming NMI and auto-joypad in the
+ * NMITIMEN shadow and installing `nmi_handler_title_fade` through loc_C0A4E9.
+ *
+ * It is a routine and not a tail of `reset` because `reset` reaches it with a
+ * jmp, so the registry has to name it; it was the ROM's own code until
+ * --no-cpu, which has no ROM to give it to. Written from out/dream.asm
+ * $BB81-$BD1D, instruction for instruction like the rest of the file.
+ *
+ * Two things in it are the ROM's own oddities and are transliterated as they
+ * stand: the `clc` before the first tilemap loop's `adc #$0030` is inside the
+ * loop, while the other three tilemap loops have no `clc` at all and carry
+ * whatever the previous iteration left; and the `lda #$02` at $BCFB loads a
+ * value the next instruction (`stz HDMAEN`) throws away.
+ *
+ * Entry: m = x = 0, DB = PB = $00 (reset's `phk ; plb`), so every absolute
+ * store is a bank-0 one.
+ * ------------------------------------------------------------------------- */
+static void title_init(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+  const uint16_t dp = ss_dp(ss);
+  bool taken;
+
+  /* the twelve fade-table words at $0F43 */
+  S(0xBB81, 3); t_write16(ss, ss_abs(ss, 0x0F43), 0);
+  S(0xBB84, 3); t_write16(ss, ss_abs(ss, 0x0F45), 0);
+  S(0xBB87, 3); t_write16(ss, ss_abs(ss, 0x0F47), 0);
+  S(0xBB8A, 3); t_write16(ss, ss_abs(ss, 0x0F49), 0);
+  S(0xBB8D, 3); t_write16(ss, ss_abs(ss, 0x0F4B), 0);
+  S(0xBB90, 3); t_write16(ss, ss_abs(ss, 0x0F4D), 0);
+  S(0xBB93, 3); t_write16(ss, ss_abs(ss, 0x0F4F), 0);
+  S(0xBB96, 3); t_write16(ss, ss_abs(ss, 0x0F51), 0);
+  S(0xBB99, 3); t_write16(ss, ss_abs(ss, 0x0F53), 0);
+  S(0xBB9C, 3); t_write16(ss, ss_abs(ss, 0x0F55), 0);
+  S(0xBB9F, 3); t_write16(ss, ss_abs(ss, 0x0F57), 0);
+  S(0xBBA2, 3); t_write16(ss, ss_abs(ss, 0x0F59), 0);
+  SIMM16(0xBBA5); a = 0x0F41; ss_set_nz16(ss, a);      /* C0BBA5 lda #$0F41 */
+  S(0xBBA8, 3); t_write16(ss, ss_abs(ss, 0x0F41), a);  /* C0BBA8 sta $0F41 */
+  S(0xBBAB, 2); t_write16(ss, (uint16_t) (dp + 0x00E3), 0);   /* C0BBAB stz $E3 */
+
+  SIMM16(0xBBAD); a = 0x0002; ss_set_nz16(ss, a);      /* C0BBAD lda #$0002 */
+  S(0xBBB0, 4); t_write16(ss, 0x7F0F86, a);            /* C0BBB0 sta.l $7F0F86 */
+  SIMM16(0xBBB4); a = 0x0008; ss_set_nz16(ss, a);      /* C0BBB4 lda #$0008 */
+  S(0xBBB7, 4); t_write16(ss, 0x7F0F88, a);            /* C0BBB7 sta.l $7F0F88 */
+  SIMM16(0xBBBB); a = 0x0040; ss_set_nz16(ss, a);      /* C0BBBB lda #$0040 */
+  S(0xBBBE, 4); t_write16(ss, 0x7F0F8A, a);            /* C0BBBE sta.l $7F0F8A */
+  SIMM16(0xBBC2); a = 0x0070; ss_set_nz16(ss, a);      /* C0BBC2 lda #$0070 */
+  S(0xBBC5, 4); t_write16(ss, 0x7F0F8C, a);            /* C0BBC5 sta.l $7F0F8C */
+  SIMM16(0xBBC9); a = 0x0070; ss_set_nz16(ss, a);      /* C0BBC9 lda #$0070 */
+  S(0xBBCC, 4); t_write16(ss, 0x7F0F8E, a);            /* C0BBCC sta.l $7F0F8E */
+  SIMM16(0xBBD0); a = 0x0000; ss_set_nz16(ss, a);      /* C0BBD0 lda #$0000 */
+  S(0xBBD3, 3); t_write16(ss, ss_abs(ss, MDMAEN), a);  /* C0BBD3 sta MDMAEN (and HDMAEN) */
+
+  SEP(0xBBD6, 0x30);                                   /* C0BBD6 sep #$30 */
+  x = (uint16_t) (x & 0xff); y = (uint16_t) (y & 0xff);
+  SIMM8(0xBBD8); a = (uint16_t) ((a & 0xff00) | 0x28); ss_set_nz8(ss, 0x28);
+  S(0xBBDA, 4); t_write8(ss, 0x7F0F90, 0x28);          /* C0BBDA sta.l $7F0F90 */
+  SIMM8(0xBBDE); a = (uint16_t) (a & 0xff00); ss_set_nz8(ss, 0x00);
+  S(0xBBE0, 4); t_write8(ss, 0x7F1195, 0x00);          /* C0BBE0 sta.l $7F1195 */
+  SIMM8(0xBBE4); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
+  S(0xBBE6, 3); t_write8(ss, ss_abs(ss, INIDISP_), 0x80);  /* C0BBE6 sta INIDISP */
+  S(0xBBE9, 3); t_write8(ss, ss_abs(ss, VMAIN), 0x80);     /* C0BBE9 sta VMAIN */
+  SIMM8(0xBBEC); a = (uint16_t) ((a & 0xff00) | 0x03); ss_set_nz8(ss, 0x03);
+  S(0xBBEE, 3); t_write8(ss, ss_abs(ss, BGMODE), 0x03);    /* C0BBEE sta BGMODE */
+  SIMM8(0xBBF1); a = (uint16_t) ((a & 0xff00) | 0x60); ss_set_nz8(ss, 0x60);
+  S(0xBBF3, 3); t_write8(ss, ss_abs(ss, BG1SC), 0x60);     /* C0BBF3 sta BG1SC */
+  S(0xBBF6, 3); t_write8(ss, ss_abs(ss, BG12NBA), 0);      /* C0BBF6 stz BG12NBA */
+  S(0xBBF9, 3); t_write8(ss, ss_abs(ss, BG1HOFS), 0);      /* C0BBF9 stz BG1HOFS */
+  S(0xBBFC, 3); t_write8(ss, ss_abs(ss, BG1HOFS), 0);      /* C0BBFC stz BG1HOFS */
+  S(0xBBFF, 3); t_write8(ss, ss_abs(ss, BG1VOFS), 0);      /* C0BBFF stz BG1VOFS */
+  S(0xBC02, 3); t_write8(ss, ss_abs(ss, BG1VOFS), 0);      /* C0BC02 stz BG1VOFS */
+  S(0xBC05, 3); t_write8(ss, ss_abs(ss, W12SEL), 0);       /* C0BC05 stz W12SEL */
+  S(0xBC08, 3); t_write8(ss, ss_abs(ss, WOBJSEL), 0);      /* C0BC08 stz WOBJSEL */
+  SIMM8(0xBC0B); a = (uint16_t) ((a & 0xff00) | 0x01); ss_set_nz8(ss, 0x01);
+  S(0xBC0D, 3); t_write8(ss, ss_abs(ss, TM), 0x01);        /* C0BC0D sta TM */
+  S(0xBC10, 3); t_write8(ss, ss_abs(ss, TS), 0);           /* C0BC10 stz TS */
+  S(0xBC13, 3); t_write8(ss, ss_abs(ss, TMW), 0);          /* C0BC13 stz TMW */
+  S(0xBC16, 3); t_write8(ss, ss_abs(ss, TSW), 0);          /* C0BC16 stz TSW */
+  S(0xBC19, 3); t_write8(ss, ss_abs(ss, CGWSEL), 0);       /* C0BC19 stz CGWSEL */
+  S(0xBC1C, 3); t_write8(ss, ss_abs(ss, SETINI), 0);       /* C0BC1C stz SETINI */
+  S(0xBC1F, 3); t_write8(ss, ss_abs(ss, CGADD), 0);        /* C0BC1F stz CGADD */
+
+  /* 512 palette bytes into CGRAM, and a copy at $7F0F91 the fade re-uploads */
+  REP(0xBC22, 0x10);                                   /* C0BC22 rep #$10 */
+  SIMM16(0xBC24); x = 0x0000; ss_set_nz16(ss, x);      /* C0BC24 ldx #$0000 */
+  SIMM16(0xBC27); y = 0x0200; ss_set_nz16(ss, y);      /* C0BC27 ldy #$0200 */
+  for(;;) {                                            /* loc_C0BC2A */
+    S(0xBC2A, 4);                                      /* lda.l data_C6A36B,x */
+    { const uint8_t v = t_read8(ss, (0xC6A36Bu + x) & 0xffffff);
+      a = (uint16_t) ((a & 0xff00) | v); ss_set_nz8(ss, v); }
+    S(0xBC2E, 3); t_write8(ss, ss_abs(ss, CGDATA), (uint8_t) a);   /* sta CGDATA */
+    S(0xBC31, 4); t_write8(ss, (0x7F0F91u + x) & 0xffffff, (uint8_t) a);
+    SI(0xBC35); x = alu_inc16(ss, x);                  /* C0BC35 inx */
+    SI(0xBC36); y = alu_dec16(ss, y);                  /* C0BC36 dey */
+    taken = y != 0;
+    S(0xBC37, 1); t_branch(ss, taken);                 /* C0BC37 bne loc_C0BC2A */
+    if(!taken) break;
+  }
+
+  /* 40 KB of tiles from $C6:002B into VRAM $0600 */
+  REP(0xBC39, 0x30);                                   /* C0BC39 rep #$30 */
+  SIMM16(0xBC3B); a = 0x0600; ss_set_nz16(ss, a);      /* C0BC3B lda #$0600 */
+  S(0xBC3E, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BC3E sta VMADDL */
+  SIMM16(0xBC41); x = 0x0000; ss_set_nz16(ss, x);      /* C0BC41 ldx #$0000 */
+  SIMM16(0xBC44); y = 0x9CC0; ss_set_nz16(ss, y);      /* C0BC44 ldy #$9CC0 */
+  for(;;) {                                            /* loc_C0BC47 */
+    S(0xBC47, 4);                                      /* lda.l data_C6002B,x */
+    a = t_read16(ss, (0xC6002Bu + x) & 0xffffff); ss_set_nz16(ss, a);
+    S(0xBC4B, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBC4E); x = alu_inc16(ss, x);                  /* C0BC4E inx */
+    SI(0xBC4F); x = alu_inc16(ss, x);                  /* C0BC4F inx */
+    SI(0xBC50); y = alu_dec16(ss, y);                  /* C0BC50 dey */
+    SI(0xBC51); y = alu_dec16(ss, y);                  /* C0BC51 dey */
+    taken = y != 0;
+    S(0xBC52, 1); t_branch(ss, taken);                 /* C0BC52 bne loc_C0BC47 */
+    if(!taken) break;
+  }
+
+  /* 4 KB of $0030 fill at VRAM $6000 */
+  SIMM16(0xBC54); a = 0x6000; ss_set_nz16(ss, a);      /* C0BC54 lda #$6000 */
+  S(0xBC57, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BC57 sta VMADDL */
+  SIMM16(0xBC5A); x = 0x1000; ss_set_nz16(ss, x);      /* C0BC5A ldx #$1000 */
+  SIMM16(0xBC5D); a = 0x0030; ss_set_nz16(ss, a);      /* C0BC5D lda #$0030 */
+  for(;;) {                                            /* loc_C0BC60 */
+    S(0xBC60, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBC63); x = alu_dec16(ss, x);                  /* C0BC63 dex */
+    taken = x != 0;
+    S(0xBC64, 1); t_branch(ss, taken);                 /* C0BC64 bne loc_C0BC60 */
+    if(!taken) break;
+  }
+
+  /* four tilemaps, each entry the ROM's word plus $0030. Only the first loop
+   * clears carry, and it does so inside itself; the other three carry whatever
+   * the previous iteration's adc left, which is the ROM's own arithmetic. */
+  SIMM16(0xBC66); x = 0x0000; ss_set_nz16(ss, x);      /* C0BC66 ldx #$0000 */
+  SIMM16(0xBC69); a = 0x6500; ss_set_nz16(ss, a);      /* C0BC69 lda #$6500 */
+  S(0xBC6C, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BC6C sta VMADDL */
+  SIMM16(0xBC6F); y = 0x0340; ss_set_nz16(ss, y);      /* C0BC6F ldy #$0340 */
+  for(;;) {                                            /* loc_C0BC72 */
+    S(0xBC72, 4);                                      /* lda.l data_C69CEB,x */
+    a = t_read16(ss, (0xC69CEBu + x) & 0xffffff); ss_set_nz16(ss, a);
+    SI(0xBC76); ss_set_c(ss, false);                   /* C0BC76 clc */
+    SIMM16(0xBC77); a = alu_adc16(ss, a, 0x0030);      /* C0BC77 adc #$0030 */
+    SI(0xBC7A); x = alu_inc16(ss, x);                  /* C0BC7A inx */
+    SI(0xBC7B); x = alu_inc16(ss, x);                  /* C0BC7B inx */
+    S(0xBC7C, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBC7F); y = alu_dec16(ss, y);                  /* C0BC7F dey */
+    SI(0xBC80); y = alu_dec16(ss, y);                  /* C0BC80 dey */
+    taken = y != 0;
+    S(0xBC81, 1); t_branch(ss, taken);                 /* C0BC81 bne loc_C0BC72 */
+    if(!taken) break;
+  }
+
+  SIMM16(0xBC83); x = 0x0000; ss_set_nz16(ss, x);      /* C0BC83 ldx #$0000 */
+  SIMM16(0xBC86); a = 0x6960; ss_set_nz16(ss, a);      /* C0BC86 lda #$6960 */
+  S(0xBC89, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BC89 sta VMADDL */
+  SIMM16(0xBC8C); y = 0x01C0; ss_set_nz16(ss, y);      /* C0BC8C ldy #$01C0 */
+  for(;;) {                                            /* loc_C0BC8F */
+    S(0xBC8F, 4);                                      /* lda.l data_C6A02B,x */
+    a = t_read16(ss, (0xC6A02Bu + x) & 0xffffff); ss_set_nz16(ss, a);
+    SIMM16(0xBC93); a = alu_adc16(ss, a, 0x0030);      /* C0BC93 adc #$0030 */
+    SI(0xBC96); x = alu_inc16(ss, x);                  /* C0BC96 inx */
+    SI(0xBC97); x = alu_inc16(ss, x);                  /* C0BC97 inx */
+    S(0xBC98, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBC9B); y = alu_dec16(ss, y);                  /* C0BC9B dey */
+    SI(0xBC9C); y = alu_dec16(ss, y);                  /* C0BC9C dey */
+    taken = y != 0;
+    S(0xBC9D, 1); t_branch(ss, taken);                 /* C0BC9D bne loc_C0BC8F */
+    if(!taken) break;
+  }
+
+  SIMM16(0xBC9F); x = 0x0000; ss_set_nz16(ss, x);      /* C0BC9F ldx #$0000 */
+  SIMM16(0xBCA2); a = 0x61C0; ss_set_nz16(ss, a);      /* C0BCA2 lda #$61C0 */
+  S(0xBCA5, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BCA5 sta VMADDL */
+  SIMM16(0xBCA8); y = 0x0080; ss_set_nz16(ss, y);      /* C0BCA8 ldy #$0080 */
+  for(;;) {                                            /* loc_C0BCAB */
+    S(0xBCAB, 4);                                      /* lda.l data_C6A2EB,x */
+    a = t_read16(ss, (0xC6A2EBu + x) & 0xffffff); ss_set_nz16(ss, a);
+    SIMM16(0xBCAF); a = alu_adc16(ss, a, 0x0030);      /* C0BCAF adc #$0030 */
+    SI(0xBCB2); x = alu_inc16(ss, x);                  /* C0BCB2 inx */
+    SI(0xBCB3); x = alu_inc16(ss, x);                  /* C0BCB3 inx */
+    S(0xBCB4, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBCB7); y = alu_dec16(ss, y);                  /* C0BCB7 dey */
+    SI(0xBCB8); y = alu_dec16(ss, y);                  /* C0BCB8 dey */
+    taken = y != 0;
+    S(0xBCB9, 1); t_branch(ss, taken);                 /* C0BCB9 bne loc_C0BCAB */
+    if(!taken) break;
+  }
+
+  SIMM16(0xBCBB); x = 0x0000; ss_set_nz16(ss, x);      /* C0BCBB ldx #$0000 */
+  SIMM16(0xBCBE); a = 0x6DA0; ss_set_nz16(ss, a);      /* C0BCBE lda #$6DA0 */
+  S(0xBCC1, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0BCC1 sta VMADDL */
+  SIMM16(0xBCC4); y = 0x0100; ss_set_nz16(ss, y);      /* C0BCC4 ldy #$0100 */
+  for(;;) {                                            /* loc_C0BCC7 */
+    S(0xBCC7, 4);                                      /* lda.l data_C6A1EB,x */
+    a = t_read16(ss, (0xC6A1EBu + x) & 0xffffff); ss_set_nz16(ss, a);
+    SIMM16(0xBCCB); a = alu_adc16(ss, a, 0x0030);      /* C0BCCB adc #$0030 */
+    SI(0xBCCE); x = alu_inc16(ss, x);                  /* C0BCCE inx */
+    SI(0xBCCF); x = alu_inc16(ss, x);                  /* C0BCCF inx */
+    S(0xBCD0, 3); t_write16(ss, ss_abs(ss, VMDATAL), a);  /* sta VMDATAL */
+    SI(0xBCD3); y = alu_dec16(ss, y);                  /* C0BCD3 dey */
+    SI(0xBCD4); y = alu_dec16(ss, y);                  /* C0BCD4 dey */
+    taken = y != 0;
+    S(0xBCD5, 1); t_branch(ss, taken);                 /* C0BCD5 bne loc_C0BCC7 */
+    if(!taken) break;
+  }
+
+  JSR(0xBCD7, 0x9234);                                 /* jsr vram_upload_shared_tileset_c5 */
+
+  /* HDMA channel 1 on the $C0:000D table, then the interrupt latches and the
+   * handler install */
+  SEP(0xBCDA, 0x30);                                   /* C0BCDA sep #$30 */
+  x = (uint16_t) (x & 0xff); y = (uint16_t) (y & 0xff);
+  SIMM8(0xBCDC); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
+  S(0xBCDE, 3); t_write8(ss, ss_abs(ss, A1B1), 0x80);      /* C0BCDE sta A1B1 */
+  SIMM8(0xBCE1); a = (uint16_t) ((a & 0xff00) | 0x7F); ss_set_nz8(ss, 0x7F);
+  S(0xBCE3, 3); t_write8(ss, ss_abs(ss, DASB1), 0x7F);     /* C0BCE3 sta DASB1 */
+  SIMM8(0xBCE6); a = (uint16_t) ((a & 0xff00) | 0xE0); ss_set_nz8(ss, 0xE0);
+  S(0xBCE8, 3); t_write8(ss, ss_abs(ss, NTRL1), 0xE0);     /* C0BCE8 sta NTRL1 */
+  REP(0xBCEB, 0x20);                                   /* C0BCEB rep #$20 */
+  SIMM16(0xBCED); a = 0x0048; ss_set_nz16(ss, a);      /* C0BCED lda #$0048 */
+  S(0xBCF0, 3); t_write16(ss, ss_abs(ss, DMAP1), a);   /* C0BCF0 sta DMAP1 */
+  SIMM16(0xBCF3); a = 0xC00D; ss_set_nz16(ss, a);      /* C0BCF3 lda #$C00D */
+  S(0xBCF6, 3); t_write16(ss, ss_abs(ss, A1TL1), a);   /* C0BCF6 sta A1TL1 */
+  SEP(0xBCF9, 0x20);                                   /* C0BCF9 sep #$20 */
+  SIMM8(0xBCFB); a = (uint16_t) ((a & 0xff00) | 0x02); ss_set_nz8(ss, 0x02);
+  S(0xBCFD, 3); t_write8(ss, ss_abs(ss, HDMAEN), 0);       /* C0BCFD stz HDMAEN */
+  S(0xBD00, 3); t_write8(ss, ss_abs(ss, INIDISP_), 0);     /* C0BD00 stz INIDISP */
+  REP(0xBD03, 0x20);                                   /* C0BD03 rep #$20 */
+  SEP(0xBD05, 0x20);                                   /* C0BD05 sep #$20 */
+  S(0xBD07, 3);                                        /* C0BD07 lda TIMEUP */
+  { const uint8_t v = t_read8(ss, ss_abs(ss, TIMEUP));
+    a = (uint16_t) ((a & 0xff00) | v); ss_set_nz8(ss, v); }
+  SIMM8(0xBD0A); a = (uint16_t) ((a & 0xff00) | 0x81); ss_set_nz8(ss, 0x81);
+  S(0xBD0C, 2); t_write8(ss, (uint16_t) (dp + nmitimen_shadow), 0x81);
+  SIMM8(0xBD0E); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
+  S(0xBD10, 3); t_write8(ss, ss_abs(ss, OAMADDH), 0x80);   /* C0BD10 sta OAMADDH */
+  SIMM8(0xBD13); a = (uint16_t) ((a & 0xff00) | 0x01); ss_set_nz8(ss, 0x01);
+  S(0xBD15, 3); t_write8(ss, ss_abs(ss, MEMSEL), 0x01);    /* C0BD15 sta MEMSEL */
+  REP(0xBD18, 0x20);                                   /* C0BD18 rep #$20 */
+  SIMM16(0xBD1A); a = 0xBD20; ss_set_nz16(ss, a);      /* C0BD1A lda #$BD20 */
+  SJMP(0xBD1D);                                        /* C0BD1D jmp loc_C0A4E9 */
+  TAIL(pb, 0xA4E9);
+}
+
+/* ---------------------------------------------------------------------------
  * nmi_handler_title_fade — $C0:BD20
  *
  * The title screen's own NMI handler, installed by the init at $BD1D. It runs
@@ -2018,9 +2307,9 @@ loc_C0C008:
  * $0E..$11 and park its slot index in $0BB4, arm NMI and auto-joypad in the
  * NMITIMEN shadow, clear the frame's scratch and install nmi_handler_gameplay.
  *
- * `clc ; xce` is handed back to the ROM (see the file header): the first entry
- * models the `clc` and points the pc at the `xce`, and the second picks the
- * routine up at $8002.
+ * `clc ; xce` is two entries: the first models the `clc` and points the pc at
+ * the `xce`, which loc_C08001 below models with ss_xce(), and the third picks
+ * the routine up at $8002.
  * ------------------------------------------------------------------------- */
 
 /* sei / cld: only the one flag moves, but ss_set_p is the only way to reach I
@@ -2038,11 +2327,25 @@ static void reset(SnesState* ss) {
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
 
   SI(0x8000); ss_set_c(ss, false);          /* C08000 clc */
-  /* C08001 xce -- handed to the ROM: no entry point in snes_state.h clears the
-   * emulation flag, and the routine cannot go on until it is clear. The next
-   * registered entry is $8002, so exactly this one instruction runs as 65816
-   * code and the hook takes the routine straight back. */
-  TAIL(pb, 0x8001);
+  TAIL(pb, 0x8001);                         /* into the xce below */
+}
+
+/* loc_C08001 — the `xce` that leaves emulation mode.
+ *
+ * Its own entry rather than two lines of `reset`, because the `clc` above it is
+ * where the very first yield of a run can land: the ROM used to run this one
+ * instruction and hand the routine back at $8002, and the address has to be
+ * dispatchable for that. ss_xce() is the instruction (LakeSnes cpu.c case 0xfb,
+ * minus the opcode fetch) -- e is the one bit of 65816 state no other accessor
+ * reaches, and without it --no-cpu could not get past the third instruction of
+ * the program. */
+static void reset_xce(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+
+  S(0x8001, 1);                             /* C08001 xce */
+  ss_xce(ss);
+  TAIL(pb, 0x8002);
 }
 
 /* The body picks the routine up at $8002, and again at the head of the WRAM
@@ -2233,6 +2536,7 @@ static void reset_mode_init(SnesState* ss){ reset_mode_restart(ss, 0x805E); }
  * there to be read and to be bisectable with --only. */
 static const RecompEntry kTopLevel[] = {
   { 0xc08000, "reset",                  reset },
+  { 0xc08001, "loc_C08001",             reset_xce },
   { 0xc08002, "reset_native",           reset_native },
   { 0xc08012, "loc_C08012",             reset_wram_clear },
   { 0xc08042, "loc_C08042",             reset_restart },
@@ -2248,6 +2552,9 @@ static const RecompEntry kTopLevel[] = {
   { 0xc0a4d1, "nmi",                    nmi },
   { 0xc0a4e9, "loc_C0A4E9",             nmi_install_handler },
   { 0xc0a4f5, "loc_C0A4F5",             nmi_park },
+  { 0xc0a4fd, "loc_C0A4FD",             nmi_wai },
+  { 0xc0a4fe, "loc_C0A4FE",             nmi_park_loop },
+  { 0xc0bb81, "loc_C0BB81",             title_init },
   { 0xc0bd20, "nmi_handler_title_fade", nmi_handler_title_fade },
 };
 RECOMP_REGISTER(kTopLevel)
