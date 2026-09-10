@@ -42,7 +42,10 @@ Two timing facts, found by binary search with `--dump-wram` against `$A4`:
 | `level_walk_jump.txt` | 3700 | 0, 1, 2 | 102/123 | jump-while-walking and jump-in-place in mode 0, then Select-cycles into modes 1 and 2 and walks there too. |
 | `level_long_traverse.txt` | 3840 | 0 | 86/123 | holds Right for 3600 frames (plus a jump) in mode 0 -- long enough to cross whatever camera-position thresholds gate the weather/zone-transition triggers. |
 | `level_attack_enemy.txt` | 1300 | 0 | 81/123 | walks right to the type-`$0E` entity mode 0 places at x=895,y=159, then presses B (the attack button) once within its 0x48px hit range. |
-| **union** | | **0, 1, 2, 3** | **111/123** | |
+| `p2_enemy_attack.txt` | 2000 | 0, 1, 2 | 98/120 | Select-cycles to mode 2, walks to that mode's type-`$0E` entity (spawn x=813,y=120), then presses B on **player 2's pad** so the entity itself attacks, hitting the player. See "A second controller as a debug/test feature" below. |
+| **union** | | **0, 1, 2, 3** | **110/120** | |
+
+(`title_start_right.txt` through `level_attack_enemy.txt`'s figures above are as originally measured, against an `/123` denominator; `compare_coverage.py` run against this checkout's current `out/codemap.txt`/`out/symbols.txt` now reports 120 static routines, not 123, for reasons this pass did not chase down. `p2_enemy_attack.txt`'s row and the union figure were both measured directly against that current `/120` tool, the same way as the command below.)
 
 Per-script counts and the union were measured directly (not estimated) with:
 
@@ -97,10 +100,60 @@ python3 recomp/harness/compare_coverage.py <(dream_harness --trace ... --input r
   `joy2_pressed`) and force `entity_state = $000C` the instant bit `$8000` (B)
   is newly pressed. Walking right to within 0x48px of the entity and pressing
   B there puts `anim_cb_hit_enemies`'s in-range branch on the executed path.
+- **p2_enemy_attack.txt** (+2): `anim_cb_hit_player` and `anim_cb_sfx_0602`,
+  the two routines the previous batch left cold for want of a second
+  controller. See the section below.
 
-## Cold routines: 12/123, and why
+## A second controller as a debug/test feature
 
-10 of these are dead code or otherwise unreachable by design, not a gap in the
+`anim_cb_hit_player` ($C0:B0CE) and `anim_cb_sfx_0602` ($C0:B05C) share the
+same gate as `entity_hit_react`/`anim_cb_hit_enemies` above, but mirrored onto
+player 2: `check_pending_player_attack` ($C0:8E8E) is `jtbl_C0827A`'s
+game-mode-1/2/3 slot (mode 0's slot is `mode0_camera_zone_update` instead), and
+when `$0BB4` (`player_attack_flag`, set once per level load to the first live
+entity of type `$0E`-`$11`) is nonzero it feeds player 2's held/pressed words
+(`$8E`/`$90`) into `entity_apply_hit_reaction`'s shared body ($C0:9A66) with
+*that entity* as the target -- the exact state machine the player's own entity
+runs off `$8A`/`$8C` (`recomp/src/entities.c`'s `entity_hit_reaction_body`).
+A type-`$0E`-`$11` entity has no attack AI of its own -- the one in every level
+this batch has found is `entity_ai_none`, confirmed against `out/dream.asm`
+and `docs/naming_proposals.md` section 4/8E8E -- so the only way it ever
+reaches an attacking state (`entity_state` = `$000C`/`$000E`, selecting anim
+id 118/11A per `entity_state_anim_table`) is a second pad acting on its
+behalf. Nothing in the ROM's own AI or attract-mode logic ever touches
+`joy2_held`/`joy2_pressed`; this reads as a leftover developer/QA hook for
+puppeting an enemy's attack on demand while testing hit reactions, not a
+gameplay feature -- there is no in-game way to reach it with one controller.
+
+Reaching it also needs `game_mode`'s animation "row offset":
+`entity_update_tick`'s state -> `entity_anim_id` lookup ($C0:9983-9991,
+`recomp/src/entities_ai.c`) adds `$0BAC` (`state_row_offset`: `$0018` in game
+mode 1, `$0000` in every other mode) to `entity_state` before indexing
+`entity_state_anim_table`, so the same (type, state) picks a different table
+row in mode 1 than in mode 0/2/3. Empirically, driving mode 1's own
+type-`$0E` entity (spawn x=768,y=20) this way sets its state to `$000C` for
+exactly one frame and then resets to `$0000` without ever entering
+`anim_cb_hit_player` -- the `+$18` row lands on some other, short-lived
+animation. Mode 2 keeps the row offset at 0 (like mode 0) while still routing
+`jtbl_C0827A` to `check_pending_player_attack`, so `p2_enemy_attack.txt` uses
+mode 2's own type-`$0E` entity (spawn x=813,y=120) instead. `entity_apply_hit_reaction`
+sets that entity's state to exactly `$000C`; `entity_update_tick`'s own per-tick
+facing/ground-probe step (the same `and #$FFFC ; ora facing_state_bits_table,Y`
+every entity gets every frame) then ORs this entity's steady facing sub-bits
+(`$0002`, the same low bits its idle state already carried) back in, landing on
+`$000E` and holding it there -- confirmed directly in WRAM, along with
+`anim_cb_hit_player`'s own hit landing (the player's `entity_state` becomes
+`$0010`, the hurt state `entity_hit_react` writes).
+
+None of this was reachable before `recomp/harness/main.c` grew a second input
+column (`frame Buttons | Buttons2`, `recomp/README.md`): `machine_set_input()`
+used to hardcode `snes->input2->currentState = 0` and the old script format
+had no way to address a second controller, so `$8E`/`$90` could never be
+nonzero. `p2_enemy_attack.txt` is the script that exercises the new column.
+
+## Cold routines: 10/120, and why
+
+All 10 are dead code or otherwise unreachable by design, not a gap in the
 scripts:
 
 | routine | why it is cold |
@@ -116,18 +169,9 @@ scripts:
 | `oam_emit_frame_1row` | sibling of `oam_emit_frame_2row`/`2row_flip`/`3row`/`3row_flip`, all of which are hot, but not a coverage-budget gap: it (and its 5-byte-header path) only fires for a sprite frame id `< 4` (`docs/data_formats.md` "Caveats worth knowing"), and every one of the 96 animation scripts in `data_C41858` was decoded and none ever sets a frame field to `1`, `2` or `3` (frame `0` means "empty animation", per `docs/handler_tables.md` §2) -- confirmed directly by walking the script table with python rather than inferred from a script budget. |
 | `oam_emit_frame_1row_flip` | same table, same conclusion, facing the other way. |
 
-2 are plausibly reachable in principle but need player 2's controller, which
-`dream_harness` does not model -- not a gap this batch's scripts can close:
-
-| routine | what it needs |
-|---|---|
-| `anim_cb_hit_player` | animation ids `118`/`11A` (`docs/handler_tables.md` §2) on a type-`$0E`/`$10` entity: raw `entity_state` (`docs/naming_proposals.md` §7) has to be exactly `$000C`/`$000E` for that (type, state) pair to select those ids in `entity_state_anim_table` (`data_C0B7AE`, verified against the ROM's raw table bytes, not just the disassembly). Every `entity_state,X` write in `out/dream.asm` bank `$C0` was enumerated: entity AI (`entity_ai_chase_player`/`entity_ai_none`) never writes it, and `entity_hit_react` only ever writes `$10`/`$12`/`$14`/`$16`. The one write that *can* produce `$000C` is `entity_apply_hit_reaction`'s shared body (`docs/handler_tables.md` §"Other pointer-table candidates"), reached for a type-`$0E`/`$10` target only through `check_pending_player_attack` ($C0:8E8E), which reads player 2's `$8E`/`$90` (`joy2_held`/`joy2_pressed`, `dream_ram.h`). `recomp/harness/main.c`'s `machine_set_input()` hardcodes `snes->input2->currentState = 0` and the input-script format (`kButtons` in the same file) has no way to address a second controller, so no input script can ever make that bit nonzero. |
-| `anim_cb_sfx_0602` | same ids `118`/`11A`, same missing controller -- see above. |
-
-Reaching these two would need `dream_harness`/`machine_set_input()` to drive a
-second controller, which is outside `recomp/harness/inputs/`'s reach; `explore.py`
-already found the RAM (`$0BB4`/`$8E`/`$90`) and the exact (type, state) pair, so a
-follow-up only needs the harness change, not more searching.
+The 2 that used to sit here, `anim_cb_hit_player` and `anim_cb_sfx_0602`, needed
+player 2's controller and are covered now by `p2_enemy_attack.txt` -- see "A
+second controller as a debug/test feature" above.
 
 ## Reproducing
 

@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
 """recomp_verify.py — the gate for the C port.
 
-Runs `dream_harness --lockstep --hooks on` over every input script in
-`recomp/harness/inputs/`, one at a time, and reports per-script pass/fail plus
-the per-routine hook call counts summed across the scripts. A routine counts as
-verified when every script passed *and* it was actually entered at least once:
-a table that never fired proves nothing.
+Runs `dream_harness --lockstep --hooks on --spc-hooks on` over every input
+script in `recomp/harness/inputs/`, one at a time, and reports per-script
+pass/fail plus the per-routine hook call counts summed across the scripts. A
+routine counts as verified when every script passed *and* it was actually
+entered at least once: a table that never fired proves nothing.
 
-    python3 tools/recomp_verify.py               # report only, exit 1 on failure
-    python3 tools/recomp_verify.py --update      # also rewrite config/recomp.txt
+Both halves of the port are gated the same way and in the same run: the 65816
+routines in recomp/src (reported as `hook`) and the SPC700 sound-driver routines
+in recomp/spc (reported as `spchook`). The lockstep comparison covers WRAM, VRAM,
+CGRAM, OAM, the SPC700's 64 KB of ARAM, the 128 DSP registers and the SPC
+registers, so one pass proves both.
+
+    python3 tools/recomp_verify.py                    # report only, exit 1 on failure
+    python3 tools/recomp_verify.py --spc-hooks off    # the 65816 side alone
+    python3 tools/recomp_verify.py --update           # also rewrite config/recomp.txt
 
 `--update` writes config/recomp.txt (which tools/progress.py credits to the
-`recomp` badge) with the routines that were both called and passing. Routines
-that are registered but were never reached by any script are listed under a
-comment as unverified rather than silently credited.
+`recomp` badge) with the routines that were both called and passing, from both
+halves: the names are the labels in out/symbols.txt and spc/driver.asm, which is
+what progress.py looks routines up by. Routines that are registered but were
+never reached by any script are listed under a comment as unverified rather than
+silently credited. `--spc-hooks off` refuses to update, because the SPC routines
+would all look unentered.
 
 Each script runs for 900 frames unless it carries a `# frames N` header line, in
 which case N is used.
@@ -32,6 +42,7 @@ RECOMP_TXT = ROOT / 'config' / 'recomp.txt'
 DEFAULT_FRAMES = 900
 
 HOOK_LINE = re.compile(r'^hook ([0-9A-F]{6}) (\S+)\s+(\d+) calls?$')
+SPC_HOOK_LINE = re.compile(r'^spchook ([0-9A-F]{4}) (\S+)\s+(\d+) calls?$')
 FRAMES_HEADER = re.compile(r'^\s*#\s*frames\s+(\d+)\s*$', re.IGNORECASE)
 
 
@@ -44,21 +55,27 @@ def script_frames(path: Path) -> int:
     return DEFAULT_FRAMES
 
 
-def run_script(path: Path, frames: int, extra: list[str]) -> tuple[bool, dict[str, int], str]:
-    cmd = [str(HARNESS), '--lockstep', '--hooks', 'on', '--quiet',
-           '--frames', str(frames), '--input', str(path)] + extra
+def run_script(path: Path, frames: int, extra: list[str],
+               spc_hooks: str) -> tuple[bool, dict[str, int], dict[str, int], str]:
+    cmd = [str(HARNESS), '--lockstep', '--hooks', 'on', '--spc-hooks', spc_hooks,
+           '--quiet', '--frames', str(frames), '--input', str(path)] + extra
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     calls: dict[str, int] = {}
+    spc_calls: dict[str, int] = {}
     detail = ''
     for line in proc.stdout.splitlines():
         m = HOOK_LINE.match(line.strip())
         if m:
             calls[m.group(2)] = int(m.group(3))
+            continue
+        m = SPC_HOOK_LINE.match(line.strip())
+        if m:
+            spc_calls[m.group(2)] = int(m.group(3))
         elif line.startswith('MISMATCH'):
             detail = line.strip()
     if proc.returncode == 2:
         detail = detail or (proc.stderr.strip() or 'harness error')
-    return proc.returncode == 0, calls, detail
+    return proc.returncode == 0, calls, spc_calls, detail
 
 
 def main() -> int:
@@ -70,7 +87,14 @@ def main() -> int:
                     help='override the frame count for every script')
     ap.add_argument('--only', default=None,
                     help='pass through to the harness: install only these routines')
+    ap.add_argument('--spc-hooks', choices=('on', 'off'), default='on',
+                    help='install the SPC700 routines too (default on)')
     args = ap.parse_args()
+
+    if args.update and args.spc_hooks == 'off':
+        print('recomp_verify: --update needs --spc-hooks on, or the SPC routines '
+              'would be written out as unverified', file=sys.stderr)
+        return 2
 
     if not HARNESS.exists():
         print(f'recomp_verify: {HARNESS.relative_to(ROOT)} missing; run `make harness` first',
@@ -82,39 +106,52 @@ def main() -> int:
         return 2
 
     extra = ['--only', args.only] if args.only else []
-    totals: dict[str, int] = {}
-    order: list[str] = []
+    # one table per processor: 65816 routines from recomp/src, SPC700 routines
+    # from recomp/spc. They are gated identically and in the same run.
+    totals: dict[str, dict[str, int]] = {'65816': {}, 'spc700': {}}
+    order: dict[str, list[str]] = {'65816': [], 'spc700': []}
     failures: list[str] = []
 
     for path in scripts:
         frames = args.frames or script_frames(path)
-        ok, calls, detail = run_script(path, frames, extra)
-        for name, n in calls.items():
-            if name not in totals:
-                totals[name] = 0
-                order.append(name)
-            totals[name] += n
+        ok, calls, spc_calls, detail = run_script(path, frames, extra, args.spc_hooks)
+        for side, got in (('65816', calls), ('spc700', spc_calls)):
+            for name, n in got.items():
+                if name not in totals[side]:
+                    totals[side][name] = 0
+                    order[side].append(name)
+                totals[side][name] += n
         fired = sum(1 for n in calls.values() if n)
+        spc_fired = sum(1 for n in spc_calls.values() if n)
         status = 'pass' if ok else 'FAIL'
         print(f'{status}  {path.name:<32} {frames:>5} frames, '
               f'{fired}/{len(calls)} routines entered'
+              + (f', {spc_fired}/{len(spc_calls)} spc700' if spc_calls else '')
               + (f'\n      {detail}' if detail else ''))
         if not ok:
             failures.append(path.name)
 
-    print()
-    print('routine call counts across all scripts:')
-    width = max((len(n) for n in order), default=0)
-    called = [n for n in order if totals[n]]
-    uncalled = [n for n in order if not totals[n]]
-    for name in order:
-        mark = ' ' if totals[name] else '*'
-        print(f'  {mark} {name:<{width}} {totals[name]:>8}')
-    if uncalled:
-        print('  (* never entered by any script: not verified)')
+    called: dict[str, list[str]] = {}
+    uncalled: dict[str, list[str]] = {}
+    for side in ('65816', 'spc700'):
+        called[side] = [n for n in order[side] if totals[side][n]]
+        uncalled[side] = [n for n in order[side] if not totals[side][n]]
+        if not order[side]:
+            continue
+        print()
+        print(f'{side} routine call counts across all scripts:')
+        width = max(len(n) for n in order[side])
+        for name in order[side]:
+            mark = ' ' if totals[side][name] else '*'
+            print(f'  {mark} {name:<{width}} {totals[side][name]:>8}')
+        if uncalled[side]:
+            print('  (* never entered by any script: not verified)')
+
     print()
     print(f'{len(scripts) - len(failures)}/{len(scripts)} scripts passed, '
-          f'{len(called)}/{len(order)} routines entered at least once')
+          f'{len(called["65816"])}/{len(order["65816"])} 65816 routines and '
+          f'{len(called["spc700"])}/{len(order["spc700"])} spc700 routines '
+          f'entered at least once')
 
     if failures:
         print('FAILED: ' + ', '.join(failures))
@@ -127,19 +164,30 @@ def main() -> int:
             ';',
             '; Regenerated by `python3 tools/recomp_verify.py --update`: every script under',
             '; recomp/harness/inputs/ passed and each routine below was entered at least once.',
+            '; Both processors are listed: 65816 routines (recomp/src, named as in',
+            '; out/symbols.txt) and SPC700 sound-driver routines (recomp/spc, named as in',
+            '; spc/driver.asm).',
             '',
+            '; --- 65816 ---',
         ]
-        lines += sorted(called)
-        if uncalled:
+        lines += sorted(called['65816'])
+        if called['spc700']:
+            lines += ['', '; --- SPC700 sound driver ---']
+            lines += sorted(called['spc700'])
+        for side, where in (('65816', 'recomp/src'), ('spc700', 'recomp/spc')):
+            if not uncalled[side]:
+                continue
             lines += [
                 '',
-                '; Registered in recomp/src but never entered by any input script, so not',
+                f'; Registered in {where} but never entered by any input script, so not',
                 '; credited here. They need a script that reaches them before they can count:',
             ]
-            lines += [f';   {n}' for n in sorted(uncalled)]
+            lines += [f';   {n}' for n in sorted(uncalled[side])]
         RECOMP_TXT.write_text('\n'.join(lines) + '\n')
-        print(f'updated {RECOMP_TXT.relative_to(ROOT)} with {len(called)} routines'
-              + (f' ({len(uncalled)} unverified)' if uncalled else ''))
+        total_called = len(called['65816']) + len(called['spc700'])
+        total_uncalled = len(uncalled['65816']) + len(uncalled['spc700'])
+        print(f'updated {RECOMP_TXT.relative_to(ROOT)} with {total_called} routines'
+              + (f' ({total_uncalled} unverified)' if total_uncalled else ''))
     return 0
 
 

@@ -46,9 +46,11 @@ one line naming both hashes; no ROM ships with this repository and none ever wil
 
 ## Controls
 
-The first connected gamepad is player 1. Plugging one in or pulling it out is
-handled silently while the game runs; if player 1's pad goes away and another is
-still connected, that one takes over. The keyboard is always live alongside it.
+The first connected gamepad is player 1; a second connected gamepad is player 2,
+with the same fixed mapping. Plugging pads in or pulling them out is handled
+silently while the game runs; if a pad goes away and another is still connected,
+that one takes over its slot. The keyboard is always live alongside player 1;
+there is no keyboard fallback for player 2 (no UI to configure one).
 
 | SNES   | Gamepad (SDL standard layout) | Keyboard      |
 |--------|-------------------------------|---------------|

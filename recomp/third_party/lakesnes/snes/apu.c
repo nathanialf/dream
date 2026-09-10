@@ -42,6 +42,7 @@ void apu_reset(Apu* apu) {
   apu->dspAdr = 0;
   apu->romReadable = true;
   apu->cycles = 0;
+  apu->sliceEnd = 0; // dream: see apu.h
   memset(apu->inPorts, 0, sizeof(apu->inPorts));
   memset(apu->outPorts, 0, sizeof(apu->outPorts));
   for(int i = 0; i < 3; i++) {
@@ -59,7 +60,7 @@ void apu_handleState(Apu* apu, StateHandler* sh) {
     &apu->dspAdr, &apu->inPorts[0], &apu->inPorts[1], &apu->inPorts[2], &apu->inPorts[3], &apu->inPorts[4],
     &apu->inPorts[5], &apu->outPorts[0], &apu->outPorts[1], &apu->outPorts[2], &apu->outPorts[3], NULL
   );
-  sh_handleInts(sh, &apu->cycles, NULL);
+  sh_handleInts(sh, &apu->cycles, &apu->sliceEnd, NULL); // dream: sliceEnd
   for(int i = 0; i < 3; i++) {
     sh_handleBools(sh, &apu->timer[i].enabled, NULL);
     sh_handleBytes(sh, &apu->timer[i].cycles, &apu->timer[i].divider, &apu->timer[i].target, &apu->timer[i].counter, NULL);
@@ -73,6 +74,9 @@ void apu_handleState(Apu* apu, StateHandler* sh) {
 int apu_runCycles(Apu* apu, int wantedCycles) {
   int runCycles = 0;
   uint32_t startCycles = apu->cycles;
+  // dream: publish where this catch-up step ends, so a recomp hook can stop on the
+  // same instruction boundary the reference SPC stops on (see apu.h)
+  apu->sliceEnd = apu->cycles + (uint32_t) (wantedCycles > 0 ? wantedCycles : 0);
   while(runCycles < wantedCycles) {
     spc_runOpcode(apu->spc);
     runCycles += (uint32_t) (apu->cycles - startCycles);

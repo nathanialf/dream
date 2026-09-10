@@ -30,6 +30,7 @@
 #include "ppu.h"
 
 #include "ss_internal.h"
+#include "sps_internal.h"
 #include "xxh64.h"
 #include "sha1.h"
 #include "dream_cycles.h"   /* generated from config/recomp_cycles.txt by CMake */
@@ -78,11 +79,22 @@ typedef struct {
   int cycleCost;
 } Installed;
 
+/* One recomped SPC700 routine. No cycle charge: an SPC body models its own
+ * instruction stream, so there is nothing to calibrate. */
+typedef struct {
+  uint16_t addr;
+  const char* name;
+  SpcRecompFn fn;
+} SpcInstalled;
+
 typedef struct {
   Snes* snes;
   SnesState ss;
+  SpcState sps;
   Installed* hooks;
   unsigned hookCount;
+  SpcInstalled* spcHooks;
+  unsigned spcHookCount;
   /* scratch for the frame hash (--frames only) */
   uint8_t vram[VRAM_BYTES];
   uint8_t cgram[CGRAM_BYTES];
@@ -132,6 +144,22 @@ static bool app_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   return true;
 }
 
+/* The SPC700 dispatcher, again identical to dream_harness's: the sound driver's
+ * converted routines run in the app exactly as they do under the gate. */
+static bool app_spc_hook(void* ctx, Spc* spc, uint16_t pc) {
+  Machine* m = (Machine*) ctx;
+  (void) spc;
+  for(unsigned i = 0; i < m->spcHookCount; i++) {
+    if(m->spcHooks[i].addr != pc) continue;
+    sps_enter_hook(&m->sps);
+    m->spcHooks[i].fn(&m->sps);
+    sps_leave_hook(&m->sps);
+    recomp_spc_hook_hits[i]++;
+    return true;
+  }
+  return false;
+}
+
 /* Force the cart to HiROM, 2 MiB, no SRAM — see the note in harness/main.c: this
  * ROM's internal header at $ffc0 is overwritten by tilemap data, so
  * snes_loadRom()'s header scoring has nothing to score. */
@@ -162,11 +190,24 @@ static Installed* build_table(unsigned* countOut) {
   return out;
 }
 
-static void machine_set_input(Machine* m, uint16_t state) {
+static SpcInstalled* build_spc_table(unsigned* countOut) {
+  unsigned n = 0;
+  const SpcRecompEntry* reg = recomp_spc_registry(&n);
+  SpcInstalled* out = calloc(n ? n : 1, sizeof(SpcInstalled));
+  for(unsigned i = 0; i < n; i++) {
+    out[i].addr = reg[i].addr;
+    out[i].name = reg[i].name;
+    out[i].fn = reg[i].fn;
+  }
+  *countOut = n;
+  return out;
+}
+
+static void machine_set_input(Machine* m, uint16_t state, uint16_t state2) {
   for(int b = 0; b < 12; b++) {
     snes_setButtonState(m->snes, 1, b, (state >> b) & 1);
+    snes_setButtonState(m->snes, 2, b, (state2 >> b) & 1);
   }
-  m->snes->input2->currentState = 0;
 }
 
 /* ---- the frame hash, for --frames ------------------------------------- */
@@ -216,7 +257,7 @@ static const struct { const char* name; int bit; } kButtons[] = {
   {"A", BTN_A}, {"X", BTN_X}, {"L", BTN_L}, {"R", BTN_R},
 };
 
-typedef struct { int frame; uint16_t state; } InputEvent;
+typedef struct { int frame; uint16_t state; uint16_t state2; } InputEvent;
 typedef struct { InputEvent* ev; int count; } InputScript;
 
 static int str_ieq(const char* a, const char* b) {
@@ -229,6 +270,40 @@ static int str_ieq(const char* a, const char* b) {
   return *a == 0 && *b == 0;
 }
 
+/* Parse a "Button+Button+..." button set (one player's column of an input
+ * line). "-", "none" and an empty list mean no buttons. */
+static bool parse_button_set(char* p, const char* path, int lineno, uint16_t* outState) {
+  uint16_t state = 0;
+  while(*p != 0) {
+    while(*p == ' ' || *p == '\t' || *p == '+' || *p == '\n' || *p == '\r') p++;
+    if(*p == 0) break;
+    char tok[32];
+    size_t n = 0;
+    while(*p != 0 && *p != ' ' && *p != '\t' && *p != '+' && *p != '\n' && *p != '\r') {
+      if(n + 1 < sizeof(tok)) tok[n++] = *p;
+      p++;
+    }
+    tok[n] = 0;
+    if(str_ieq(tok, "-") || str_ieq(tok, "none")) continue;
+    bool found = false;
+    for(size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
+      if(str_ieq(tok, kButtons[i].name)) {
+        state |= (uint16_t) (1u << kButtons[i].bit);
+        found = true;
+        break;
+      }
+    }
+    if(!found) {
+      fprintf(stderr, "dream: %s:%d: unknown button '%s'\n", path, lineno, tok);
+      return false;
+    }
+  }
+  *outState = state;
+  return true;
+}
+
+/* "frame Buttons" or "frame Buttons | Buttons2" (harness format,
+ * recomp/README.md); the optional second column addresses player 2. */
 static bool input_load(InputScript* s, const char* path) {
   FILE* f = fopen(path, "r");
   if(f == NULL) {
@@ -238,6 +313,7 @@ static bool input_load(InputScript* s, const char* path) {
   int cap = 16;
   s->ev = malloc((size_t) cap * sizeof(InputEvent));
   s->count = 0;
+  uint16_t lastState2 = 0;
   char line[512];
   int lineno = 0;
   while(fgets(line, sizeof(line), f) != NULL) {
@@ -255,31 +331,13 @@ static bool input_load(InputScript* s, const char* path) {
       return false;
     }
     p = endp;
-    uint16_t state = 0;
-    while(*p != 0) {
-      while(*p == ' ' || *p == '\t' || *p == '+' || *p == '\n' || *p == '\r') p++;
-      if(*p == 0) break;
-      char tok[32];
-      size_t n = 0;
-      while(*p != 0 && *p != ' ' && *p != '\t' && *p != '+' && *p != '\n' && *p != '\r') {
-        if(n + 1 < sizeof(tok)) tok[n++] = *p;
-        p++;
-      }
-      tok[n] = 0;
-      if(str_ieq(tok, "-") || str_ieq(tok, "none")) continue;
-      bool found = false;
-      for(size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
-        if(str_ieq(tok, kButtons[i].name)) {
-          state |= (uint16_t) (1u << kButtons[i].bit);
-          found = true;
-          break;
-        }
-      }
-      if(!found) {
-        fprintf(stderr, "dream: %s:%d: unknown button '%s'\n", path, lineno, tok);
-        fclose(f);
-        return false;
-      }
+    char* bar = strchr(p, '|');
+    if(bar != NULL) *bar = 0;
+    uint16_t state = 0, state2 = lastState2;
+    if(!parse_button_set(p, path, lineno, &state)) { fclose(f); return false; }
+    if(bar != NULL) {
+      if(!parse_button_set(bar + 1, path, lineno, &state2)) { fclose(f); return false; }
+      lastState2 = state2;
     }
     if(s->count == cap) {
       cap *= 2;
@@ -287,16 +345,20 @@ static bool input_load(InputScript* s, const char* path) {
     }
     s->ev[s->count].frame = (int) frame;
     s->ev[s->count].state = state;
+    s->ev[s->count].state2 = state2;
     s->count++;
   }
   fclose(f);
   return true;
 }
 
-static uint16_t input_state_at(const InputScript* s, int frame) {
-  uint16_t state = 0;
-  for(int i = 0; i < s->count && s->ev[i].frame <= frame; i++) state = s->ev[i].state;
-  return state;
+static void input_state_at(const InputScript* s, int frame, uint16_t* state, uint16_t* state2) {
+  *state = 0;
+  *state2 = 0;
+  for(int i = 0; i < s->count && s->ev[i].frame <= frame; i++) {
+    *state = s->ev[i].state;
+    *state2 = s->ev[i].state2;
+  }
 }
 
 /* ---- the fixed mapping (docs/RECOMP.md) -------------------------------- */
@@ -346,16 +408,22 @@ static uint16_t read_keyboard(void) {
   return s;
 }
 
-/* First connected pad is player 1; a later one is ignored until that one goes. */
-static SDL_Gamepad* open_first_gamepad(void) {
+/* The first connected pad is player 1, the second is player 2 (same fixed
+ * mapping, docs/RECOMP.md); a third is ignored until one of the first two
+ * goes. */
+static void open_gamepads(SDL_Gamepad** pad1, SDL_Gamepad** pad2) {
   int count = 0;
   SDL_JoystickID* ids = SDL_GetGamepads(&count);
-  SDL_Gamepad* pad = NULL;
+  *pad1 = NULL;
+  *pad2 = NULL;
   if(ids != NULL) {
-    for(int i = 0; i < count && pad == NULL; i++) pad = SDL_OpenGamepad(ids[i]);
+    for(int i = 0; i < count && *pad2 == NULL; i++) {
+      SDL_Gamepad* p = SDL_OpenGamepad(ids[i]);
+      if(p == NULL) continue;
+      if(*pad1 == NULL) *pad1 = p; else *pad2 = p;
+    }
     SDL_free(ids);
   }
-  return pad;
 }
 
 /* ---- ROM lookup -------------------------------------------------------- */
@@ -492,13 +560,20 @@ int main(int argc, char** argv) {
   m.snes = snes_init();
   m.ss.snes = m.snes;
   m.hooks = build_table(&m.hookCount);
+  m.spcHooks = build_spc_table(&m.spcHookCount);
   if(!machine_load_rom(&m, rom, romLen)) { free(rom); return 2; }
   free(rom);
   snes_setPixelFormat(m.snes, pixelFormatRGBX);
   m.snes->cpu->hook = app_hook;
   m.snes->cpu->hookCtx = &m;
+  m.sps.apu = m.snes->apu;
+  m.sps.spc = m.snes->apu->spc;
+  m.snes->apu->spc->hook = app_spc_hook;
+  m.snes->apu->spc->hookCtx = &m;
 
-  SDL_Gamepad* pad = open_first_gamepad();
+  SDL_Gamepad* pad = NULL;
+  SDL_Gamepad* pad2 = NULL;
+  open_gamepads(&pad, &pad2);
 
   bool running = true;
   int frame = 0;
@@ -516,11 +591,14 @@ int main(int argc, char** argv) {
           break;
         case SDL_EVENT_GAMEPAD_ADDED:
           if(pad == NULL) pad = SDL_OpenGamepad(ev.gdevice.which);
+          else if(pad2 == NULL) pad2 = SDL_OpenGamepad(ev.gdevice.which);
           break;
         case SDL_EVENT_GAMEPAD_REMOVED:
-          if(pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) {
-            SDL_CloseGamepad(pad);
-            pad = open_first_gamepad();   /* silently promote whatever is left */
+          if((pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) ||
+             (pad2 != NULL && SDL_GetGamepadID(pad2) == ev.gdevice.which)) {
+            if(pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) SDL_CloseGamepad(pad);
+            if(pad2 != NULL && SDL_GetGamepadID(pad2) == ev.gdevice.which) SDL_CloseGamepad(pad2);
+            open_gamepads(&pad, &pad2);   /* silently promote whatever is left */
           }
           break;
         default:
@@ -529,10 +607,14 @@ int main(int argc, char** argv) {
     }
     if(!running) break;
 
-    uint16_t state;
-    if(inputPath != NULL) state = input_state_at(&script, frame);
-    else state = (uint16_t) (read_gamepad(pad) | read_keyboard());
-    machine_set_input(&m, state);
+    uint16_t state, state2;
+    if(inputPath != NULL) {
+      input_state_at(&script, frame, &state, &state2);
+    } else {
+      state = (uint16_t) (read_gamepad(pad) | read_keyboard());
+      state2 = read_gamepad(pad2);
+    }
+    machine_set_input(&m, state, state2);
 
     snes_runFrame(m.snes);
 
@@ -586,6 +668,7 @@ int main(int argc, char** argv) {
   }
 
   if(pad != NULL) SDL_CloseGamepad(pad);
+  if(pad2 != NULL) SDL_CloseGamepad(pad2);
   if(audio != NULL) SDL_DestroyAudioStream(audio);
   if(texture != NULL) SDL_DestroyTexture(texture);
   if(renderer != NULL) SDL_DestroyRenderer(renderer);
@@ -594,6 +677,7 @@ int main(int argc, char** argv) {
 
   snes_free(m.snes);
   free(m.hooks);
+  free(m.spcHooks);
   free(srcPixels);
   free(audioBuf);
   free(script.ev);

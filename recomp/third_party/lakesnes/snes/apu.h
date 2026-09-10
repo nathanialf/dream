@@ -28,6 +28,13 @@ struct Apu {
   bool romReadable;
   uint8_t dspAdr;
   uint32_t cycles;
+  // dream: the cycle count at which the catch-up step running now would end.
+  // apu_runCycles() runs whole opcodes until the slice is spent, so the reference
+  // SPC stops between two instructions of a routine at exactly the point a recomp
+  // hook would otherwise have to run the routine to its end. A hook compares
+  // `cycles` against this and hands the rest of the routine back (spc_state.h,
+  // sps_yield_wanted); it is the SPC700 twin of the 65816 frame boundary.
+  uint32_t sliceEnd;
   uint8_t inPorts[6]; // includes 2 bytes of ram
   uint8_t outPorts[4];
   Timer timer[3];

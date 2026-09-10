@@ -1,0 +1,65 @@
+# frames 2000
+# Reaches anim_cb_hit_player ($C0:B0CE) and anim_cb_sfx_0602 ($C0:B05C), the two
+# routines recomp/harness/inputs/README.md's cold-routine table listed as
+# needing a second controller: dream_harness did not model player 2's pad
+# before recomp/harness/main.c grew a second input column, so no script could
+# ever make joy2_held/joy2_pressed ($8E/$90, dream_ram.h) nonzero.
+#
+# check_pending_player_attack ($C0:8E8E) is jtbl_C0827A's game-mode-1/2/3
+# slot (mode 0's slot is mode0_camera_zone_update instead, so this can only
+# fire once the game has left mode 0). It reads $0BB4 (player_attack_flag),
+# set once per level load by the scan at $C08079-$C08092 to the first live
+# entity of type $0E-$11, and feeds player 2's held/pressed words into
+# entity_apply_hit_reaction's shared body ($C0:9A66) with that entity as the
+# target -- the same state machine the player's own entity uses from $8A/$8C,
+# so a second pad drives an enemy directly. That's a debug/test feature, not
+# gameplay: nothing in the ROM's own attract/AI logic ever drives joy2, and a
+# type-$0E/$10 entity has no attack AI of its own (entity_ai_none, confirmed
+# by out/dream.asm and docs/naming_proposals.md section 4/8E8E) -- the only
+# way it ever reaches its "attacking" state ($000C/$000E) is a second
+# controller acting on its behalf, presumably left in for the developers to
+# puppet an enemy while testing hit reactions without a second player build.
+#
+# Getting there also needs game_mode's "row offset": entity_update_tick's
+# state -> entity_anim_id lookup ($C0:9983-9991, recomp/src/entities_ai.c)
+# adds $0BAC (state_row_offset, entities_ai.c: $0018 in game mode 1, else 0)
+# to entity_state before indexing entity_state_anim_table, so the same
+# (type, state) picks a different table row in mode 1 than in mode 0/2/3.
+# The cold-routine table's (type $0E, state $000C/$000E) -> id 118/11A mapping
+# does not hold under that +$18 shift, which was confirmed empirically: the
+# same script run in mode 1, against mode 1's own type-$0E entity (slot 8,
+# spawn x=768 y=20), sets entity_state to $000C for exactly one frame and then
+# resets to $0000 without ever entering anim_cb_hit_player -- consistent with
+# the +$18 row landing on a different, short-lived animation. Mode 2 keeps the
+# row offset at 0 (like mode 0) while still routing jtbl_C0827A to
+# check_pending_player_attack, so this script uses mode 2's type-$0E entity
+# (slot 10, spawn x=813 y=120, entity_flags $2D40) instead.
+#
+# Start, then Select twice (120 frames apart, the debug mode-advance feature
+# documented above in this file / recomp/harness/inputs/README.md) reaches
+# game_mode 2. Holding Left from frame 420 walks the player from its mode-2
+# spawn (x=2069) down to x=844 by frame ~1850 -- within entity_hit_react's
+# $40px facing-direction range of the entity at x=813 -- where Left is
+# released and, two frames later, player 2 presses B. That is a fresh
+# joy2_pressed edge with entity_hitstun_timer 0 and entity_state ($0002) below
+# $000C, so entity_apply_hit_reaction's body sets the entity's state to
+# $000C; entity_update_tick's own per-tick facing/ground-probe step (the
+# "and #$FFFC ; ora facing_state_bits_table,Y" every entity gets every frame,
+# recomp/src/entities_ai.c) then ORs this entity's steady facing sub-bits
+# ($0002, the same low bits its idle state already carried) back in, landing
+# on $000E and selecting anim id 11A. anim_cb_sfx_0602 and anim_cb_hit_player
+# both fire off that animation's script, and the latter's range check finds
+# the player in range and applies the hit -- confirmed by the player's own
+# entity_state becoming $0010 (the hurt state entity_hit_react writes) a few
+# frames later.
+0     none
+120   Start
+126   none
+240   Select
+246   none
+360   Select
+366   none
+420   Left
+1850  none
+1852  none | B
+1858  none

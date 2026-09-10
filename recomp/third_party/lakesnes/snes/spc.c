@@ -35,6 +35,9 @@ Spc* spc_init(void* mem, SpcReadHandler read, SpcWriteHandler write, SpcIdleHand
   spc->read = read;
   spc->write = write;
   spc->idle = idle;
+  // dream: recomp hook off by default
+  spc->hook = NULL;
+  spc->hookCtx = NULL;
   return spc;
 }
 
@@ -89,6 +92,8 @@ void spc_runOpcode(Spc* spc) {
     spc_idleWait(spc);
     return;
   }
+  // dream: give the recomp hook table a chance to replace the routine at this pc
+  if(spc->hook != NULL && spc->hook(spc->hookCtx, spc, spc->pc)) return;
   uint8_t opcode = spc_readOpcode(spc);
   spc_doOpcode(spc, opcode);
 }

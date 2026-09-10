@@ -13,6 +13,13 @@ typedef void (*SpcIdleHandler)(void* mem, bool waiting);
 
 typedef struct Spc Spc;
 
+// dream: recomp hook dispatch, the SPC700 twin of CpuHookHandler in cpu.h. Called
+// before every opcode fetch with the 16-bit pc; if it returns true the instruction
+// is not executed and the hook is responsible for leaving pc where execution should
+// resume. A hook must always consume at least one SPC cycle, because apu_runCycles()
+// loops until the slice is spent and would otherwise never make progress.
+typedef bool (*SpcHookHandler)(void* ctx, Spc* spc, uint16_t pc);
+
 struct Spc {
   // reference to memory handler, pointers to read/write/idle handlers
   void* mem;
@@ -38,6 +45,9 @@ struct Spc {
   bool stopped;
   // reset
   bool resetWanted;
+  // dream: recomp hook (NULL = stock behaviour)
+  SpcHookHandler hook;
+  void* hookCtx;
 };
 
 Spc* spc_init(void* mem, SpcReadHandler read, SpcWriteHandler write, SpcIdleHandler idle);

@@ -7,9 +7,10 @@ takes shape.
 ## Verification
 
 - The reference is the ROM running in an embedded emulator core. The port and the
-  reference execute the same scripted inputs; after every frame WRAM, VRAM, CGRAM and OAM
-  are compared. A routine is "recomped" only when its C body passes that check across
-  the test scripts; `config/recomp.txt` lists them and feeds the `recomp` badge.
+  reference execute the same scripted inputs; after every frame WRAM, VRAM, CGRAM, OAM
+  and the APU's own state (the SPC700's 64 KB of ARAM, the 128 DSP registers and the SPC
+  registers) are compared. A routine is "recomped" only when its C body passes that check
+  across the test scripts; `config/recomp.txt` lists them and feeds the `recomp` badge.
 - The disassembly (`src/`) is the source of truth for behaviour; the C mirrors its
   routine boundaries and names so the two can be read side by side.
 
@@ -20,7 +21,8 @@ takes shape.
 - Fixed default mapping, SNES to gamepad: B = south face button, A = east, Y = west,
   X = north, L/R = shoulders, Start = start, Select = back/select, d-pad = d-pad and
   left stick. Keyboard fallback is likewise fixed (arrows, Z/X/A/S, Q/W, Enter, Shift).
-- Hot-plug is handled silently; the first connected pad is player 1.
+- Hot-plug is handled silently; the first connected pad is player 1, and a second
+  connected pad is player 2 with the same fixed mapping (no UI for it either).
 
 ## Presentation
 
@@ -94,6 +96,22 @@ A hook is atomic where the routine it replaces is not, so every loop offers the
 ROM the chance to take the rest of the routine back (`ss_yield_wanted`) at the top
 of each iteration. That is what keeps a several-thousand-cycle routine honest when
 the frame boundary or an interrupt lands inside it.
+
+## The sound driver
+
+The ROM's other program runs on the APU: 3514 bytes of SPC700 code, uploaded at
+boot and polling its command port for the rest of the session (`spc/driver.asm`,
+`spc/spc_map.txt`). `recomp/spc/` is its half of the port, written against
+`recomp/include/spc_state.h` and dispatched from a hook in the vendored SPC700's
+instruction loop, exactly as `recomp/src/` is on the 65816 side.
+
+Two things about it are its own. There is no cycle charge to calibrate: an APU
+cycle is spent by exactly one read, write or idle, so a body that replays a
+routine's access sequence costs what the routine cost by construction, and
+`dream_harness --test-spc-timing` checks the per-opcode figures against the core.
+And the yield boundary is the APU catch-up slice rather than the frame — the SPC
+runs in steps against the CPU's clock, so the reference stops mid-routine at an
+instant a hooked run would otherwise have to run past.
 
 `config/recomp.txt` lists what has passed; `make recomp-check` is the gate, and
 `tools/hooks/pre-commit` runs it when a commit touches `recomp/`.

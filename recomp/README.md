@@ -21,10 +21,17 @@ Headless, deterministic, no SDL, no X, no network, no threads.
         dream_ram.h               RAM and register names (tools/names.txt)
         dream_alu.h               65816 arithmetic with its flag side effects
         dream_time.h              one instruction at a time: cycles and yields
+      include/spc_state.h         the same, for an SPC700 sound-driver routine
+      spc/                        the SPC700 half of the port: one C function
+        loader.c driver_cmd.c     per routine of spc/driver.asm, registering
+        dsp_init.c                itself the same way (RECOMP_SPC_REGISTER)
+        spc_time.h                one SPC700 instruction at a time
       harness/
         main.c                    CLI, frame loop, hashing, tracing, lockstep
         snes_state.c              hook API implemented over the emulator core
+        spc_state.c               the SPC700 hook API, over the vendored APU
         ss_internal.h             private glue (struct SnesState)
+        sps_internal.h            private glue (struct SpcState)
         hooks.c                   the --hook-table demo/empty tables
         xxh64.c/.h                XXH64, the per-frame region digest
         compare_coverage.py       trace vs out/codemap.txt
@@ -50,8 +57,9 @@ or by hand:
 `third_party/lakesnes/` is a copy of [LakeSnes](https://github.com/elzo-d/LakeSnes)
 by elzo-d (MIT), commit `9db90b86`, core only: no SDL frontend, no zip support, no
 tracing frontend. It is a copy rather than a submodule because the hook mechanism
-needs two lines inside the CPU's instruction loop. Every local change is marked
-`// dream:` and listed in `third_party/lakesnes/UPSTREAM.txt`.
+needs two lines inside the CPU's instruction loop, and two more inside the
+SPC700's. Every local change is marked `// dream:` and listed in
+`third_party/lakesnes/UPSTREAM.txt`.
 
 ### Forcing HiROM
 
@@ -81,7 +89,8 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
       --input FILE              input script (default: no buttons)
       --trace FILE              write the executed-PC coverage set
       --dump-wram DIR           write DIR/wram_NNNNNN.bin after every frame
-      --hooks on|off            install the recomp routines (default off)
+      --hooks on|off            install the recomp 65816 routines (default off)
+      --spc-hooks on|off        install the recomp SPC700 routines (default off)
       --hook-table all|demo|empty  which table to install (default all)
                                   all   everything recomp/src registered
                                   demo  the single worked example
@@ -93,6 +102,8 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
       --lockstep                run hooks-off vs hooks-on, compare every frame
       --test-nesting            self-test: a hook entered inside another hook's
                                 callee keeps its own yield snapshot (see below)
+      --test-spc-timing         self-test: sps_op_cycles() against the SPC700
+                                core's own opcode timing (see below)
       --quiet                   suppress the per-frame lines
       --help
 
@@ -127,6 +138,16 @@ changes it. `#` starts a comment, `-` and `none` mean no buttons. Button names a
     120  Start
     126  none
     240  Right
+
+An optional `| Button+Button+...` second column addresses player 2's controller
+(`snes->input2`); a line that omits it leaves player 2's held set unchanged, so
+existing scripts (all first-column-only) still load and behave exactly as
+before. `harness/inputs/p2_enemy_attack.txt` is the worked example: a live
+second controller is otherwise unreachable in-game (`harness/inputs/README.md`
+has the full story, filed as a debug/test feature the developers left in).
+
+    240  Right
+    500  none | B
 
 ### Traces
 
@@ -395,6 +416,196 @@ must see nothing to hand back -- it has only just started -- and the outer hook
 must *still* want to yield afterwards. It exits 0 on pass, 1 on fail, and prints
 one line per check.
 
+## The SPC700 hook API
+
+The sound driver is the ROM's other program: 3514 bytes of SPC700 code
+(`spc/driver.asm`, `spc/spc_map.txt`) uploaded into the APU at boot and running
+on its own processor for the rest of the session. `recomp/spc/` is its half of
+the port, `include/spc_state.h` is the API it is written against, and
+`harness/spc_state.c` implements that over the vendored APU. The shape is the
+same as the 65816 side deliberately — a dispatcher in the core's instruction
+loop, a self-registering table, timed accessors, a yield — but three things
+differ enough to change the design, and they are the whole of what is new.
+
+**Cycles are the only clock, and there is no charge to calibrate.** The SPC700
+takes no interrupts here. What the driver observes is its own timers, the DSP's
+tick and the four ports the 65816 writes, and every one of those moves on APU
+cycles. An APU cycle is spent by exactly one thing: `apu_spcRead`,
+`apu_spcWrite` and `apu_spcIdle` each call `apu_cycle()` once and nothing else
+does. So a body that replays a routine's access sequence in order costs the
+emulator exactly what the routine cost, to the cycle — there is no `--profile`
+step for this side and no `config/recomp_cycles.txt` entry, because the figure
+is zero by construction. `sps_read8` / `sps_write8` / `sps_idle` / `sps_fetch`
+are those primitives; `sps_aram_*` are the untimed escape hatch.
+
+**The yield boundary is the catch-up slice, not the frame.** The SPC does not
+run alongside the 65816. `snes_catchupApu()` hands `apu_runCycles()` a budget —
+at the end of every frame, and before every read or write of `$2140-$217F` — and
+it runs whole opcodes until the budget is spent. The reference SPC therefore
+stops *between two instructions in the middle of a routine*, at an instant a
+hooked run would have to run the routine to its end. That is the same atomicity
+problem the 65816 side solves at a frame boundary, and it has the same solution:
+`apu_runCycles()` publishes where the step ends (`apu->sliceEnd`, the one field
+added to the core for this), `sps_yield_wanted()` compares the cycle count
+against it, and a body that models the instruction stream points the pc at the
+next instruction and returns. The driver picks the routine up and finishes it.
+
+It needs no entry snapshot and no snapshot stack, which is the one place this
+side is *simpler*. The 65816's condition is a level — "vblank has started" stays
+true for the rest of the frame — so a hook has to remember what the machine
+looked like when it began, and hooks nest (`--test-nesting`). The SPC's is a
+threshold on a monotonically increasing cycle count, and `apu_runCycles()` only
+calls `spc_runOpcode()` while the budget is unspent, so every dispatch happens
+strictly below the threshold and the same question has the same right answer for
+every hook in flight. That also guarantees progress: a hook can never yield at
+its own first instruction, so it always spends at least one cycle, so the
+catch-up loop cannot spin.
+
+**The DSP is shared state, not a register file.** Every DSP access goes through
+`$F2`/`$F3` and therefore through the emulated DSP, so envelopes, key-on latches
+and the echo buffer evolve exactly as they did. A body writes DSP registers with
+`sps_write8(SPS_DSPADDR, ...)` / `sps_write8(SPS_DSPDATA, ...)` where the ROM
+does; `sps_dsp_read` / `sps_dsp_write` are untimed inspection only.
+
+A routine in `recomp/spc/` registers itself the same way `recomp/src/` does, and
+the entry address is the SPC's own 16-bit one — no bank folding, because ARAM has
+no mirrors:
+
+```c
+#include "spc_state.h"
+
+static void dsp_flg_20(SpcState* sp) {
+  ...
+  sps_ret(sp);
+}
+
+static const SpcRecompEntry kDspInit[] = {
+  { 0x1123, "dsp_flg_20", dsp_flg_20 },
+};
+RECOMP_SPC_REGISTER(kDspInit)   /* constructor -> recomp_spc_register() */
+```
+
+The name is the label in `spc/driver.asm`, because that is what
+`tools/progress.py` credits an SPC routine by.
+
+`include/spc_state.h` is the whole API. In outline:
+
+| group | functions |
+|-------|-----------|
+| registers | `sps_a/x/y/sp/pc/ya/psw` and `sps_set_*` |
+| flags | `sps_c/z/v/n/i/h/p/b`, `sps_set_*`, `sps_set_zn`, `sps_set_zn16`, `sps_dp` |
+| ARAM, untimed | `sps_aram_r8/r16`, `sps_aram_w8/w16` |
+| memory, timed | `sps_read8`, `sps_write8`, `sps_idle`, `sps_fetch` |
+| stack | `sps_push8/16`, `sps_pull8/16` |
+| return | `sps_ret` |
+| DSP | `sps_dsp_addr`, `sps_dsp_read`, `sps_dsp_write` |
+| ports | `sps_port_in`, `sps_port_out`, `sps_set_port_out` |
+| timers | `sps_timer_target/counter/divider/enabled` |
+| cycles | `sps_cycles`, `sps_consume_cycles`, `sps_op_cycles` |
+| callees | `sps_call`, `sps_run_until_return`, `sps_run_callee` |
+| yield | `sps_yield_wanted` |
+| registry | `recomp_spc_register`, `recomp_spc_registry`, `RECOMP_SPC_REGISTER` |
+
+`spc/spc_time.h` is the SPC700 counterpart of `src/dream_time.h`: one helper per
+opcode form the driver uses, each reproducing that opcode's access sequence from
+LakeSnes' own `spc.c` case body, and an `S(addr, bytes)` macro that publishes the
+registers the body is holding in locals, offers the routine back, and fetches. A
+body reads straight down `spc/driver.asm`, one macro per instruction:
+
+```c
+S(0x0683, 2); a = s_load(sp, sps_dp(sp, 0xE9));           /* mov a,$E9 */
+S(0x0685, 2); s_cmp(sp, a, s_read(sp, sps_dp(sp, SPS_CPUIO0)));  /* cmp a,!CPUIO0 */
+bool cmd = sps_z(sp);
+S(0x0687, 2); s_branch(sp, cmd);                          /* beq cmd_receive */
+if(cmd) S_GOTO(0x068C);
+```
+
+`S_GOTO(addr)` is how a body leaves through a tail `jmp` or falls through into
+the next routine: it publishes the registers and points the pc at `addr`, so the
+routine that owns that address runs next — its own hook if it has one. Most of
+this driver's routines end that way rather than on `ret`.
+
+### Calling a routine that is not converted yet
+
+`sps_call(retAddr, callee)` is `ss_call_sub`'s twin: it charges the five cycles
+`call abs` spends after its three fetches, pushes the return address, points the
+pc at the callee and runs the reference SPC over it until the stack pointer is
+back above the frame. Any hook the callee hits still fires, so `driver_init`'s
+`call dsp_init` reaches `dsp_init`'s own C body.
+
+`sps_run_callee(spBefore)` is the yielding form, and the bodies here use it
+directly because these callees are long: `dsp_init` executes some 360
+instructions (its two loops run eight times each) and `cmd7_stop_to_loader` spins
+on `$FE` for a full timer-1 period, about 25 600 APU cycles. It stops when
+the slice ends and returns true, leaving the callee running — safe because the
+address the body pushed is the routine's real return address, so the callee's own
+`ret` lands where the driver expects.
+
+### `--test-spc-timing`
+
+`sps_op_cycles()` states what the core's own implementation of an opcode costs,
+and `spc_time.h` is built on the same counts. `--test-spc-timing` checks the
+statement rather than trusting it: for every opcode the table covers it assembles
+the instruction into scratch ARAM, executes it on the reference SPC700 with hooks
+off, and compares the cycles actually spent against the figure. Operands are
+chosen to stay out of the `$F0-$FF` register block, so nothing in the test touches
+a timer, a port or the DSP; a taken branch's two extra cycles are added back where
+the flags make the branch taken.
+
+    ./build/recomp/dream_harness --test-spc-timing
+    ...
+      D7 mov (dp)+y,a           want  7 got  7  ok
+      3F call abs               want  8 got  8  ok
+    test-spc-timing: 61 opcodes, PASS
+
+It exits 0 on pass, 1 on fail.
+
+### The first batch
+
+`recomp/spc/` converts the loader, the driver's entry and command set, and
+`dsp_init` — twenty-two routines, every one of them modelling its own instruction
+stream:
+
+* `loader.c` — `spc_loader`, `loader_reset_dsp`, `loader_block_loop`,
+  `loader_jump`. The IPL-uploaded block at `$04D8` that stays resident for the
+  whole run, and the handshake the 65816's `spc_send_words` busy-waits against.
+  The block loop patches the upload destination into the operand bytes of its own
+  two `mov $0000+y,a` instructions and then leaves through `jmp ($0539+x)`, so the
+  ROM writes its own jump target into its own code; the C body does exactly that,
+  storing through the timed path and reading the vector back out of ARAM one byte
+  at a time where the SPC700's operand fetch reads it.
+* `driver_cmd.c` — `driver_entry`, `driver_init`, `main_loop`, `cmd_receive`,
+  `cmd_dispatch`, the eight `cmd_table` handlers, `start_song`, `play_sfx` and
+  `dsp_step_toward_zero`. `scale_volume` and `sfx_start` are not converted yet and
+  run through `sps_run_callee`; `tick_wait` (`$0781`) is not either, and every
+  handler hands the pc back to it, which is what the ROM's own `jmp tick_wait`
+  does.
+* `dsp_init.c` — `dsp_init` and `dsp_flg_20`: the DSP reset, the per-voice
+  defaults and the sixteen per-slot arrays read out of the song header.
+
+Fourteen of the twenty-two are entered by the gate's scripts and credited; the
+call counts summed across all seven, with the tables installed on both
+processors, are
+
+    main_loop 18947   loader_block_loop 1531   cmd_receive 571   play_sfx 527
+    dsp_flg_20 73     dsp_init 51              cmd_dispatch 44   driver_entry 29
+    driver_init 29    loader_reset_dsp 29      loader_jump 29    cmd6_play 22
+    cmd7_stop_to_loader 22                     spc_loader 7
+
+and every script ends `+0 master cycles and +0 APU cycles` from the reference.
+The other eight are command handlers no live 65816 code sends. Only three places
+write the command port (`src/bank_C1.asm`): `spc_command` sends `$FF` with a
+parameter (`cmd7_stop_to_loader`) and then `$FE` (`cmd6_play`);
+`sfx_command_dispatch` sends the byte in X, which is the sound-effect path below
+`$80` (`play_sfx`); and `orphan_C183F1`, which sends `$F9` (`cmd1_set_E7`), has
+no caller. That leaves `cmd0_set_E8`, `cmd1_set_E7`, `cmd2_set_mono`,
+`cmd4_pitch_offset` and `cmd5_voice5_volume` with no sender at all, and
+`cmd3_fade_and_song` sent only by the eighteen stale bytes at `$C1:8403` — which
+also makes `start_song` and `dsp_step_toward_zero`, reachable only through
+`cmd3`, unreachable. They are converted because they are `cmd_table` entries and
+the dispatch is not honest without them, and the gate lists them as unverified
+rather than crediting them.
+
 ## Lockstep protocol
 
 `--lockstep` creates two independent emulator instances from the same ROM image:
@@ -403,22 +614,43 @@ one line per check.
 * **candidate** — the routine table installed; hooked routines run as C.
 
 Both are driven with the same input script, one frame at a time. After every frame
-all four regions — WRAM (128 KB), VRAM (64 KB), CGRAM (512 B), OAM (544 B) — are
-compared byte for byte. The first difference is printed as
+seven regions are compared byte for byte: the four the PPU and the 65816 own —
+WRAM (128 KB), VRAM (64 KB), CGRAM (512 B), OAM (544 B) — and the three the APU
+owns, ARAM (the SPC700's 64 KB), `dspreg` (the DSP's 128 registers, read out of
+the emulated DSP's own register file) and `spcreg` (A, X, Y, SP, PSW, the pc and
+the `$F2` DSP-address latch, eight bytes). The first difference is printed as
 
     MISMATCH frame 188 region wram offset 0x00408 expected 00 got 01
 
 ("expected" is the reference, "got" the candidate) and the run stops with exit
 status 1. If every frame matches, the run prints `lockstep: N frames, no mismatches`
-and exits 0. Per-hook call counts are printed at the end, so a table that never fired
+and exits 0. Per-hook call counts are printed at the end — `hook` lines for the
+65816 table and `spchook` lines for the SPC700 one — so a table that never fired
 cannot be mistaken for a table that passed.
 
-`--hooks` is ignored in lockstep mode: the point of the mode is precisely the
-off-versus-on comparison. `--hook-table empty` still works, and trivially passes,
-and `--only NAME` narrows the table to one routine, which is how a mismatch gets
-bisected. The summary line also reports how far the candidate's master-cycle count
-has drifted from the reference's, which separates a timing problem from a
-behavioural one at a glance.
+`--hooks` and `--spc-hooks` are both honoured in lockstep mode, but only on the
+candidate: the reference never runs a hook of either kind, because the point of
+the mode is precisely the off-versus-on comparison. `--hook-table empty` still
+works, and trivially passes, and `--only NAME` narrows *both* tables to the named
+routines, which is how a mismatch gets bisected down to one body on either
+processor. The summary line reports how far the candidate has drifted from the
+reference on both clocks:
+
+    lockstep: 900 frames, no mismatches (candidate ended +0 master cycles
+              and +0 APU cycles from the reference)
+
+The master-cycle figure separates a 65816 timing problem from a behavioural one
+at a glance. The APU-cycle figure is weaker on its own, because the SPC does not
+free-run: `snes_catchupApu()` hands `apu_runCycles()` a budget and it runs whole
+opcodes until the budget is spent, so the total spent per frame is set by the
+budget rather than by what the SPC did. A timing error inside a sound-driver body
+shows up instead as a *pc* difference in `spcreg` — the SPC is a few cycles ahead
+or behind and is therefore on a different instruction when the frame ends — and
+the APU figure then reports the size of it. Removing one internal cycle from
+`main_loop` is caught that way at frame 82 of `title_start_right.txt`:
+
+    MISMATCH frame 82 region spcreg offset 0x00005 expected C7 got CA
+             (candidate is +0 master cycles, -3 APU cycles)
 
 ## The worked example
 
@@ -438,13 +670,22 @@ interval, and therefore a charge of zero.
 
     make recomp-check          # build the harness, then tools/recomp_verify.py
 
-`tools/recomp_verify.py` runs `--lockstep --hooks on` over every script in
-`harness/inputs/`, 900 frames each unless the script carries a `# frames N` header,
-and prints per-script pass/fail plus the hook call counts summed across the scripts.
-A routine counts as verified only when every script passed *and* it was entered at
-least once; `--update` rewrites `config/recomp.txt` (which `tools/progress.py`
-credits to the `recomp` badge) from that, listing the never-entered ones separately
-as unverified rather than crediting them.
+`tools/recomp_verify.py` runs `--lockstep --hooks on --spc-hooks on` over every
+script in `harness/inputs/`, 900 frames each unless the script carries a
+`# frames N` header, and prints per-script pass/fail plus the hook call counts
+summed across the scripts. Both processors are gated in the same run and by the
+same rule: a routine counts as verified only when every script passed *and* it was
+entered at least once. The two tables are reported separately (`65816 routine call
+counts`, `spc700 routine call counts`), and `--update` rewrites
+`config/recomp.txt` (which `tools/progress.py` credits to the `recomp` badge) with
+both, under `; --- 65816 ---` and `; --- SPC700 sound driver ---` headings, listing
+the never-entered ones separately as unverified rather than crediting them. The
+names are the labels `progress.py` looks routines up by: `out/symbols.txt` for the
+65816 side, `spc/driver.asm` for the SPC700 side.
+
+`--spc-hooks off` runs the 65816 side alone, which is how a change to one half is
+checked against the other. It refuses `--update`, because every SPC routine would
+then be written out as unverified.
 
 `tools/hooks/pre-commit` runs the gate after `make check` when a commit touches
 `recomp/` or `config/recomp*`.
@@ -487,11 +728,14 @@ located.
 
     make harness
     make recomp-check                       # the gate: every script, every routine
-    ./build/recomp/dream_harness --test-nesting   # the nested-hook snapshot test
+    ./build/recomp/dream_harness --test-nesting      # the nested-hook snapshot test
+    ./build/recomp/dream_harness --test-spc-timing   # SPC700 per-opcode cycle counts
     ./build/recomp/dream_harness --frames 600
     ./build/recomp/dream_harness --frames 600 --input recomp/harness/inputs/title_start_right.txt
     ./build/recomp/dream_harness --lockstep --hooks on --frames 900 --quiet \
         --input recomp/harness/inputs/title_start_right.txt
+    ./build/recomp/dream_harness --lockstep --hooks on --spc-hooks on --frames 900 \
+        --quiet --input recomp/harness/inputs/title_start_right.txt
     ./build/recomp/dream_harness --frames 600 --quiet --trace /tmp/trace.txt \
         --input recomp/harness/inputs/title_start_right.txt
     python3 recomp/harness/compare_coverage.py /tmp/trace.txt

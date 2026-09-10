@@ -49,9 +49,11 @@ add_executable(dream
   main.c
   sha1.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/snes_state.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/../harness/spc_state.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/hooks.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/xxh64.c
   ${RECOMP_SOURCES}
+  ${RECOMP_SPC_SOURCES}
 )
 target_include_directories(dream PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}

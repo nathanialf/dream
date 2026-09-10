@@ -23,6 +23,7 @@
 #include "ppu.h"
 
 #include "ss_internal.h"
+#include "sps_internal.h"
 #include "xxh64.h"
 
 #define ROM_SIZE   0x200000u   /* 2 MiB */
@@ -30,6 +31,10 @@
 #define VRAM_BYTES 0x10000u
 #define CGRAM_BYTES 0x200u
 #define OAM_BYTES  (0x200u + 0x20u)
+#define ARAM_BYTES 0x10000u    /* the SPC700's 64 KB */
+#define DSPREG_BYTES 0x80u     /* the DSP's 128 registers */
+#define SPCREG_BYTES 8u        /* A X Y SP PSW PC(lo,hi) */
+#define REGION_COUNT 7
 
 #define COV_BYTES  (1u << 21)  /* 2^24 PCs / 8 */
 
@@ -51,6 +56,7 @@ static const struct { const char* name; int bit; } kButtons[] = {
 typedef struct {
   int frame;
   uint16_t state;
+  uint16_t state2;
 } InputEvent;
 
 typedef struct {
@@ -68,8 +74,43 @@ static int str_ieq(const char* a, const char* b) {
   return *a == 0 && *b == 0;
 }
 
-/* Parse "frame Button+Button+..." lines; a button set is held until the next
- * line changes it. "-", "none" and an empty button list mean no buttons. */
+/* Parse a "Button+Button+..." button set (one player's column of an input
+ * line). "-", "none" and an empty list mean no buttons. */
+static bool parse_button_set(char* p, const char* path, int lineno, uint16_t* outState) {
+  uint16_t state = 0;
+  while(*p != 0) {
+    while(*p == ' ' || *p == '\t' || *p == '+' || *p == '\n' || *p == '\r') p++;
+    if(*p == 0) break;
+    char tok[32];
+    size_t n = 0;
+    while(*p != 0 && *p != ' ' && *p != '\t' && *p != '+' && *p != '\n' && *p != '\r') {
+      if(n + 1 < sizeof(tok)) tok[n++] = *p;
+      p++;
+    }
+    tok[n] = 0;
+    if(str_ieq(tok, "-") || str_ieq(tok, "none")) continue;
+    bool found = false;
+    for(size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
+      if(str_ieq(tok, kButtons[i].name)) {
+        state |= (uint16_t) (1u << kButtons[i].bit);
+        found = true;
+        break;
+      }
+    }
+    if(!found) {
+      fprintf(stderr, "dream_harness: %s:%d: unknown button '%s'\n", path, lineno, tok);
+      return false;
+    }
+  }
+  *outState = state;
+  return true;
+}
+
+/* Parse "frame Buttons" or "frame Buttons | Buttons2" lines; a button set is
+ * held until a later line changes it. "-", "none" and an empty button list
+ * mean no buttons. The "| Buttons2" column is optional and addresses player
+ * 2's controller; when a line omits it, player 2's held set carries forward
+ * unchanged from whatever an earlier line last gave it (default none). */
 static bool input_load(InputScript* s, const char* path) {
   FILE* f = fopen(path, "r");
   if(f == NULL) {
@@ -79,6 +120,7 @@ static bool input_load(InputScript* s, const char* path) {
   int cap = 16;
   s->ev = malloc((size_t) cap * sizeof(InputEvent));
   s->count = 0;
+  uint16_t lastState2 = 0;
   char line[512];
   int lineno = 0;
   while(fgets(line, sizeof(line), f) != NULL) {
@@ -96,32 +138,13 @@ static bool input_load(InputScript* s, const char* path) {
       return false;
     }
     p = endp;
-    uint16_t state = 0;
-    /* tokenize the rest on '+', space and tab */
-    while(*p != 0) {
-      while(*p == ' ' || *p == '\t' || *p == '+' || *p == '\n' || *p == '\r') p++;
-      if(*p == 0) break;
-      char tok[32];
-      size_t n = 0;
-      while(*p != 0 && *p != ' ' && *p != '\t' && *p != '+' && *p != '\n' && *p != '\r') {
-        if(n + 1 < sizeof(tok)) tok[n++] = *p;
-        p++;
-      }
-      tok[n] = 0;
-      if(str_ieq(tok, "-") || str_ieq(tok, "none")) continue;
-      bool found = false;
-      for(size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
-        if(str_ieq(tok, kButtons[i].name)) {
-          state |= (uint16_t) (1u << kButtons[i].bit);
-          found = true;
-          break;
-        }
-      }
-      if(!found) {
-        fprintf(stderr, "dream_harness: %s:%d: unknown button '%s'\n", path, lineno, tok);
-        fclose(f);
-        return false;
-      }
+    char* bar = strchr(p, '|');
+    if(bar != NULL) *bar = 0;
+    uint16_t state = 0, state2 = lastState2;
+    if(!parse_button_set(p, path, lineno, &state)) { fclose(f); return false; }
+    if(bar != NULL) {
+      if(!parse_button_set(bar + 1, path, lineno, &state2)) { fclose(f); return false; }
+      lastState2 = state2;
     }
     if(s->count == cap) {
       cap *= 2;
@@ -129,16 +152,20 @@ static bool input_load(InputScript* s, const char* path) {
     }
     s->ev[s->count].frame = (int) frame;
     s->ev[s->count].state = state;
+    s->ev[s->count].state2 = state2;
     s->count++;
   }
   fclose(f);
   return true;
 }
 
-static uint16_t input_state_at(const InputScript* s, int frame) {
-  uint16_t state = 0;
-  for(int i = 0; i < s->count && s->ev[i].frame <= frame; i++) state = s->ev[i].state;
-  return state;
+static void input_state_at(const InputScript* s, int frame, uint16_t* state, uint16_t* state2) {
+  *state = 0;
+  *state2 = 0;
+  for(int i = 0; i < s->count && s->ev[i].frame <= frame; i++) {
+    *state = s->ev[i].state;
+    *state2 = s->ev[i].state2;
+  }
 }
 
 /* ---- machine ---------------------------------------------------------- */
@@ -152,6 +179,15 @@ typedef struct {
   RecompFn fn;
   int cycleCost;             /* master cycles to charge, 0 = charge nothing */
 } Installed;
+
+/* One installed SPC700 routine. There is no declining form and no cycle charge:
+ * an SPC body models its own instruction stream, and one APU cycle is one read,
+ * write or idle, so a modelled body costs exactly what the routine cost. */
+typedef struct {
+  uint16_t addr;
+  const char* name;
+  SpcRecompFn fn;
+} SpcInstalled;
 
 #define PROF_DEPTH 64
 #define PROF_STACK 8         /* bytes of its caller's stack a frame remembers */
@@ -168,9 +204,13 @@ typedef struct {
 typedef struct {
   Snes* snes;
   SnesState ss;
+  SpcState sps;
   Installed* hooks;          /* NULL when nothing is installed */
   unsigned hookCount;
   bool hooksActive;          /* false for the profile pass and --hooks off */
+  SpcInstalled* spcHooks;    /* NULL when nothing is installed */
+  unsigned spcHookCount;
+  bool spcHooksActive;       /* --spc-hooks */
   uint8_t* cov;              /* NULL when not tracing */
   uint64_t covNonRom;        /* PCs seen outside the cart map */
   uint64_t instructions;
@@ -192,6 +232,9 @@ typedef struct {
   uint8_t vram[VRAM_BYTES];
   uint8_t cgram[CGRAM_BYTES];
   uint8_t oam[OAM_BYTES];
+  uint8_t aram[ARAM_BYTES];
+  uint8_t dspreg[DSPREG_BYTES];
+  uint8_t spcreg[SPCREG_BYTES];
 } Machine;
 
 /* Canonical ROM address for a 24-bit PC, in the disassembly's $C0:0000+offset
@@ -395,6 +438,29 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   return true;
 }
 
+/* The SPC700 dispatcher, the twin of harness_hook above.
+ *
+ * It needs no entry snapshot and no snapshot stack. The 65816's yield condition
+ * is a level -- "vblank has started" stays true for the rest of the frame -- so
+ * a hook has to remember what the machine looked like when it began. The SPC's
+ * is a threshold on a monotonically increasing cycle count (apu->sliceEnd), and
+ * every dispatch happens strictly below it, so the same question has the same
+ * right answer for every hook in flight. The depth is tracked for the report. */
+static bool harness_spc_hook(void* ctx, Spc* spc, uint16_t pc) {
+  Machine* m = (Machine*) ctx;
+  (void) spc;
+  if(!m->spcHooksActive || m->spcHooks == NULL) return false;
+  for(unsigned i = 0; i < m->spcHookCount; i++) {
+    if(m->spcHooks[i].addr != pc) continue;
+    sps_enter_hook(&m->sps);
+    m->spcHooks[i].fn(&m->sps);
+    sps_leave_hook(&m->sps);
+    recomp_spc_hook_hits[i]++;
+    return true;
+  }
+  return false;
+}
+
 /* Force the cart to HiROM, 2 MiB, no SRAM.
  *
  * snes_loadRom() scores the header candidates at $7fc0/$ffc0/$40ffc0. This ROM's
@@ -427,6 +493,16 @@ static void machine_init(Machine* m, const uint8_t* rom, size_t len,
   if(!machine_load_rom(m, rom, len)) exit(2);
   m->snes->cpu->hook = harness_hook;
   m->snes->cpu->hookCtx = m;
+  m->sps.apu = m->snes->apu;
+  m->sps.spc = m->snes->apu->spc;
+  m->snes->apu->spc->hook = harness_spc_hook;
+  m->snes->apu->spc->hookCtx = m;
+}
+
+static void machine_install_spc(Machine* m, SpcInstalled* table, unsigned count, bool active) {
+  m->spcHooks = table;
+  m->spcHookCount = table != NULL ? count : 0;
+  m->spcHooksActive = active;
 }
 
 static void machine_free(Machine* m) {
@@ -440,9 +516,9 @@ static void machine_free(Machine* m) {
   snes_free(m->snes);
 }
 
-static void machine_set_input(Machine* m, uint16_t state) {
+static void machine_set_input(Machine* m, uint16_t state, uint16_t state2) {
   m->snes->input1->currentState = state;
-  m->snes->input2->currentState = 0;
+  m->snes->input2->currentState = state2;
 }
 
 static void machine_snapshot(Machine* m) {
@@ -460,6 +536,22 @@ static void machine_snapshot(Machine* m) {
     m->oam[i * 2 + 1] = (uint8_t) (ppu->oam[i] >> 8);
   }
   memcpy(m->oam + 0x200, ppu->highOam, 0x20);
+  /* The APU's own state, for --lockstep: 64 KB of ARAM, the DSP's 128 registers
+   * (dsp->ram is the register file dsp_read() answers from) and the six SPC700
+   * registers. Everything the sound driver computes lands in one of the three. */
+  const Apu* apu = m->snes->apu;
+  memcpy(m->aram, apu->ram, ARAM_BYTES);
+  memcpy(m->dspreg, apu->dsp->ram, DSPREG_BYTES);
+  const Spc* spc = apu->spc;
+  m->spcreg[0] = spc->a;
+  m->spcreg[1] = spc->x;
+  m->spcreg[2] = spc->y;
+  m->spcreg[3] = spc->sp;
+  m->spcreg[4] = (uint8_t) ((spc->n << 7) | (spc->v << 6) | (spc->p << 5) | (spc->b << 4) |
+                            (spc->h << 3) | (spc->i << 2) | (spc->z << 1) | spc->c);
+  m->spcreg[5] = (uint8_t) spc->pc;
+  m->spcreg[6] = (uint8_t) (spc->pc >> 8);
+  m->spcreg[7] = (uint8_t) (apu->dspAdr);
 }
 
 typedef struct {
@@ -468,11 +560,14 @@ typedef struct {
   size_t len;
 } Region;
 
-static void machine_regions(Machine* m, Region out[4]) {
-  out[0] = (Region) { "wram",  m->snes->ram, WRAM_SIZE };
-  out[1] = (Region) { "vram",  m->vram,      VRAM_BYTES };
-  out[2] = (Region) { "cgram", m->cgram,     CGRAM_BYTES };
-  out[3] = (Region) { "oam",   m->oam,       OAM_BYTES };
+static void machine_regions(Machine* m, Region out[REGION_COUNT]) {
+  out[0] = (Region) { "wram",   m->snes->ram, WRAM_SIZE };
+  out[1] = (Region) { "vram",   m->vram,      VRAM_BYTES };
+  out[2] = (Region) { "cgram",  m->cgram,     CGRAM_BYTES };
+  out[3] = (Region) { "oam",    m->oam,       OAM_BYTES };
+  out[4] = (Region) { "aram",   m->aram,      ARAM_BYTES };
+  out[5] = (Region) { "dspreg", m->dspreg,    DSPREG_BYTES };
+  out[6] = (Region) { "spcreg", m->spcreg,    SPCREG_BYTES };
 }
 
 /* ---- trace output ----------------------------------------------------- */
@@ -522,7 +617,8 @@ static void usage(void) {
     "  --input FILE       input script: lines 'frame Button+Button...'\n"
     "  --trace FILE       write the executed-PC coverage set (sorted C0XXXX)\n"
     "  --dump-wram DIR    write DIR/wram_NNNNNN.bin after every frame\n"
-    "  --hooks on|off     install the recomp routines (default off)\n"
+    "  --hooks on|off     install the recomp 65816 routines (default off)\n"
+    "  --spc-hooks on|off install the recomp SPC700 routines (default off)\n"
     "  --hook-table all|demo|empty  which table to install (default all)\n"
     "                       all   every routine registered by recomp/src\n"
     "                       demo  the single worked example, clear_sprite_table\n"
@@ -535,6 +631,8 @@ static void usage(void) {
     "  --lockstep         run hooks-off vs hooks-on and compare every frame\n"
     "  --test-nesting     self-test: a hook entered inside another hook's callee\n"
     "                     keeps its own yield snapshot (exits 0 on pass, 1 on fail)\n"
+    "  --test-spc-timing  self-test: sps_op_cycles() against the SPC700 core's own\n"
+    "                     opcode timing (exits 0 on pass, 1 on fail)\n"
     "  --quiet            suppress the per-frame lines\n"
     "  --help\n"
     "buttons: A B X Y L R Start Select Up Down Left Right\n");
@@ -604,6 +702,21 @@ static Installed* build_table(const char* which, unsigned* countOut) {
     out[i].hookFn = t[i].fn;
   }
   *countOut = c;
+  return out;
+}
+
+/* The SPC700 table --spc-hooks installs: everything recomp/spc registered from
+ * its own constructor, so adding a routine edits no central table. */
+static SpcInstalled* build_spc_table(unsigned* countOut) {
+  unsigned n = 0;
+  const SpcRecompEntry* reg = recomp_spc_registry(&n);
+  SpcInstalled* out = calloc(n ? n : 1, sizeof(SpcInstalled));
+  for(unsigned i = 0; i < n; i++) {
+    out[i].addr = reg[i].addr;
+    out[i].name = reg[i].name;
+    out[i].fn = reg[i].fn;
+  }
+  *countOut = n;
   return out;
 }
 
@@ -858,6 +971,121 @@ static int run_nesting_test(const uint8_t* rom, size_t romLen) {
   return failures == 0 ? 0 : 1;
 }
 
+/* ---- --test-spc-timing --------------------------------------------------
+ *
+ * sps_op_cycles() states what the core's own implementation of an opcode costs
+ * in APU cycles, and recomp/spc/spc_time.h is built on the same counts. This
+ * checks the statement instead of trusting it: for every opcode the table
+ * covers, the instruction is assembled into scratch ARAM, executed by the
+ * reference SPC700 with hooks off, and the cycles it actually spent are compared
+ * against the figure. A taken branch costs two more, which the table excludes,
+ * so the expected figure adds them back where the flags make the branch taken.
+ *
+ * Operands are chosen to stay out of the $F0-$FF register block, so nothing here
+ * touches a timer, a port or the DSP.
+ */
+#define SPCT_CODE 0x0200u    /* scratch: the instruction under test */
+#define SPCT_DP   0x30u      /* scratch: its direct-page operand */
+#define SPCT_ABS  0x0300u    /* scratch: its absolute operand */
+
+typedef struct {
+  uint8_t op;
+  int len;
+  uint8_t b1, b2;
+  bool taken;                /* the branch this opcode takes with n = z = 0 */
+  const char* text;
+} SpcTimingCase;
+
+static const SpcTimingCase kSpcTiming[] = {
+  /* implied */
+  { 0x1c, 1, 0, 0, false, "asl a" },      { 0x1d, 1, 0, 0, false, "dec x" },
+  { 0x20, 1, 0, 0, false, "clrp" },       { 0x3d, 1, 0, 0, false, "inc x" },
+  { 0x5d, 1, 0, 0, false, "mov x,a" },    { 0x60, 1, 0, 0, false, "clrc" },
+  { 0x7d, 1, 0, 0, false, "mov a,x" },    { 0x80, 1, 0, 0, false, "setc" },
+  { 0x9c, 1, 0, 0, false, "dec a" },      { 0xbc, 1, 0, 0, false, "inc a" },
+  { 0xbd, 1, 0, 0, false, "mov sp,x" },   { 0xdc, 1, 0, 0, false, "dec y" },
+  { 0xdd, 1, 0, 0, false, "mov a,y" },    { 0xfc, 1, 0, 0, false, "inc y" },
+  { 0xfd, 1, 0, 0, false, "mov y,a" },
+  { 0x2d, 1, 0, 0, false, "push a" },     { 0x4d, 1, 0, 0, false, "push x" },
+  { 0xae, 1, 0, 0, false, "pop a" },      { 0xce, 1, 0, 0, false, "pop x" },
+  { 0x6f, 1, 0, 0, false, "ret" },
+  /* immediate */
+  { 0x28, 2, 0x07, 0, false, "and a,#imm" }, { 0x68, 2, 0x80, 0, false, "cmp a,#imm" },
+  { 0x8d, 2, 0x08, 0, false, "mov y,#imm" }, { 0xa8, 2, 0x0f, 0, false, "sbc a,#imm" },
+  { 0xcd, 2, 0xff, 0, false, "mov x,#imm" }, { 0xe8, 2, 0x00, 0, false, "mov a,#imm" },
+  /* branches, with n = z = 0 */
+  { 0x10, 2, 0x00, 0, true,  "bpl (taken)" },
+  { 0x30, 2, 0x00, 0, false, "bmi (not taken)" },
+  { 0xd0, 2, 0x00, 0, true,  "bne (taken)" },
+  { 0xf0, 2, 0x00, 0, false, "beq (not taken)" },
+  { 0x2f, 2, 0x00, 0, true,  "bra" },
+  /* direct page */
+  { 0x3e, 2, SPCT_DP, 0, false, "cmp x,dp" },  { 0x64, 2, SPCT_DP, 0, false, "cmp a,dp" },
+  { 0xe4, 2, SPCT_DP, 0, false, "mov a,dp" },  { 0xf8, 2, SPCT_DP, 0, false, "mov x,dp" },
+  { 0xab, 2, SPCT_DP, 0, false, "inc dp" },    { 0xc4, 2, SPCT_DP, 0, false, "mov dp,a" },
+  { 0xcb, 2, SPCT_DP, 0, false, "mov dp,y" },  { 0xd8, 2, SPCT_DP, 0, false, "mov dp,x" },
+  { 0xba, 2, SPCT_DP, 0, false, "movw ya,dp" },{ 0x7a, 2, SPCT_DP, 0, false, "addw ya,dp" },
+  { 0xda, 2, SPCT_DP, 0, false, "movw dp,ya" },{ 0x1a, 2, SPCT_DP, 0, false, "decw dp" },
+  { 0xd4, 2, SPCT_DP, 0, false, "mov dp+x,a" },{ 0xf7, 2, SPCT_DP, 0, false, "mov a,(dp)+y" },
+  { 0xd7, 2, SPCT_DP, 0, false, "mov (dp)+y,a" },
+  /* absolute */
+  { 0xe5, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov a,abs" },
+  { 0xe9, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov x,abs" },
+  { 0x5f, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "jmp abs" },
+  { 0xac, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "inc abs" },
+  { 0xc5, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov abs,a" },
+  { 0xc9, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov abs,x" },
+  { 0xcc, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov abs,y" },
+  { 0xf6, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov a,abs+y" },
+  { 0xd5, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov abs+x,a" },
+  { 0xd6, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "mov abs+y,a" },
+  { 0x1f, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "jmp (abs+x)" },
+  { 0x3f, 3, (uint8_t) SPCT_ABS, (uint8_t) (SPCT_ABS >> 8), false, "call abs" },
+  /* dp,#imm: the immediate is the first operand byte, the destination the second */
+  { 0x8f, 3, 0x20, SPCT_DP, false, "mov dp,#imm" },
+  { 0x98, 3, 0x08, SPCT_DP, false, "adc dp,#imm" },
+  /* dbnz dp,rel: $30 holds 1, so the decrement reaches zero and it is not taken */
+  { 0x6e, 3, SPCT_DP, 0x00, false, "dbnz dp,rel (not taken)" },
+};
+
+static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
+  Machine m;
+  machine_init(&m, rom, romLen, NULL, 0, false, false);
+  machine_install_spc(&m, NULL, 0, false);
+  Apu* apu = m.snes->apu;
+  Spc* spc = apu->spc;
+  /* the first spc_runOpcode after a reset is the reset sequence itself */
+  spc_runOpcode(spc);
+
+  int bad = 0;
+  for(unsigned i = 0; i < sizeof(kSpcTiming) / sizeof(kSpcTiming[0]); i++) {
+    const SpcTimingCase* c = &kSpcTiming[i];
+    apu->ram[SPCT_CODE] = c->op;
+    apu->ram[SPCT_CODE + 1] = c->b1;
+    apu->ram[SPCT_CODE + 2] = c->b2;
+    apu->ram[SPCT_DP] = 1;              /* dbnz reaches zero; also the pointer low */
+    apu->ram[SPCT_DP + 1] = 3;          /* (dp)+Y points into the scratch page */
+    spc->pc = SPCT_CODE;
+    spc->a = 0x12; spc->x = 0x00; spc->y = 0x00; spc->sp = 0xf0;
+    spc->n = false; spc->z = false; spc->c = false; spc->v = false;
+    spc->h = false; spc->p = false; spc->i = false; spc->b = false;
+    apu->sliceEnd = apu->cycles;        /* unused with hooks off; keep it defined */
+    uint32_t before = apu->cycles;
+    spc_runOpcode(spc);
+    int got = (int) (apu->cycles - before);
+    int want = sps_op_cycles(c->op) + (c->taken ? 2 : 0);
+    bool ok = want != 0 && got == want;
+    if(!ok) bad++;
+    printf("  %02X %-24s want %2d got %2d  %s\n", c->op, c->text, want, got,
+           ok ? "ok" : "FAIL");
+  }
+  printf("test-spc-timing: %u opcodes, %s\n",
+         (unsigned) (sizeof(kSpcTiming) / sizeof(kSpcTiming[0])),
+         bad == 0 ? "PASS" : "FAIL");
+  machine_free(&m);
+  return bad == 0 ? 0 : 1;
+}
+
 static void print_frame_line(int frame, Machine* m, const Region* r) {
   const Cpu* c = m->snes->cpu;
   const Ppu* p = m->snes->ppu;
@@ -890,6 +1118,8 @@ int main(int argc, char** argv) {
   bool lockstep = false;
   bool quiet = false;
   bool testNesting = false;
+  bool testSpcTiming = false;
+  bool spcHooksOn = false;
   const char* tableName = "all";
 
   for(int i = 1; i < argc; i++) {
@@ -905,6 +1135,11 @@ int main(int argc, char** argv) {
       if(strcmp(v, "on") == 0) hooksOn = true;
       else if(strcmp(v, "off") == 0) hooksOn = false;
       else { fprintf(stderr, "dream_harness: --hooks takes on|off\n"); return 2; }
+    } else if(strcmp(a, "--spc-hooks") == 0 && hasNext) {
+      const char* v = argv[++i];
+      if(strcmp(v, "on") == 0) spcHooksOn = true;
+      else if(strcmp(v, "off") == 0) spcHooksOn = false;
+      else { fprintf(stderr, "dream_harness: --spc-hooks takes on|off\n"); return 2; }
     } else if(strcmp(a, "--hook-table") == 0 && hasNext) {
       const char* v = argv[++i];
       if(strcmp(v, "all") != 0 && strcmp(v, "demo") != 0 && strcmp(v, "empty") != 0) {
@@ -918,6 +1153,7 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--only") == 0 && hasNext) onlyList = argv[++i];
     else if(strcmp(a, "--lockstep") == 0) lockstep = true;
     else if(strcmp(a, "--test-nesting") == 0) testNesting = true;
+    else if(strcmp(a, "--test-spc-timing") == 0) testSpcTiming = true;
     else if(strcmp(a, "--quiet") == 0) quiet = true;
     else if(strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) { usage(); return 0; }
     else { fprintf(stderr, "dream_harness: unknown option %s\n", a); usage(); return 2; }
@@ -938,8 +1174,17 @@ int main(int argc, char** argv) {
     return rc;
   }
 
+  if(testSpcTiming) {
+    int rc = run_spc_timing_test(rom, romLen);
+    free(rom);
+    free(script.ev);
+    return rc;
+  }
+
   unsigned tableCount = 0;
   Installed* table = build_table(tableName, &tableCount);
+  unsigned spcTableCount = 0;
+  SpcInstalled* spcTable = build_spc_table(&spcTableCount);
   if(profilePath != NULL) { lockstep = false; hooksOn = false; }
   /* The charges are loaded for --profile too, and the measuring pass applies
    * them. That makes --profile a refinement step rather than a measurement from
@@ -961,14 +1206,28 @@ int main(int argc, char** argv) {
       if(name_in_list(onlyList, table[i].name)) table[kept++] = table[i];
     }
     tableCount = kept;
+    /* --only names one routine on either side; the SPC table narrows the same
+     * way, so a mismatch can be bisected down to a single sound-driver body. */
+    kept = 0;
+    for(unsigned i = 0; i < spcTableCount; i++) {
+      if(name_in_list(onlyList, spcTable[i].name)) spcTable[kept++] = spcTable[i];
+    }
+    spcTableCount = kept;
   }
 
   Machine ref, cand;
   /* the reference never runs hooks; it still carries the table for --profile */
   machine_init(&ref, rom, romLen, table, tableCount, !lockstep && !profilePath && hooksOn,
                tracePath != NULL);
+  /* The reference never runs SPC hooks either: --lockstep is precisely the
+   * off-versus-on comparison, and --profile measures the ROM's own cost. */
+  machine_install_spc(&ref, spcTable, spcTableCount,
+                      !lockstep && !profilePath && spcHooksOn);
   bool twin = lockstep || profilePath != NULL;
-  if(twin) machine_init(&cand, rom, romLen, table, tableCount, true, false);
+  if(twin) {
+    machine_init(&cand, rom, romLen, table, tableCount, true, false);
+    machine_install_spc(&cand, spcTable, spcTableCount, lockstep ? spcHooksOn : false);
+  }
   if(profilePath != NULL) {
     unsigned n = tableCount ? tableCount : 1;
     ref.profiling = true;
@@ -992,11 +1251,13 @@ int main(int argc, char** argv) {
   for(unsigned i = 0; i < tableCount; i++) if(table[i].cycleCost > 0) charged++;
 
   printf("dream_harness: %s, HiROM forced, 2 MiB, no SRAM, NTSC\n", romPath);
-  printf("mode: %s, hooks %s, table %s (%u entr%s, %d cycle-costed), frames %d, input %s\n",
+  printf("mode: %s, hooks %s, spc-hooks %s, table %s (%u entr%s, %d cycle-costed,"
+         " %u spc), frames %d, input %s\n",
          profilePath ? "profile (hooks off, measuring)" :
            lockstep ? "lockstep (reference=hooks off, candidate=hooks on)" : "single",
          lockstep || hooksOn ? "on" : "off",
-         tableName, tableCount, tableCount == 1 ? "y" : "ies", charged,
+         spcHooksOn ? "on" : "off",
+         tableName, tableCount, tableCount == 1 ? "y" : "ies", charged, spcTableCount,
          frames, inputPath ? inputPath : "(none)");
 
   struct timespec t0, t1;
@@ -1005,27 +1266,29 @@ int main(int argc, char** argv) {
   int status = 0;
   int ranFrames = 0;
   for(int frame = 0; frame < frames; frame++) {
-    uint16_t state = input_state_at(&script, frame);
-    machine_set_input(&ref, state);
+    uint16_t state, state2;
+    input_state_at(&script, frame, &state, &state2);
+    machine_set_input(&ref, state, state2);
     snes_runFrame(ref.snes);
     machine_snapshot(&ref);
-    Region rr[4];
+    Region rr[REGION_COUNT];
     machine_regions(&ref, rr);
 
     if(twin) {
-      machine_set_input(&cand, state);
+      machine_set_input(&cand, state, state2);
       snes_runFrame(cand.snes);
       machine_snapshot(&cand);
-      Region cr[4];
+      Region cr[REGION_COUNT];
       machine_regions(&cand, cr);
-      for(int k = 0; k < 4 && lockstep && status == 0; k++) {
+      for(int k = 0; k < REGION_COUNT && lockstep && status == 0; k++) {
         if(memcmp(rr[k].data, cr[k].data, rr[k].len) == 0) continue;
         for(size_t off = 0; off < rr[k].len; off++) {
           if(rr[k].data[off] == cr[k].data[off]) continue;
           printf("MISMATCH frame %d region %s offset 0x%05zx expected %02X got %02X"
-                 " (candidate is %+" PRId64 " master cycles)\n",
+                 " (candidate is %+" PRId64 " master cycles, %+" PRId64 " APU cycles)\n",
                  frame, rr[k].name, off, rr[k].data[off], cr[k].data[off],
-                 (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles);
+                 (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles,
+                 (int64_t) cand.snes->apu->cycles - (int64_t) ref.snes->apu->cycles);
           break;
         }
         status = 1;
@@ -1073,8 +1336,9 @@ int main(int argc, char** argv) {
   if(lockstep) {
     if(status == 0) {
       printf("lockstep: %d frames, no mismatches (candidate ended %+" PRId64
-             " master cycles from the reference)\n", ranFrames,
-             (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles);
+             " master cycles and %+" PRId64 " APU cycles from the reference)\n", ranFrames,
+             (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles,
+             (int64_t) cand.snes->apu->cycles - (int64_t) ref.snes->apu->cycles);
     }
     else printf("lockstep: FAILED after %d frames\n", ranFrames);
   }
@@ -1089,6 +1353,15 @@ int main(int argc, char** argv) {
              recomp_hook_hits[i], recomp_hook_hits[i] == 1 ? "" : "s");
     }
   }
+  if(lockstep || spcHooksOn) {
+    printf("spc hook nesting: max %d hook%s in flight at once\n",
+           sps_hook_max_depth(twin ? &cand.sps : &ref.sps),
+           sps_hook_max_depth(twin ? &cand.sps : &ref.sps) == 1 ? "" : "s");
+    for(unsigned i = 0; i < spcTableCount; i++) {
+      printf("spchook %04X %-32s %lu call%s\n", spcTable[i].addr, spcTable[i].name,
+             recomp_spc_hook_hits[i], recomp_spc_hook_hits[i] == 1 ? "" : "s");
+    }
+  }
   printf("%d frames in %.3f s = %.1f fps (%.2fx realtime), %" PRIu64 " instructions\n",
          ranFrames, secs, secs > 0 ? ranFrames / secs : 0.0,
          secs > 0 ? (ranFrames / secs) / 60.0988 : 0.0, ref.instructions);
@@ -1096,6 +1369,7 @@ int main(int argc, char** argv) {
   machine_free(&ref);
   if(twin) machine_free(&cand);
   free(table);
+  free(spcTable);
   free(script.ev);
   return status;
 }

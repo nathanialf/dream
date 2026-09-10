@@ -43,13 +43,20 @@ target_include_directories(lakesnes PUBLIC third_party/lakesnes/snes)
 # cmake re-run.
 file(GLOB RECOMP_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 
+# The SPC700 half of the port, one C function per routine of the sound driver in
+# spc/driver.asm, registering itself the same way (RECOMP_SPC_REGISTER) and
+# globbed the same way. --spc-hooks on installs whatever registered itself.
+file(GLOB RECOMP_SPC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/spc/*.c)
+
 # --- harness -----------------------------------------------------------------
 add_executable(dream_harness
   harness/main.c
   harness/snes_state.c
+  harness/spc_state.c
   harness/hooks.c
   harness/xxh64.c
   ${RECOMP_SOURCES}
+  ${RECOMP_SPC_SOURCES}
 )
 target_include_directories(dream_harness PRIVATE include harness)
 target_link_libraries(dream_harness PRIVATE lakesnes)
