@@ -869,7 +869,7 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
  * CI. So the primitive gets a self-test of its own that needs no ROM, no
  * emulator and no data: it can run on any runner.
  *
- * It checks the four requirements the scheduler asks of a backend:
+ * It checks the five requirements the scheduler asks of a backend:
  *
  *   1. a body suspends and resumes where it stopped, and its stack survives
  *      (a 16 KiB local buffer is written before a yield and verified after);
