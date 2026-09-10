@@ -18,8 +18,8 @@ Code ranges:
   $103E-$11CB  (398 bytes)
 
 Data / unreached ranges inside the loaded blocks (jump tables excluded):
-  $055D-$055F  (3 bytes)  data_055D
-  $0560-$065F  (256 bytes)  data_0560
+  $055D-$055F  (3 bytes)  cmd_param
+  $0560-$065F  (256 bytes)  sample_remap
   $0FC2-$0FD7  (22 bytes)
   $11CC-$1291  (198 bytes)  pitch_table
 
@@ -33,7 +33,7 @@ Subroutines (call targets) with callers:
   seq_retrigger  $0B69  callers: $0DB5, $0DF2, $0E30, $0E9E, $0F61, $0F91
   seq_load_srcn  $0B8B  callers: $0B75, $0B9A
   seq_read_volume $0BC2  callers: $0BA9, $0BB9
-  sub_0BCC       $0BCC  callers: $0BF6
+  seq_read_volume_r $0BCC  callers: $0BF6
   scale_volume   $0C59  callers: $0724, $072D, $08FC, $0906
   seq_push_return $0D1C  callers: $0CEE, $0D05
   seq_read_vibrato $0E25  callers: $0E14, $0E1F

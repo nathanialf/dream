@@ -2,7 +2,7 @@
 
 org $DF0000
     incbin "../data/stale/stale_dup_metatiles_mode3.bin"                        ; 4288 bytes (whole asset)
-    incbin "../data/unknown/unknown_gap_1f10c0.bin"                        ; 64 bytes (whole asset)
+    incbin "../data/stale/stale_dup_metatiles_mode1_tail.bin"                        ; 64 bytes (whole asset)
     incbin "../data/stale/stale_dup_metatiles_mode2b.bin"                        ; 5760 bytes (whole asset)
     incbin "../data/gfx/tiles_unref_1f2780.bin"                        ; 1684 bytes (whole asset)
     incbin "../data/sprites/frame_alt_0082.bin"                        ; 1678 bytes (whole asset)

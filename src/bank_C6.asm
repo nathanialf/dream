@@ -26,4 +26,5 @@ data_C6A36C:
     incbin "../data/palettes/title_palette_256.bin":$0001..$0200        ; 511 bytes
     incbin "../data/maps/tilemap_unref_6a56b.bin"                        ; 246 bytes (whole asset)
     incbin "../data/stale/stale_dup_sprite_frames_ca.bin"                        ; 21957 bytes (whole asset)
-    incbin "../data/unknown/unknown_tail_6fc26.bin"                        ; 986 bytes (whole asset)
+    incbin "../data/stale/stale_dup_sprite_frames_ce_partial.bin"                        ; 982 bytes (whole asset)
+    incbin "../data/unknown/unknown_tail_6fffc.bin"                        ; 4 bytes (whole asset)

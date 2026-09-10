@@ -285,6 +285,8 @@ NAMES = {
     0x04F3: ('loader_reset_dsp', 'FLG=$FF EDL=0 ESA=$FF, then block loop; driver cmd 7 jumps back here'),
     0x050A: ('loader_block_loop', 'handshake: wait port0==counter, movw ya,$F5 = dest address'),
     0x0556: ('loader_jump', 'word count 0: save counter, jmp (dest)'),
+    0x055D: ('cmd_param', 'scratch byte inside the uploaded loader block; port2 -> cmd_param via cmd_receive'),
+    0x0560: ('sample_remap', 'uploaded by 65816 loc_C18288; 256-byte sample number -> SRCN remap table, read by seq_load_srcn'),
     0x0660: ('start_song', 'cmd 3: song number in cmd_param -> song_table[$1312] -> $E5/$E6'),
     0x0672: ('driver_entry', 'reached via loader `jmp ($0539+x)` after the 65816 sends addr $0672 with 0 words'),
     0x0678: ('driver_init', 'init DSP/channels from song header at ($E5), clear play flag'),
@@ -317,6 +319,7 @@ NAMES = {
     0x0B97: ('seq_instr_full', 'seq cmd $22: instrument, transpose, finetune, volume, ADSR'),
     0x0BB6: ('seq_volume', 'seq cmd $02'),
     0x0BC2: ('seq_read_volume', 'L,R bytes; averaged when mono flag set'),
+    0x0BCC: ('seq_read_volume_r', 'reads one sequence byte into vol_r[x] ($0264+x); companion to seq_read_volume\'s vol_l store'),
     0x0BF0: ('seq_volume_mono', 'seq cmd $23: one byte -> both channels'),
     0x0C02: ('seq_volume_preset', 'seq cmd $20: volume from $04B8/$04B9'),
     0x0C18: ('orphan_volume_preset2', 'stale seq_cmd_table entry $31: copy of seq cmd $20 using $04BA/$04BB'),
@@ -366,6 +369,7 @@ NAMES = {
     0x1123: ('dsp_flg_20', 'FLG = $20 (echo write off)'),
     0x112A: ('sfx_start', 'a = sfx id, x = channel: pointer from $2412 (id < $60) or $2E96 (id - $60), voice x|8'),
     0x11CC: ('pitch_table', '98 words, DSP pitch per semitone, index = (note + $24 + transpose) * 2'),
+    0x11CD: ('pitch_table_tail', 'remaining words of pitch_table; split into its own data run by the emitter'),
 }
 
 # RAM / variable names, shown as comments beside instructions that reference them.

@@ -74,7 +74,7 @@
 0155e0 018000 filler      fill_55_a                    ; fill 0x55
 018000 01841a sound_iface sound_iface                  ; 65816 sound interface, bank $C1 (spc_init, spc_command, uploads); includes orphan_C183F1 dead code and a stale duplicate byte run at C18403-C18414 (see out/dream.asm)
 01841a 01eac0 stale       stale_dup_bg1_mode3          ; stale duplicate of 08041A-086AC0 (game_mode 3 BG1 4bpp tileset, minus its first 0x41A bytes)
-01eac0 01efc0 unknown     unknown_tilelike_1eac0       ; unknown, tile-like, 1280 bytes, no duplicate found
+01eac0 01efc0 stale       stale_dup_bg1_tiles_mode2_tail ; stale duplicate of 076E02-077302 (the last 1280 bytes / 40 tiles of bg1_tiles_mode2); exact byte-for-byte match, found by full-length substring search
 01efc0 020000 filler      fill_55_b                    ; fill 0x55
 020000 020088 spc700      spc700_ipl_loader            ; SPC700 IPL loader image, uploaded to SPC $04D8
 020088 020dba spc700      spc700_driver                ; SPC700 driver image, 0x699 words -> SPC $0560 (DKC2/3-derived driver)
@@ -107,7 +107,7 @@
 0502c0 050ec0 tiles       obj_tiles_1600               ; 4bpp OBJ tiles, 96 tiles -> VRAM $1600 (mode 0) and VRAM $0000 (sub_C09234)
 050ec0 05babf stale       stale_dup_c8c9_multi         ; stale duplicates of bank C8/C9 tilesets (three internal matches, incl. game_mode 0 BG1 tileset)
 05babf 05f0e1 stale       stale_dup_bg2_mode1          ; stale duplicate of 08C97F-08FFA1 (game_mode 1 BG2 tileset)
-05f0e1 060000 unknown     unknown_counter_table        ; word table 0000,0001,...0009 then mostly zeros; low confidence, no known reader
+05f0e1 060000 unknown     unknown_counter_table        ; word table 0000,0001,...0009 then mostly zeros; checked for duplicates: only a weak 259-byte coincidental partial match against level_map_mode2's start (both begin with small sequential values), not enough to confirm identity; no known reader
 060000 06002b filler      tool_export_header           ; 43-byte leftover graphics-tool export directory header, ASCII FRAME 1 / FRAME 3; unreferenced
 06002b 069ceb tiles       title_tiles_8bpp             ; 8bpp tiles, 627 tiles -> VRAM $0600 (title screen, BGMODE 3 BG1)
 069ceb 06a02b maps        title_tilemap_6500           ; tilemap words (+$30) -> VRAM $6500, 416 words
@@ -117,19 +117,20 @@
 06a36b 06a56b palettes    title_palette_256            ; 256-colour palette -> CGRAM $00-$FF (title screen), also copied to $7F0F91
 06a56b 06a661 maps        tilemap_unref_6a56b          ; tilemap-like words, increasing, unreferenced
 06a661 06fc26 stale       stale_dup_sprite_frames_ca   ; stale duplicate of 0A7581-0ACB46 (bank CA sprite frames)
-06fc26 070000 unknown     unknown_tail_6fc26           ; unreferenced tail, entropy 5.5, no duplicate/format found
+06fc26 06fffc stale       stale_dup_sprite_frames_ce_partial ; exact byte-for-byte match (982 bytes) of sprite_frames_ce data at file offset 12F8AA; not tile/frame aligned, so the precise provenance is unclear, but 982 consecutive identical bytes is not plausibly coincidental
+06fffc 070000 unknown     unknown_tail_6fffc           ; last 4 bytes of the old unknown_tail_6fc26 span; these diverge from the sprite_frames_ce match just above and have no duplicate of their own
 070000 070340 sprites     sprite_frames_c7a            ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-070340 070342 unknown     unknown_gap_70340            ; 2-byte unlabelled gap between a sprite-frame region and the next tileset
+070340 070342 unknown     unknown_gap_70340            ; 2-byte unlabelled gap between a sprite-frame region and the next tileset; too short (2 bytes) for a duplicate search to mean anything -- every 2-byte value recurs by chance across a 2 MiB ROM
 070342 077302 tiles       bg1_tiles_mode2              ; 4bpp BG1 tiles, 894 tiles -> VRAM $2000 (game_mode 2)
 077302 07df82 tiles       mixed_tiles_c7_mid           ; unreferenced: mixed 4bpp tiles and tilemap/metatile word chunks; duplicated (as stale) at 047463
 07df82 07f962 tiles       bg2_tiles_mode2              ; 4bpp BG2 tiles, 207 tiles -> VRAM $6000 (game_mode 2)
 07f962 07fff8 sprites     sprite_frames_c7b            ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-07fff8 080000 unknown     unknown_gap_7fff8            ; 8-byte unlabelled gap between a sprite-frame region and the next tileset
+07fff8 080000 unknown     unknown_gap_7fff8            ; 8-byte unlabelled gap between a sprite-frame region and the next tileset; searched for an exact match anywhere in the ROM, none found
 080000 086ac0 tiles       bg1_tiles_mode3              ; 4bpp BG1 tiles, 854 tiles -> VRAM $2000 (game_mode 3)
 086ac0 08c980 tiles       bg1_tiles_mode1              ; 4bpp BG1 tiles -> VRAM $2000 (game_mode 1); DMA over-reads 0x140 bytes into the next set
 08c980 08ffa0 tiles       bg2_tiles_mode1              ; 4bpp BG2 tiles, 433 tiles -> VRAM $5000 (game_mode 1)
 08ffa0 08ffec sprites     sprite_frames_c8             ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-08ffec 090000 unknown     unknown_gap_8ffec            ; 20-byte unlabelled gap between a sprite-frame region and the next tileset
+08ffec 090000 unknown     unknown_gap_8ffec            ; 20-byte unlabelled gap (19 zero bytes + one 0xF0 byte) between a sprite-frame region and the next tileset; the exact 20 bytes recur at 6 other offsets across unrelated live regions (tiles_strip1, title_tiles_8bpp, sprite_frames_cc, sprite_frames_ce) -- a generic near-all-zero pattern, not evidence of a specific shared origin
 090000 095ac0 tiles       bg1_tiles_mode0              ; 4bpp BG1 tiles, 726 tiles -> VRAM $2000 (game_mode 0); B208 descriptor
 095ac0 098ac0 tiles       bg2_tiles_mode3              ; 4bpp BG2 tiles, 384 tiles -> VRAM $6000 (game_mode 3)
 098ac0 09b560 tiles       bg2_tiles_mode0              ; 4bpp BG2 tiles, 341 tiles -> VRAM $5000 (game_mode 0); B208 record
@@ -142,12 +143,12 @@
 0a4860 0a5760 maps        level_map_mode0              ; level map, game_mode 0: 120 columns x 16 rows, 32 bytes/column
 0a5760 0a6360 maps        level_map_mode2              ; level map, game_mode 2: 64 columns x 24 rows, 48 bytes/column
 0a6360 0ae384 sprites     sprite_frames_ca             ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 15 frames
-0ae384 0ae38e unknown     unknown_gap_ae384            ; 10-byte unlabelled gap between a sprite-frame region and the next tilemap
+0ae384 0ae38e unknown     unknown_gap_ae384            ; 10-byte unlabelled gap between a sprite-frame region and the next tilemap; searched for an exact match anywhere in the ROM, none found
 0ae38e 0aeb8e maps        tilemap_bg3_mode0            ; 32x32 tilemap -> VRAM $1C00 (game_mode 0 BG3)
 0aeb8e 0af38e maps        tilemap_mode0_7000           ; 32x32 tilemap -> VRAM $7000 (game_mode 0)
 0af38e 0afb8e maps        tilemap_mode0_6800           ; 32x32 tilemap -> VRAM $6800 (game_mode 0)
 0afb8e 0affec sprites     sprite_frames_ca2            ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-0affec 0b0000 unknown     unknown_gap_afffec           ; 20-byte unlabelled gap between a sprite-frame region and the next tilemaps block
+0affec 0b0000 unknown     unknown_gap_afffec           ; 20-byte unlabelled gap between a sprite-frame region and the next tilemaps block; searched for an exact match anywhere in the ROM, none found
 0b0000 0b4000 maps        tilemaps_multi_b0000         ; eight 32x32 tilemaps (2KB each), targets for modes 1-3 incl. streamed B208 entries
 0b4000 0ba4ca sprites     sprite_frames_cb             ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 13 frames
 0ba4ca 0bac4c maps        tilemap_unref_ba4ca          ; tilemap-like words, 961 words, unreferenced, sits between two sprite-frame regions
@@ -160,7 +161,7 @@
 1cc066 1cc6aa tiles       tiles_between_frames         ; tile-like data between the last table-referenced frame and the alternate-format frames; low confidence
 1cc6aa 1f0000 sprites     sprite_frames_alt_dc         ; sprite frames in an ALTERNATE format not read by live code: 8-byte header + 3-byte OAM records + 4bpp tiles; 82 frames
 1f0000 1f10c0 stale       stale_dup_metatiles_mode3    ; stale duplicate of 0A37A0-0A4860 (all 134 game_mode 3 metatiles)
-1f10c0 1f1100 unknown     unknown_gap_1f10c0           ; 64-byte gap between two stale-duplicate metatile regions, high entropy, no format found
+1f10c0 1f1100 stale       stale_dup_metatiles_mode1_tail ; stale duplicate of 0A3760-0A37A0 (the last 2 metatiles of metatiles_mode1); exact byte-for-byte match, fits between its two stale-duplicate-metatile neighbours
 1f1100 1f2780 stale       stale_dup_metatiles_mode2b   ; stale duplicate of 09C660-09DCE0 (game_mode 2 metatiles 136-315)
 1f2780 1f2e14 tiles       tiles_unref_1f2780           ; unreferenced, tile-like, entropy 5.2
 1f2e14 1ffee5 sprites     sprite_frames_alt_ef         ; sprite frames, alternate format (as 1CC6AA): 31 frames at 0x684 spacing

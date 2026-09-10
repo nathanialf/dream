@@ -200,7 +200,7 @@ seq_volume
 seq_volume_mono
 sfx_start
 spc_loader
-sub_0BCC
+seq_read_volume_r
 tick_wait
 
 ; Registered in recomp/src but never entered by any input script, so not

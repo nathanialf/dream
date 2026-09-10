@@ -107,15 +107,17 @@ loader_jump: ; word count 0: save counter, jmp (dest)
     mov x,#$00                   ; 0558
     jmp ($0539+x)                ; 055A loader_dest (self-modified operand)
 
-data_055D:
+
+cmd_param: ; scratch byte inside the uploaded loader block; port2 -> cmd_param via cmd_receive
     incbin "../data/04.bin":$0085..$0088     ; 3 bytes  SPC $055D-$055F
 
 ; ---- main driver (spc_upload_driver, 0x699 words): file 0x20088, SPC $0560-$1291 ----
 org $0560
-data_0560:
+
+sample_remap: ; uploaded by 65816 loc_C18288; 256-byte sample number -> SRCN remap table, read by seq_load_srcn
     incbin "../data/04.bin":$0088..$0188     ; 256 bytes  SPC $0560-$065F
 start_song: ; cmd 3: song number in cmd_param -> song_table[$1312] -> $E5/$E6
-    mov a,$055D                  ; 0660 data_055D; cmd_param
+    mov a,$055D                  ; 0660 cmd_param; cmd_param
     asl a                        ; 0663
     mov y,a                      ; 0664
     mov a,$1312+y                ; 0665 song_table (word pointers, indexed by cmd 3 param)
@@ -141,7 +143,7 @@ main_loop: ; poll port0 == counter ($E9); else fall to loc_0781 tick handling
 
 cmd_receive: ; port2 -> cmd_param ($055D), port1 -> cmd; echo counter; counter++
     mov x,!CPUIO2                ; 068C
-    mov $055D,x                  ; 068E data_055D; cmd_param
+    mov $055D,x                  ; 068E cmd_param; cmd_param
     mov x,!CPUIO1                ; 0691
     mov !CPUIO0,a                ; 0693
     inc a                        ; 0695
@@ -211,17 +213,17 @@ loc_06F7:
     ret                          ; 06F9
 
 cmd2_set_mono: ; cmd_param -> mono flag ($1D)
-    mov a,$055D                  ; 06FA data_055D; cmd_param
+    mov a,$055D                  ; 06FA cmd_param; cmd_param
     mov $1D,a                    ; 06FD mono_flag
     jmp tick_wait                ; 06FF
 
 cmd1_set_E7: ; cmd_param -> $E7 (unused elsewhere in traced code)
-    mov a,$055D                  ; 0702 data_055D; cmd_param
+    mov a,$055D                  ; 0702 cmd_param; cmd_param
     mov $E7,a                    ; 0705 var_E7
     jmp tick_wait                ; 0707
 
 cmd0_set_E8: ; cmd_param -> $E8 (unused elsewhere in traced code)
-    mov a,$055D                  ; 070A data_055D; cmd_param
+    mov a,$055D                  ; 070A cmd_param; cmd_param
     mov $E8,a                    ; 070D var_E8
     jmp tick_wait                ; 070F
 
@@ -230,7 +232,7 @@ cmd5_voice5_volume: ; scale DSP V5 VOL_L/R by cmd_param percent
     push a                       ; 0715
     push x                       ; 0716
     mov x,#$05                   ; 0717
-    mov a,$055D                  ; 0719 data_055D; cmd_param
+    mov a,$055D                  ; 0719 cmd_param; cmd_param
     mov $04B6,a                  ; 071C master_percent
     mov !DSPADDR,#$50            ; 071F DSP V5_VOL_L
     mov a,!DSPDATA               ; 0722
@@ -246,18 +248,18 @@ cmd5_voice5_volume: ; scale DSP V5 VOL_L/R by cmd_param percent
     bra tick_wait                ; 0737
 
 cmd4_pitch_offset: ; sign-extend cmd_param * 8 -> $EC/$ED (applied to SFX voice $0D); clear EON bit 5
-    mov a,$055D                  ; 0739 data_055D; cmd_param
+    mov a,$055D                  ; 0739 cmd_param; cmd_param
     bmi loc_074A                 ; 073C
     clrc                         ; 073E
-    mov a,$055D                  ; 073F data_055D; cmd_param
+    mov a,$055D                  ; 073F cmd_param; cmd_param
     mov $EC,a                    ; 0742 pitch_offset
     mov a,#$00                   ; 0744
     mov $ED,a                    ; 0746
     bra loc_0756                 ; 0748
 
 loc_074A:
-    mov $055D,a                  ; 074A data_055D; cmd_param
-    mov a,$055D                  ; 074D data_055D; cmd_param
+    mov $055D,a                  ; 074A cmd_param; cmd_param
+    mov a,$055D                  ; 074D cmd_param; cmd_param
     mov $EC,a                    ; 0750 pitch_offset
     mov a,#$FF                   ; 0752
     mov $ED,a                    ; 0754
@@ -278,7 +280,7 @@ loc_0756:
     bra tick_wait                ; 0771
 
 play_sfx: ; cmd < $80: sfx number = cmd, channel = cmd_param -> sfx_start
-    mov x,$055D                  ; 0773 data_055D; cmd_param
+    mov x,$055D                  ; 0773 cmd_param; cmd_param
     call sfx_start               ; 0776
     bra loc_078E                 ; 0779
 
@@ -342,7 +344,7 @@ loc_07D8:
     jmp main_loop                ; 07D8
 
 cmd7_stop_to_loader: ; param != 0: jump straight to loader; else keyoff, ~200 T1 ticks, re-init, then loader
-    mov a,$055D                  ; 07DB data_055D; cmd_param
+    mov a,$055D                  ; 07DB cmd_param; cmd_param
     beq loc_07E3                 ; 07DE
     jmp loader_reset_dsp         ; 07E0
 
@@ -475,7 +477,7 @@ loc_08AE:
     mov $02,y                    ; 08B4 tmp2
     mov $03,#$00                 ; 08B6 tmp3
     pop y                        ; 08B9
-    mov a,$11CD+x                ; 08BA data_11CD
+    mov a,$11CD+x                ; 08BA pitch_table_tail
     mul ya                       ; 08BD
     addw ya,$02                  ; 08BE tmp2
     mov $03,y                    ; 08C0 tmp3
@@ -484,7 +486,7 @@ loc_08AE:
     lsr $03                      ; 08C5 tmp3
     ror a                        ; 08C7
     mov $02,a                    ; 08C8 tmp2
-    mov a,$11CD+x                ; 08CA data_11CD
+    mov a,$11CD+x                ; 08CA pitch_table_tail
     mov y,a                      ; 08CD
     mov a,$11CC+x                ; 08CE pitch_table
     mov x,$04                    ; 08D1 tmp4
@@ -502,7 +504,7 @@ loc_08DF:
     mov x,a                      ; 08DF
     mov a,$11CC+x                ; 08E0 pitch_table
     mov $02,a                    ; 08E3 tmp2
-    mov a,$11CD+x                ; 08E5 data_11CD
+    mov a,$11CD+x                ; 08E5 pitch_table_tail
     mov $03,a                    ; 08E8 tmp3
 loc_08EA:
     pop a                        ; 08EA
@@ -882,7 +884,7 @@ seq_load_srcn: ; sample index -> sample_remap[$0560] -> SRCN ($0244+x)
     push x                       ; 0B8B
     mov a,($00)+y                ; 0B8C tmp0
     mov x,a                      ; 0B8E
-    mov a,$0560+x                ; 0B8F data_0560; sample_remap[256] (uploaded by 65816 loc_C18288)
+    mov a,$0560+x                ; 0B8F sample_remap; sample_remap[256] (uploaded by 65816 loc_C18288)
     pop x                        ; 0B92
     mov $0244+x,a                ; 0B93 srcn[x]
     ret                          ; 0B96
@@ -918,7 +920,7 @@ seq_read_volume: ; L,R bytes; averaged when mono flag set
     mov $0254+x,a                ; 0BC8 vol_l[x]
     inc y                        ; 0BCB
 
-sub_0BCC:
+seq_read_volume_r: ; reads one sequence byte into vol_r[x] ($0264+x); companion to seq_read_volume's vol_l store
     mov a,($00)+y                ; 0BCC tmp0
     mov $0264+x,a                ; 0BCE vol_r[x]
     ret                          ; 0BD1
@@ -948,7 +950,7 @@ loc_0BE5:
 seq_volume_mono: ; seq cmd $23: one byte -> both channels
     call seq_pop_x               ; 0BF0
     mov $0254+x,a                ; 0BF3 vol_l[x]
-    call sub_0BCC                ; 0BF6
+    call seq_read_volume_r       ; 0BF6
     mov a,$0264+x                ; 0BF9 vol_r[x]
     mov $0254+x,a                ; 0BFC vol_l[x]
     jmp loc_0B78                 ; 0BFF
@@ -1760,5 +1762,6 @@ loc_11BB:
 
 pitch_table: ; 98 words, DSP pitch per semitone, index = (note + $24 + transpose) * 2
     incbin "../data/04.bin":$0CF4..$0CF5     ; 1 byte  SPC $11CC-$11CC
-data_11CD:
+
+pitch_table_tail: ; remaining words of pitch_table; split into its own data run by the emitter
     incbin "../data/04.bin":$0CF5..$0DBA     ; 197 bytes  SPC $11CD-$1291

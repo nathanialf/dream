@@ -184,9 +184,11 @@ via RAM pointers.
 
 ## Open items
 
-1. Four small unreferenced fragments remain (`orphan_C0A294`, `orphan_C0A35C`,
-   `entity_clear_anim_unused`, the dead `$9206` dispatcher); everything else in the code
-   bank is reached from a vector, a table, or an animation script.
+1. Four small unreferenced fragments remain (`unused_entity_apply_velocity_z` at $A294,
+   `unused_wram_clear_full` at $A35C, `entity_clear_anim_unused`, the dead $9206 dispatcher
+   -- named `unused_stream_desc_dispatch` since it reads data_C0B208/vram_stream_desc_table,
+   now repurposed as non-code); everything else in the code bank is reached from a vector,
+   a table, or an animation script.
 2. Split `data/` along the region table in `docs/data_formats.md` (sprite frames, BRR,
    songs, tilesets, maps, palettes) so assets become editable files instead of blobs.
 3. Dynamic confirmation: a trace log from Mesen2/bsnes-plus would settle the handler

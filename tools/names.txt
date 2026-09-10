@@ -219,3 +219,103 @@ ram 0072 walk_cycle_parity
 ; ---- from the mode-init recomp batch (behaviour read from the C transcription) ----
 C08A74 mode0_camera_zone_update   ; per-frame mode-0 arm: 180-frame effect cycle, camera_x zone ladder selecting HDMA layer masks
 C091BB cgram_palette_ramp_step    ; steps $0C1D by $80 toward the sign of $0C1B and queues a 32-colour CGRAM record from $C4:7103
+
+; ---- remaining auto-named routines, named from behaviour (out/dream.asm) ----
+; dead: reads data_C0B208,X as if it were a jump-table entry and dispatches via jmp ($0004);
+; the B208 table has since been repurposed as the VRAM streaming-descriptor array (non-code),
+; so this path is unreachable garbage -- see NOTES.md "Open items" #1 (dream.asm:2093-2100).
+C09206 unused_stream_desc_dispatch
+; entity_update_tick's airborne branch (jsr at C0994B): negates entity_vel_x, arithmetic-shifts
+; it right by 2 (cmp #$8000/ror x2, a sign-preserving /4), then re-negates unless $0BAE==0 (the
+; ground_y_lookup_threshold sentinel), and stores the result to entity_vel_y (dream.asm:4210-4211).
+C0A1F3 entity_vel_y_from_vel_x
+; dead twin of entity_apply_velocity_x/_y: same sub-pixel-accumulate-then-integer-add pattern,
+; but on the fields at $0928 (vel)/$0908 (sub)/$08E8 (pos) -- a third per-entity axis that
+; entity_init_from_table clears/seeds (data_C0B4AE) but no live code ever advances via velocity;
+; unreferenced (dream.asm:4316-4315).
+C0A294 unused_entity_apply_velocity_z
+; unreferenced duplicate of reset's WRAM-clear sequence (DP $0000-$01FE via tcd, $0200-$1FFE,
+; then WRAM bank $7E $2000-$FFFE) -- never called (dream.asm:4424-4384).
+C0A35C unused_wram_clear_full
+
+; ---- sound_iface: remaining auto-named/undissected bytes ----
+; dead duplicate of spc_command's tail: sends SPC command $F9 (cmd1_set_E7, spc/driver.asm) then
+; $FE (play), skipping the upload steps spc_command does first; unreferenced (dream.asm:7607-7614).
+C183F1 unused_spc_set_e7_and_play
+; raw bytes right after orphan_C183F1/unused_spc_set_e7_and_play, byte-identical to it except
+; command $FB instead of $F9 (cmd3_fade_and_song) -- a second dead sibling, left undecoded by
+; the tracer's orphan sweep because the gap (18 bytes) is under its min_gap=24 floor. Forced
+; here as its own routine since the bytes are valid, unreferenced 65816 (dream.asm:7616-7618).
+C18403 unused_spc_set_fb_and_play m0x0
+
+; ---- data tables inside the code/sound_iface regions (named so progress.py counts them) ----
+; three overlapping DMA-source windows (len 0x10/0x20/0x30 from offsets 84A2/84A9/84B0) copied
+; by mode0_level_init via dma_setup_channel_step before its main HDMA setup; byte-shaped like
+; the {tag=$48,ptr16} triples used elsewhere for indirect HDMA (dream.asm:465-489).
+data C084A2 mode0_init_dma_curve_table
+; symmetric 17-entry triangle wave (0,0,0,0,1,1,2,2,3,3,3,3,2,2,1,1,0 as words), read indexed
+; from two call sites (dream.asm:1810, 2516); amplitude ramp for a periodic screen effect.
+data C084B5 camera_shake_ramp_table
+; single byte written to CGDATA right after CGADD=$E1 in mode1_level_init (dream.asm:8780-8784).
+data C08791 mode1_flash_cgram_lo
+; second CGDATA byte for the same $E1 write, plus 5 trailing unreferenced bytes (dream.asm:8787-8792).
+data C08792 mode1_flash_cgram_hi
+; {$03,$0C,$30,$C0}: the four 2-bit-field masks isolating one sprite's slot within an OAM
+; high-table byte (4 sprites/byte); indexed by sprite-slot & 3 (dream.asm:4879-4880, 4934).
+data C0A6D3 oam_size_bit_mask_table
+; 128-entry precomputed OAM high-table byte, indexed by a shifted frame-width value and ORed
+; into oam_entry_ptr (dream.asm:4882, 5051).
+data C0A6D7 oam_size_preset_table
+; VRAM streaming-descriptor record array read by vram_stream_descriptor_dispatch and (dead) by
+; unused_stream_desc_dispatch; interleaved 8-byte records, one field-view label per word offset.
+data C0B208 vram_stream_desc_table
+data C0B20A vram_stream_desc_addr
+data C0B20C vram_stream_desc_bank
+data C0B20E vram_stream_desc_payload
+; per-zone index into the streaming-descriptor table above, selected from camera_x
+; (dream.asm:3462, 6564-6567).
+data C0B24C stream_zone_index_table
+; particle_spawn_from_table's per-game-mode spawn coordinate lists (first words are per-mode
+; start offsets into the same array, dream.asm:2589-2610).
+data C0B26C particle_spawn_list_x
+data C0B26E particle_spawn_list_y
+; entity_ground_y_lookup's compare threshold ($0008) and fallback ground Y ($00D0)
+; (dream.asm:3380-3390).
+data C0B2F6 ground_y_lookup_threshold
+data C0B2F8 ground_y_lookup_default
+; large per-index Y-position lookup read by entity_ground_y_lookup (dream.asm:3395).
+data C0B2FA entity_state_ground_y_table
+; entity_init_from_table's per-entity init record array (18-byte interleaved records; the
+; first 8 bytes double as the 4 per-game-mode start offsets into the same array), one
+; field-view label per word offset (dream.asm:3583-3624).
+data C0B4A4 entity_init_table
+data C0B4A6 entity_init_state
+data C0B4A8 entity_init_unk_07a8
+data C0B4AA entity_init_x
+data C0B4AC entity_init_y
+data C0B4AE entity_init_unk_08e8
+data C0B4B0 entity_init_flags
+data C0B4B2 entity_init_parent
+data C0B4B4 entity_init_hitstun
+
+; ---- small unlabeled dead/source-table fragments found while closing the code-section gap ----
+; 5-byte DMA/HDMA source table for the dma_setup_channel_step call in mode2_level_init's tail
+; (ptr_04 = #$88A6, loaded at C08899); same family as mode0_init_dma_curve_table.
+data C088A6 mode2_init_dma_table
+; 26-byte HDMA/DMA source table before mode0_camera_zone_update; ptr_04 = #$8A6D (loaded at
+; C08A4D, inside the same overlapping-window mode0_level_init tail as data_C084A2/84A9/84B0).
+; This is the "8A5A" table referenced in the naming brief.
+data C08A5A mode0_zone_hdma_table
+; dead tail right after loc_C0921C's rts (the exit of unused_stream_desc_dispatch): INC $0BB8
+; twice then STZ $0BBA, RTS -- more cleanup code for the same dead dispatcher, never reached.
+data C0921D unused_stream_desc_dispatch_tail
+; dead fragment inside particle_spawn_from_table, right after loc_C097DD's rts: dex/dex/bpl/
+; jmp $98D7 -- never reached by any traced path.
+data C097E7 unused_particle_spawn_tail
+; dead duplicate of entity_animate_only's own tail (tyx/pla/rts), sitting right after it.
+data C09AFD unused_entity_animate_tail
+; two zero bytes used as a fixed DMA source by dma_fill_vram_zero (lda #$A443) to fill VRAM
+; with zero via repeated-byte DMA mode.
+data C0A443 dma_fill_zero_word
+; three unreached jmp instructions inside nmi_handler_title_fade (jmp $BDD6/$BDBF/$BDB0).
+data C0BEB7 unused_title_fade_jmp_stub

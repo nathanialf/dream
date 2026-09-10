@@ -355,15 +355,30 @@ low-confidence block below (seedable with `m0x0` if the maintainer wants it trac
 
 ## 10. Low-confidence block (not for direct merge)
 
+Resolved (2026-09-10): the routines below are now named in `tools/names.txt`, superseding
+this block's guesses where the two disagree.
+
+- `C09206` -> `unused_stream_desc_dispatch` (this proposal's "do not seed" note is overridden
+  by the 100%-naming pass; the dead-dispatcher behaviour is unchanged, only the label is new).
+- `orphan_C0A294` -> `unused_entity_apply_velocity_z` (same routine as this block's
+  `entity_apply_velocity_z_dead` guess, renamed to the `unused_*` convention).
+- `orphan_C0A35C` -> `unused_wram_clear_full` (same routine as `wram_clear_alt`; confirmed by
+  reading `reset`'s own WRAM-clear sequence in out/dream.asm rather than by the sample-directory
+  cross-reference this block guessed at).
+- `orphan_C183F1` -> `unused_spc_set_e7_and_play`, **not** "stop_sequence": tracing the actual
+  bytes (out/dream.asm:7607-7614) shows it builds command `$F9` and calls `write_spc_command`
+  twice ($F9 then $FE=play), never $FF (`cmd7_stop_to_loader`); `$F9 & 7 = 1` is
+  `cmd1_set_E7` in spc/driver.asm's `NAMES` table, so this dead routine would set $E7 and play,
+  not stop. This block's guess was wrong; verify against out/dream.asm and spc/driver.asm.NAMES
+  before reusing an old proposal.
+- `C0A1F3` -> `entity_vel_y_from_vel_x` (same routine as `entity_derive_bounce_velocity`;
+  renamed for a more literal description of the arithmetic: derives entity_vel_y from
+  entity_vel_x via a sign-preserving /4, called once from entity_update_tick).
+
 ```
 ; documented, but left unnamed/uncertain — behaviour understood, game-level meaning is not
-; C09206 seq_dispatch_dead                ; already documented dead in docs/handler_tables.md; do not seed
 C08A74 mode0_weather_zone_update m0x0
 C091BB spawn_screen_flash_effect m0x0
-orphan_C0A294 entity_apply_velocity_z_dead m0x0 ; dead code, no live caller (docs/NOTES.md open item 1)
-orphan_C0A35C wram_clear_alt m0x0          ; unreferenced; zeroes DP + $0200-$1FFF + $7E2000-$7EDFFF (matches sub_C1815F's sample-directory buffer)
-orphan_C183F1 spc_stop_sequence_dead m0x0  ; unreferenced; see docs/dkc_crossref.md 3.2
-C0A1F3 entity_derive_bounce_velocity m0x0
 ram 0748 entity_attack_timer
 ram 07A8 entity_substate
 ram 08E8 entity_z_dead

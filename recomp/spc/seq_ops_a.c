@@ -16,7 +16,7 @@
  *   code if not -- runs next. loc_0B78/loc_0B7B (the pointer advance at the end
  *   of seq_instrument), loc_0D6A, loc_0DDF, loc_0DF2, loc_0F09 and seq_advance5
  *   are all entered that way. Where a handler *falls through* into the next
- *   routine (seq_read_volume into sub_0BCC) the same thing happens, so the
+ *   routine (seq_read_volume into seq_read_volume_r) the same thing happens, so the
  *   routine that owns the address is still credited with the call.
  *
  *   A tail reached by a *branch* from inside two handlers belongs to both of
@@ -26,7 +26,7 @@
  *
  *   A `call` runs on the emulator through sps_run_callee (call_sub below), so a
  *   callee that is converted gets its hook -- seq_load_srcn, seq_read_volume,
- *   sub_0BCC, seq_push_return, seq_read_vibrato and dsp_flg_20 are all in the
+ *   seq_read_volume_r, seq_push_return, seq_read_vibrato and dsp_flg_20 are all in the
  *   table -- and one that is not (seq_read_adsr, seq_retrigger) runs as the
  *   ROM's own code. `call seq_pop_x` is the single exception, and the comment on
  *   call_seq_pop_x says why: it reaches its argument by pulling the return
@@ -43,7 +43,7 @@
 #define SEQ_RETRIGGER   0x0B69   /* not converted: duration[x] = 1, gate[x] = 0 */
 #define SEQ_LOAD_SRCN   0x0B8B
 #define SEQ_READ_VOLUME 0x0BC2
-#define SUB_0BCC        0x0BCC
+#define SEQ_READ_VOLUME_R 0x0BCC
 #define SEQ_PUSH_RETURN 0x0D1C
 #define SEQ_READ_ADSR   0x0E4E   /* not converted yet */
 #define SEQ_READ_VIB    0x0E25
@@ -235,7 +235,7 @@ static void loc_0BBC(SpcState* sp) { seq_volume_at(sp, 0x0BBC); }
  * The L,R pair out of the sequence. With the mono flag set the two are halved
  * (as magnitudes, so a negative -- phase-inverted -- channel keeps its weight)
  * and summed into both; otherwise L is stored here and the routine falls
- * through into sub_0BCC for R.
+ * through into seq_read_volume_r for R.
  * ------------------------------------------------------------------------- */
 static void seq_read_volume(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -248,7 +248,7 @@ static void seq_read_volume(SpcState* sp) {
     S(0x0BC8, 3); s_idx(sp);                              /* 0BC8 mov $0254+x,a */
     s_movs(sp, (uint16_t) (0x0254 + x), a);
     S(0x0BCB, 1); s_imp(sp); y++; sps_set_zn(sp, y);      /* 0BCB inc y */
-    S_GOTO(SUB_0BCC);                                     /* falls into sub_0BCC */
+    S_GOTO(SEQ_READ_VOLUME_R);                            /* falls into seq_read_volume_r */
   }
 
   S(0x0BD2, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));   /* 0BD2 mov a,($00)+y */
@@ -280,13 +280,13 @@ static void seq_read_volume(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * sub_0BCC -- $0BCC (proposed name: seq_read_volume_r)
+ * seq_read_volume_r -- $0BCC
  *
  * One sequence byte into the slot's right volume. It is the second half of
  * seq_read_volume's stereo path, which falls into it, and seq_volume_mono calls
  * it on its own to read the single byte that then goes to both channels.
  * ------------------------------------------------------------------------- */
-static void sub_0BCC(SpcState* sp) {
+static void seq_read_volume_r(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
 
   S(0x0BCC, 2); a = s_load(sp, s_adr_idy(sp, 0x00, y));   /* 0BCC mov a,($00)+y */
@@ -300,7 +300,7 @@ static void sub_0BCC(SpcState* sp) {
  *
  * One byte to both channels. The store at $0BF3 writes the A seq_retrigger left
  * behind (zero) and is immediately overwritten from $0264+x, which is what
- * sub_0BCC has just read.
+ * seq_read_volume_r has just read.
  * ------------------------------------------------------------------------- */
 static void seq_volume_mono(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -308,8 +308,8 @@ static void seq_volume_mono(SpcState* sp) {
   if(call_seq_pop_x(sp, 0x0BF0, &a, &x, &y)) return;      /* 0BF0 call seq_pop_x */
   S(0x0BF3, 3); s_idx(sp);                                /* 0BF3 mov $0254+x,a */
   s_movs(sp, (uint16_t) (0x0254 + x), a);
-  S(0x0BF6, 3);                                           /* 0BF6 call sub_0BCC */
-  if(call_sub(sp, 0x0BF9, SUB_0BCC)) return;
+  S(0x0BF6, 3);                                           /* 0BF6 call seq_read_volume_r */
+  if(call_sub(sp, 0x0BF9, SEQ_READ_VOLUME_R)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
   S(0x0BF9, 3); s_idx(sp);                                /* 0BF9 mov a,$0264+x */
   a = s_load(sp, (uint16_t) (0x0264 + x));
@@ -994,7 +994,7 @@ static const SpcRecompEntry kSeqOpsA[] = {
   { 0x0bb6, "seq_volume",            seq_volume },
   { 0x0bbc, "loc_0BBC",           loc_0BBC },
   { 0x0bc2, "seq_read_volume",       seq_read_volume },
-  { 0x0bcc, "sub_0BCC",              sub_0BCC },
+  { 0x0bcc, "seq_read_volume_r",     seq_read_volume_r },
   { 0x0bf0, "seq_volume_mono",       seq_volume_mono },
   { 0x0c02, "seq_volume_preset",     seq_volume_preset },
   { 0x0c18, "orphan_volume_preset2", orphan_volume_preset2 },

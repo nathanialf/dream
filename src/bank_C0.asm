@@ -558,9 +558,11 @@ dma_setup_channel_step:
     sta.w DASB0,x                          ; C0849C m1x0
     rep.b #$20                             ; C0849F m1x0
     rts                                    ; C084A1 m0x0
+
+mode0_init_dma_curve_table:
     incbin "../data/01.bin":$04A2..$04B5      ; 19 bytes
 
-data_C084B5:
+camera_shake_ramp_table:
     incbin "../data/01.bin":$04B5..$04D7      ; 34 bytes
 
 mode1_level_init:
@@ -810,17 +812,17 @@ loc_C0861D:
     sep.b #$20                             ; C08779 m0x0
     lda.b #$E1                             ; C0877B m1x0
     sta.w CGADD                            ; C0877D m1x0
-    lda.l $800000+(data_C08791&$FFFF)      ; C08780 m1x0
+    lda.l $800000+(mode1_flash_cgram_lo&$FFFF)   ; C08780 m1x0
     sta.w CGDATA                           ; C08784 m1x0
-    lda.l $800000+(data_C08792&$FFFF)      ; C08787 m1x0
+    lda.l $800000+(mode1_flash_cgram_hi&$FFFF)   ; C08787 m1x0
     sta.w CGDATA                           ; C0878B m1x0
     rep.b #$20                             ; C0878E m1x0
     rts                                    ; C08790 m0x0
 
-data_C08791:
+mode1_flash_cgram_lo:
     incbin "../data/01.bin":$0791..$0792      ; 1 bytes
 
-data_C08792:
+mode1_flash_cgram_hi:
     incbin "../data/01.bin":$0792..$0798      ; 6 bytes
 
 mode2_level_init:
@@ -924,6 +926,8 @@ loc_C087FE:
     ldx.w #$0010                           ; C0889F m0x0
     jsr.w dma_setup_channel_step           ; C088A2 m0x0
     rts                                    ; C088A5 m0x0
+
+mode2_init_dma_table:
     incbin "../data/01.bin":$08A6..$08AB      ; 5 bytes
 
 title_screen_init:
@@ -1081,6 +1085,8 @@ loc_C08914:
     ldx.w #$0050                           ; C08A53 m0x0
     jsr.w dma_setup_channel_step           ; C08A56 m0x0
     rts                                    ; C08A59 m0x0
+
+mode0_zone_hdma_table:
     incbin "../data/01.bin":$0A5A..$0A74      ; 26 bytes
 
 mode0_camera_zone_update:
@@ -1809,7 +1815,7 @@ nmi_scroll_mode1:
     ldx.w #$0000                           ; C08FFC m0x0
 
 loc_C08FFF:
-    lda.l $800000+(data_C084B5&$FFFF),x    ; C08FFF m0x0
+    lda.l $800000+(camera_shake_ramp_table&$FFFF),x   ; C08FFF m0x0
     clc                                    ; C09003 m0x0
     adc.b camera_x                         ; C09004 m0x0
     sta.b $AC,x                            ; C09006 m0x0
@@ -2092,11 +2098,11 @@ loc_C091DD:
     sta.w $0B8A                            ; C09202 m0x0
     rts                                    ; C09205 m0x0
 
-orphan_C09206:
+unused_stream_desc_dispatch:
     clc                                    ; C09206 m0x0
     adc.w $0BB8                            ; C09207 m0x0
     tax                                    ; C0920A m0x0
-    lda.l $800000+(data_C0B208&$FFFF),x    ; C0920B m0x0
+    lda.l $800000+(vram_stream_desc_table&$FFFF),x   ; C0920B m0x0
     beq loc_C0921C                         ; C0920F m0x0
     sta.b ptr_04                           ; C09211 m0x0
     lda.w $0BBA                            ; C09213 m0x0
@@ -2105,6 +2111,8 @@ orphan_C09206:
 
 loc_C0921C:
     rts                                    ; C0921C m0x0
+
+unused_stream_desc_dispatch_tail:
     incbin "../data/01.bin":$121D..$1227      ; 10 bytes
 
 mode0_particle_draw_dispatch:
@@ -2515,7 +2523,7 @@ loc_C0954E:
     lda.l $7F0E87,x                        ; C09552 m0x0
     and.w #$001E                           ; C09556 m0x0
     tax                                    ; C09559 m0x0
-    lda.l $800000+(data_C084B5&$FFFF),x    ; C0955A m0x0
+    lda.l $800000+(camera_shake_ramp_table&$FFFF),x   ; C0955A m0x0
     plx                                    ; C0955E m0x0
     clc                                    ; C0955F m0x0
     adc.l $7F0E89,x                        ; C09560 m0x0
@@ -2592,19 +2600,19 @@ particle_spawn_from_table:
     lda.b game_mode                        ; C095E9 m0x0
     asl                                    ; C095EB m0x0
     tax                                    ; C095EC m0x0
-    lda.l $800000+(data_C0B26C&$FFFF),x    ; C095ED m0x0
+    lda.l $800000+(particle_spawn_list_x&$FFFF),x   ; C095ED m0x0
     tax                                    ; C095F1 m0x0
     pea.w $807F                            ; C095F2 m0x0
     plb                                    ; C095F5 m0x0
     ldy.w #$003A                           ; C095F6 m0x0
 
 loc_C095F9:
-    lda.l $800000+(data_C0B26C&$FFFF),x    ; C095F9 m0x0
+    lda.l $800000+(particle_spawn_list_x&$FFFF),x   ; C095F9 m0x0
     bmi loc_C0966A                         ; C095FD m0x0
     sec                                    ; C095FF m0x0
     sbc.w #$0080                           ; C09600 m0x0
     sta.w $0A06,y                          ; C09603 m0x0
-    lda.l $800000+(data_C0B26E&$FFFF),x    ; C09606 m0x0
+    lda.l $800000+(particle_spawn_list_y&$FFFF),x   ; C09606 m0x0
     sec                                    ; C0960A m0x0
     sbc.w #$0080                           ; C0960B m0x0
     sta.w $0A86,y                          ; C0960E m0x0
@@ -2829,6 +2837,8 @@ loc_C097DD:
     sbc.w #$0400                           ; C097E1 m0x0
     bmi loc_C097EE                         ; C097E4 m0x0
     rts                                    ; C097E6 m0x0
+
+unused_particle_spawn_tail:
     incbin "../data/01.bin":$17E7..$17EE      ; 7 bytes
 
 loc_C097EE:
@@ -3000,7 +3010,7 @@ loc_C0993D:
 
 loc_C09948:
     jsr.w entity_ground_y_lookup           ; C09948 m0x0
-    jsr.w sub_C0A1F3                       ; C0994B m0x0
+    jsr.w entity_vel_y_from_vel_x          ; C0994B m0x0
     jsr.w entity_apply_velocity_x          ; C0994E m0x0
     jsr.w entity_apply_velocity_y          ; C09951 m0x0
     lda.w entity_vel_x,x                   ; C09954 m0x0
@@ -3262,6 +3272,8 @@ entity_animate_only:
     jsl.l $800000+(anim_update&$FFFF)      ; C09AF7 m0x0
     pla                                    ; C09AFB m0x0
     rts                                    ; C09AFC m0x0
+
+unused_entity_animate_tail:
     incbin "../data/01.bin":$1AFD..$1B00      ; 3 bytes
 
 entity_spawn_transform_b:
@@ -3375,11 +3387,11 @@ loc_C09BE1:
     lda.b game_mode                        ; C09BE6 m0x0
     asl                                    ; C09BE8 m0x0
     tax                                    ; C09BE9 m0x0
-    lda.l $800000+(data_C0B2F6&$FFFF),x    ; C09BEA m0x0
+    lda.l $800000+(ground_y_lookup_threshold&$FFFF),x   ; C09BEA m0x0
 
 loc_C09BEE:
     tax                                    ; C09BEE m0x0
-    lda.l $800000+(data_C0B2F6&$FFFF),x    ; C09BEF m0x0
+    lda.l $800000+(ground_y_lookup_threshold&$FFFF),x   ; C09BEF m0x0
     beq loc_C09C03                         ; C09BF3 m0x0
     cmp.b ptr_04                           ; C09BF5 m0x0
     bcs loc_C09BFF                         ; C09BF7 m0x0
@@ -3388,13 +3400,13 @@ loc_C09BEE:
     bra loc_C09BEE                         ; C09BFD m0x0
 
 loc_C09BFF:
-    lda.l $800000+(data_C0B2F8&$FFFF),x    ; C09BFF m0x0
+    lda.l $800000+(ground_y_lookup_default&$FFFF),x   ; C09BFF m0x0
 
 loc_C09C03:
     sta.w $0BAE                            ; C09C03 m0x0
     beq loc_C09C14                         ; C09C06 m0x0
     bmi loc_C09C14                         ; C09C08 m0x0
-    lda.l $800000+(data_C0B2FA&$FFFF),x    ; C09C0A m0x0
+    lda.l $800000+(entity_state_ground_y_table&$FFFF),x   ; C09C0A m0x0
     beq loc_C09C14                         ; C09C0E m0x0
     tyx                                    ; C09C10 m0x0
     sta.w entity_y,x                       ; C09C11 m0x0
@@ -3461,7 +3473,7 @@ vram_stream_descriptor_dispatch:
     asl                                    ; C09C6F m0x0
     adc.b ptr_04                           ; C09C70 m0x0
     tax                                    ; C09C72 m0x0
-    lda.l $800000+(data_C0B24C&$FFFF),x    ; C09C73 m0x0
+    lda.l $800000+(stream_zone_index_table&$FFFF),x   ; C09C73 m0x0
     bmi loc_C09C93                         ; C09C77 m0x0
     cmp.w $0BC4                            ; C09C79 m0x0
     beq loc_C09C93                         ; C09C7C m0x0
@@ -3472,7 +3484,7 @@ loc_C09C84:
     tax                                    ; C09C84 m0x0
     lda.w $0BCA                            ; C09C85 m0x0
     bne loc_C09CB8                         ; C09C88 m0x0
-    lda.l $800000+(data_C0B208&$FFFF),x    ; C09C8A m0x0
+    lda.l $800000+(vram_stream_desc_table&$FFFF),x   ; C09C8A m0x0
     bpl loc_C09C94                         ; C09C8E m0x0
     sta.w $0BC6                            ; C09C90 m0x0
 
@@ -3481,12 +3493,12 @@ loc_C09C93:
 
 loc_C09C94:
     sta.w $0BCC                            ; C09C94 m0x0
-    lda.l $800000+(data_C0B20C&$FFFF),x    ; C09C97 m0x0
+    lda.l $800000+(vram_stream_desc_bank&$FFFF),x   ; C09C97 m0x0
     bpl loc_C09D02                         ; C09C9B m0x0
     sta.w $0BD0                            ; C09C9D m0x0
-    lda.l $800000+(data_C0B20A&$FFFF),x    ; C09CA0 m0x0
+    lda.l $800000+(vram_stream_desc_addr&$FFFF),x   ; C09CA0 m0x0
     sta.w $0BCE                            ; C09CA4 m0x0
-    lda.l $800000+(data_C0B20E&$FFFF),x    ; C09CA7 m0x0
+    lda.l $800000+(vram_stream_desc_payload&$FFFF),x   ; C09CA7 m0x0
     sta.w $0BC8                            ; C09CAB m0x0
     txa                                    ; C09CAE m0x0
     clc                                    ; C09CAF m0x0
@@ -3537,9 +3549,9 @@ loc_C09D02:
     sta.w $0B92,y                          ; C09D05 m0x0
     lda.w $0BCC                            ; C09D08 m0x0
     sta.w $0B8E,y                          ; C09D0B m0x0
-    lda.l $800000+(data_C0B20E&$FFFF),x    ; C09D0E m0x0
+    lda.l $800000+(vram_stream_desc_payload&$FFFF),x   ; C09D0E m0x0
     sta.w $0B8C,y                          ; C09D12 m0x0
-    lda.l $800000+(data_C0B20A&$FFFF),x    ; C09D15 m0x0
+    lda.l $800000+(vram_stream_desc_addr&$FFFF),x   ; C09D15 m0x0
     sta.w $0B90,y                          ; C09D19 m0x0
     tya                                    ; C09D1C m0x0
     clc                                    ; C09D1D m0x0
@@ -3588,19 +3600,19 @@ entity_init_from_table:
     lda.b game_mode                        ; C09D70 m0x0
     asl                                    ; C09D72 m0x0
     tax                                    ; C09D73 m0x0
-    lda.l $800000+(data_C0B4A4&$FFFF),x    ; C09D74 m0x0
+    lda.l $800000+(entity_init_table&$FFFF),x   ; C09D74 m0x0
     ldy.w #$0000                           ; C09D78 m0x0
 
 loc_C09D7B:
     tax                                    ; C09D7B m0x0
-    lda.l $800000+(data_C0B4A4&$FFFF),x    ; C09D7C m0x0
+    lda.l $800000+(entity_init_table&$FFFF),x   ; C09D7C m0x0
     bpl loc_C09D85                         ; C09D80 m0x0
     jmp.w loc_C09E28                       ; C09D82 m0x0
 
 loc_C09D85:
     sta.w entity_type,y                    ; C09D85 m0x0
     sta.b ptr_04                           ; C09D88 m0x0
-    lda.l $800000+(data_C0B4A6&$FFFF),x    ; C09D8A m0x0
+    lda.l $800000+(entity_init_state&$FFFF),x   ; C09D8A m0x0
     sta.w entity_state,y                   ; C09D8E m0x0
     clc                                    ; C09D91 m0x0
     adc.w $0BAC                            ; C09D92 m0x0
@@ -3611,23 +3623,23 @@ loc_C09D85:
     lda.l $800000+(entity_state_anim_table&$FFFF),x   ; C09D9D m0x0
     plx                                    ; C09DA1 m0x0
     sta.w entity_anim_id,y                 ; C09DA2 m0x0
-    lda.l $800000+(data_C0B4A8&$FFFF),x    ; C09DA5 m0x0
+    lda.l $800000+(entity_init_unk_07a8&$FFFF),x   ; C09DA5 m0x0
     sta.w $07A8,y                          ; C09DA9 m0x0
-    lda.l $800000+(data_C0B4AA&$FFFF),x    ; C09DAC m0x0
+    lda.l $800000+(entity_init_x&$FFFF),x   ; C09DAC m0x0
     sta.w entity_x,y                       ; C09DB0 m0x0
-    lda.l $800000+(data_C0B4AC&$FFFF),x    ; C09DB3 m0x0
+    lda.l $800000+(entity_init_y&$FFFF),x   ; C09DB3 m0x0
     sta.w entity_y,y                       ; C09DB7 m0x0
-    lda.l $800000+(data_C0B4AE&$FFFF),x    ; C09DBA m0x0
+    lda.l $800000+(entity_init_unk_08e8&$FFFF),x   ; C09DBA m0x0
     sta.w $08E8,y                          ; C09DBE m0x0
-    lda.l $800000+(data_C0B4B0&$FFFF),x    ; C09DC1 m0x0
+    lda.l $800000+(entity_init_flags&$FFFF),x   ; C09DC1 m0x0
     sta.w entity_flags,y                   ; C09DC5 m0x0
-    lda.l $800000+(data_C0B4B2&$FFFF),x    ; C09DC8 m0x0
+    lda.l $800000+(entity_init_parent&$FFFF),x   ; C09DC8 m0x0
     sta.w entity_parent_index,y            ; C09DCC m0x0
-    lda.l $800000+(data_C0B4B4&$FFFF),x    ; C09DCF m0x0
+    lda.l $800000+(entity_init_hitstun&$FFFF),x   ; C09DCF m0x0
     sta.w entity_hitstun_timer,y           ; C09DD3 m0x0
     lda.w entity_type,y                    ; C09DD6 m0x0
     bne loc_C09DE2                         ; C09DD9 m0x0
-    lda.l $800000+(data_C0B4A6&$FFFF),x    ; C09DDB m0x0
+    lda.l $800000+(entity_init_state&$FFFF),x   ; C09DDB m0x0
     sta.w entity_anim_id,y                 ; C09DDF m0x0
 
 loc_C09DE2:
@@ -4209,7 +4221,7 @@ loc_C0A1E5:
 loc_C0A1F2:
     rts                                    ; C0A1F2 m0x0
 
-sub_C0A1F3:
+entity_vel_y_from_vel_x:
     lda.w entity_vel_x,x                   ; C0A1F3 m0x0
     eor.w #$FFFF                           ; C0A1F6 m0x0
     inc                                    ; C0A1F9 m0x0
@@ -4315,7 +4327,7 @@ loc_C0A28D:
     sta.w entity_x,x                       ; C0A290 m0x0
     rts                                    ; C0A293 m0x0
 
-orphan_C0A294:
+unused_entity_apply_velocity_z:
     ldy.w #$0000                           ; C0A294 m0x0
     lda.w $0927,x                          ; C0A297 m0x0
     and.w #$FF00                           ; C0A29A m0x0
@@ -4423,7 +4435,7 @@ loc_C0A34B:
 loc_C0A35B:
     rts                                    ; C0A35B m0x0
 
-orphan_C0A35C:
+unused_wram_clear_full:
     ldx.w #$00FE                           ; C0A35C m0x0
     lda.w #$0000                           ; C0A35F m0x0
     tcd                                    ; C0A362 m0x0
@@ -4523,6 +4535,8 @@ ppu_init:
 
 unused_vec:
     rti                                    ; C0A442 m1x1
+
+dma_fill_zero_word:
     incbin "../data/01.bin":$2443..$2445      ; 2 bytes
 
 dma_fill_vram_zero:
@@ -4878,10 +4892,10 @@ loc_C0A6CD:
     plb                                    ; C0A6D1 m0x0
     rtl                                    ; C0A6D2 m0x0
 
-data_C0A6D3:
+oam_size_bit_mask_table:
     incbin "../data/01.bin":$26D3..$26D7      ; 4 bytes
 
-data_C0A6D7:
+oam_size_preset_table:
     incbin "../data/01.bin":$26D7..$2757      ; 128 bytes
 
 oam_emit_frame_1row:
@@ -4933,7 +4947,7 @@ loc_C0A7A2:
     txa                                    ; C0A7A9 m1x0
     and.b #$03                             ; C0A7AA m1x0
     tax                                    ; C0A7AC m1x0
-    lda.w data_C0A6D3,x                    ; C0A7AD m1x0
+    lda.w oam_size_bit_mask_table,x        ; C0A7AD m1x0
     sta.b $24                              ; C0A7B0 m1x0
     ldx.b oam_write_ptr                    ; C0A7B2 m1x0
     clc                                    ; C0A7B4 m1x0
@@ -5050,7 +5064,7 @@ loc_C0A82D:
     lsr                                    ; C0A862 m0x0
     sep.b #$20                             ; C0A863 m0x0
     sta.b oam_entry_ptr                    ; C0A865 m1x0
-    lda.w data_C0A6D7,x                    ; C0A867 m1x0
+    lda.w oam_size_preset_table,x          ; C0A867 m1x0
     ora.b (oam_entry_ptr)                  ; C0A86A m1x0
     sta.b (oam_entry_ptr)                  ; C0A86C m1x0
     ldx.b $52                              ; C0A86E m1x0
@@ -5121,7 +5135,7 @@ loc_C0A89C:
     lsr                                    ; C0A8D1 m0x0
     sep.b #$20                             ; C0A8D2 m0x0
     sta.b oam_entry_ptr                    ; C0A8D4 m1x0
-    lda.w data_C0A6D7,x                    ; C0A8D6 m1x0
+    lda.w oam_size_preset_table,x          ; C0A8D6 m1x0
     ora.b (oam_entry_ptr)                  ; C0A8D9 m1x0
     sta.b (oam_entry_ptr)                  ; C0A8DB m1x0
     ldx.b $52                              ; C0A8DD m1x0
@@ -5196,7 +5210,7 @@ loc_C0A941:
     txa                                    ; C0A948 m1x0
     and.b #$03                             ; C0A949 m1x0
     tax                                    ; C0A94B m1x0
-    lda.w data_C0A6D3,x                    ; C0A94C m1x0
+    lda.w oam_size_bit_mask_table,x        ; C0A94C m1x0
     sta.b $24                              ; C0A94F m1x0
     ldx.b oam_write_ptr                    ; C0A951 m1x0
     clc                                    ; C0A953 m1x0
@@ -5321,7 +5335,7 @@ loc_C0A9DB:
     lsr                                    ; C0AA13 m0x0
     sep.b #$20                             ; C0AA14 m0x0
     sta.b oam_entry_ptr                    ; C0AA16 m1x0
-    lda.w data_C0A6D7,x                    ; C0AA18 m1x0
+    lda.w oam_size_preset_table,x          ; C0AA18 m1x0
     ora.b (oam_entry_ptr)                  ; C0AA1B m1x0
     sta.b (oam_entry_ptr)                  ; C0AA1D m1x0
     ldx.b $52                              ; C0AA1F m1x0
@@ -5393,7 +5407,7 @@ loc_C0AA4D:
     lsr                                    ; C0AA85 m0x0
     sep.b #$20                             ; C0AA86 m0x0
     sta.b oam_entry_ptr                    ; C0AA88 m1x0
-    lda.w data_C0A6D7,x                    ; C0AA8A m1x0
+    lda.w oam_size_preset_table,x          ; C0AA8A m1x0
     ora.b (oam_entry_ptr)                  ; C0AA8D m1x0
     sta.b (oam_entry_ptr)                  ; C0AA8F m1x0
     ldx.b $52                              ; C0AA91 m1x0
@@ -5453,7 +5467,7 @@ loc_C0AADA:
     txa                                    ; C0AAE1 m1x0
     and.b #$03                             ; C0AAE2 m1x0
     tax                                    ; C0AAE4 m1x0
-    lda.w data_C0A6D3,x                    ; C0AAE5 m1x0
+    lda.w oam_size_bit_mask_table,x        ; C0AAE5 m1x0
     sta.b $24                              ; C0AAE8 m1x0
     ldx.b oam_write_ptr                    ; C0AAEA m1x0
     clc                                    ; C0AAEC m1x0
@@ -5578,7 +5592,7 @@ loc_C0AB73:
     lsr                                    ; C0ABAA m0x0
     sep.b #$20                             ; C0ABAB m0x0
     sta.b oam_entry_ptr                    ; C0ABAD m1x0
-    lda.w data_C0A6D7,x                    ; C0ABAF m1x0
+    lda.w oam_size_preset_table,x          ; C0ABAF m1x0
     ora.b (oam_entry_ptr)                  ; C0ABB2 m1x0
     sta.b (oam_entry_ptr)                  ; C0ABB4 m1x0
     ldx.b $52                              ; C0ABB6 m1x0
@@ -5650,7 +5664,7 @@ loc_C0ABE4:
     lsr                                    ; C0AC1B m0x0
     sep.b #$20                             ; C0AC1C m0x0
     sta.b oam_entry_ptr                    ; C0AC1E m1x0
-    lda.w data_C0A6D7,x                    ; C0AC20 m1x0
+    lda.w oam_size_preset_table,x          ; C0AC20 m1x0
     ora.b (oam_entry_ptr)                  ; C0AC23 m1x0
     sta.b (oam_entry_ptr)                  ; C0AC25 m1x0
     ldx.b $52                              ; C0AC27 m1x0
@@ -5710,7 +5724,7 @@ loc_C0AC70:
     txa                                    ; C0AC77 m1x0
     and.b #$03                             ; C0AC78 m1x0
     tax                                    ; C0AC7A m1x0
-    lda.w data_C0A6D3,x                    ; C0AC7B m1x0
+    lda.w oam_size_bit_mask_table,x        ; C0AC7B m1x0
     sta.b $24                              ; C0AC7E m1x0
     ldx.b oam_write_ptr                    ; C0AC80 m1x0
     clc                                    ; C0AC82 m1x0
@@ -5841,7 +5855,7 @@ loc_C0AD14:
     lsr                                    ; C0AD4E m0x0
     sep.b #$20                             ; C0AD4F m0x0
     sta.b oam_entry_ptr                    ; C0AD51 m1x0
-    lda.w data_C0A6D7,x                    ; C0AD53 m1x0
+    lda.w oam_size_preset_table,x          ; C0AD53 m1x0
     ora.b (oam_entry_ptr)                  ; C0AD56 m1x0
     sta.b (oam_entry_ptr)                  ; C0AD58 m1x0
     ldx.b $52                              ; C0AD5A m1x0
@@ -5914,7 +5928,7 @@ loc_C0AD88:
     lsr                                    ; C0ADC2 m0x0
     sep.b #$20                             ; C0ADC3 m0x0
     sta.b oam_entry_ptr                    ; C0ADC5 m1x0
-    lda.w data_C0A6D7,x                    ; C0ADC7 m1x0
+    lda.w oam_size_preset_table,x          ; C0ADC7 m1x0
     ora.b (oam_entry_ptr)                  ; C0ADCA m1x0
     sta.b (oam_entry_ptr)                  ; C0ADCC m1x0
     ldx.b $52                              ; C0ADCE m1x0
@@ -6548,61 +6562,61 @@ entity_clear_anim_unused:
     stz.w $0A48,x                          ; C0B204 m0x0
     rts                                    ; C0B207 m0x0
 
-data_C0B208:
+vram_stream_desc_table:
     incbin "../data/01.bin":$3208..$320A      ; 2 bytes
 
-data_C0B20A:
+vram_stream_desc_addr:
     incbin "../data/01.bin":$320A..$320C      ; 2 bytes
 
-data_C0B20C:
+vram_stream_desc_bank:
     incbin "../data/01.bin":$320C..$320E      ; 2 bytes
 
-data_C0B20E:
+vram_stream_desc_payload:
     incbin "../data/01.bin":$320E..$324C      ; 62 bytes
 
-data_C0B24C:
+stream_zone_index_table:
     incbin "../data/01.bin":$324C..$326C      ; 32 bytes
 
-data_C0B26C:
+particle_spawn_list_x:
     incbin "../data/01.bin":$326C..$326E      ; 2 bytes
 
-data_C0B26E:
+particle_spawn_list_y:
     incbin "../data/01.bin":$326E..$32F6      ; 136 bytes
 
-data_C0B2F6:
+ground_y_lookup_threshold:
     incbin "../data/01.bin":$32F6..$32F8      ; 2 bytes
 
-data_C0B2F8:
+ground_y_lookup_default:
     incbin "../data/01.bin":$32F8..$32FA      ; 2 bytes
 
-data_C0B2FA:
+entity_state_ground_y_table:
     incbin "../data/01.bin":$32FA..$34A4      ; 426 bytes
 
-data_C0B4A4:
+entity_init_table:
     incbin "../data/01.bin":$34A4..$34A6      ; 2 bytes
 
-data_C0B4A6:
+entity_init_state:
     incbin "../data/01.bin":$34A6..$34A8      ; 2 bytes
 
-data_C0B4A8:
+entity_init_unk_07a8:
     incbin "../data/01.bin":$34A8..$34AA      ; 2 bytes
 
-data_C0B4AA:
+entity_init_x:
     incbin "../data/01.bin":$34AA..$34AC      ; 2 bytes
 
-data_C0B4AC:
+entity_init_y:
     incbin "../data/01.bin":$34AC..$34AE      ; 2 bytes
 
-data_C0B4AE:
+entity_init_unk_08e8:
     incbin "../data/01.bin":$34AE..$34B0      ; 2 bytes
 
-data_C0B4B0:
+entity_init_flags:
     incbin "../data/01.bin":$34B0..$34B2      ; 2 bytes
 
-data_C0B4B2:
+entity_init_parent:
     incbin "../data/01.bin":$34B2..$34B4      ; 2 bytes
 
-data_C0B4B4:
+entity_init_hitstun:
     incbin "../data/01.bin":$34B4..$3652      ; 414 bytes
 
 facing_flag_table:
@@ -7010,6 +7024,8 @@ loc_C0BEA0:
     stz.b $90                              ; C0BEB0 m0x0
     stz.b dma_pending_mask                 ; C0BEB2 m0x0
     jmp.w loc_C08042                       ; C0BEB4 m0x0
+
+unused_title_fade_jmp_stub:
     incbin "../data/01.bin":$3EB7..$3EC0      ; 9 bytes
 
 loc_C0BEC0:

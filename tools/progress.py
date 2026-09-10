@@ -138,6 +138,7 @@ def routines_spc700():
     items = []  # (addr, kind, label)
     cur_label = None
     named_data = [0]
+    dw_tables = []   # [label, bytes] for symbolic jump tables (cmd_table, seq_cmd_table)
     for ln in lines:
         m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*):', ln)
         if m:
@@ -152,8 +153,10 @@ def routines_spc700():
             if is_named(cur_label): named_data[0] += b - a
             cur_label = None; continue
         m = re.match(r'^\s+dw\s', ln)
-        if m and cur_label:
-            items.append((None, 'dw', cur_label)); cur_label = None
+        if m:
+            if cur_label:
+                dw_tables.append([cur_label, 0]); cur_label = None
+            if dw_tables: dw_tables[-1][1] += 2
     items = [i for i in items if i[0] is not None]
     items.sort(key=lambda x: x[0])
     routines = []
@@ -170,6 +173,8 @@ def routines_spc700():
             if cur: cur['size'] += size
         elif kind == 'd':
             cur = None
+    for label, nbytes in dw_tables:
+        if is_named(label): named_data[0] += nbytes
     return routines, code_total, named_data[0]
 
 def compute():

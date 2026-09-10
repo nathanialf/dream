@@ -435,21 +435,23 @@ spc_command:
     jsr.w write_spc_command                ; C183ED m0x0
     rtl                                    ; C183F0 m0x0
 
-orphan_C183F1:
-    xba                                    ; C183F1 m0x0
-    and.w #$FF00                           ; C183F2 m0x0
-    ora.w #$00F9                           ; C183F5 m0x0
-    tax                                    ; C183F8 m0x0
-    jsr.w write_spc_command                ; C183F9 m0x0
-    ldx.w #$00FE                           ; C183FC m0x0
-    jsr.w write_spc_command                ; C183FF m0x0
-    rtl                                    ; C18402 m0x0
-    incbin "../data/03.bin":$0403..$0415      ; 18 bytes
+unused_spc_set_e7_and_play:
+    incbin "../data/03.bin":$03F1..$0403      ; 18 bytes
+
+unused_spc_set_fb_and_play:
+    xba                                    ; C18403 m0x0
+    and.w #$FF00                           ; C18404 m0x0
+    ora.w #$00FB                           ; C18407 m0x0
+    tax                                    ; C1840A m0x0
+    jsr.w write_spc_command                ; C1840B m0x0
+    ldx.w #$00FE                           ; C1840E m0x0
+    jsr.w write_spc_command                ; C18411 m0x0
+    rtl                                    ; C18414 m0x0
 
 sfx_command_dispatch:
     tax                                    ; C18415 m0x0
     jsr.w write_spc_command                ; C18416 m0x0
     rtl                                    ; C18419 m0x0
     incbin "../data/stale/stale_dup_bg1_mode3.bin"                        ; 26278 bytes (whole asset)
-    incbin "../data/unknown/unknown_tilelike_1eac0.bin"                        ; 1280 bytes (whole asset)
+    incbin "../data/stale/stale_dup_bg1_tiles_mode2_tail.bin"                        ; 1280 bytes (whole asset)
     incbin "../data/filler/fill_55_b.bin"                        ; 4160 bytes (whole asset)

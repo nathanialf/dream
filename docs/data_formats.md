@@ -28,7 +28,7 @@ Conventions: `game_mode` 0-3 are the four scenes dispatched through `game_mode_t
 | 0155E0-018000 | 10784 | fill 0x55 | high | all bytes 0x55 | none |
 | 018000-01841A | 1050 | 65816 sound interface (spc_init, spc_command, uploads) | high | out/dream.asm | jsl from reset/play_sound_effect |
 | 01841A-01EAC0 | 26278 | stale duplicate of 08041A-086AC0 (game_mode 3 BG1 4bpp tileset, minus its first 0x41A bytes) | high | 26278-byte exact match at delta +0x68000 | none |
-| 01EAC0-01EFC0 | 1280 | unknown (tile-like, 1280 bytes) | low | entropy 4.9, no duplicate found | none |
+| 01EAC0-01EFC0 | 1280 | stale duplicate of 076E02-077302 (last 40 tiles of bg1_tiles_mode2) | high | 1280-byte exact match at delta +0x58342 | none |
 | 01EFC0-020000 | 4160 | fill 0x55 | high | all bytes 0x55 | none |
 | 020000-020088 | 136 | SPC700 IPL loader image (uploaded to SPC $04D8) | high | spc/spc_map.txt; spc_ipl_upload_loader | $C1807A |
 | 020088-020DBA | 3378 | SPC700 driver image (0x699 words -> SPC $0560; DKC2/3 driver per NOTES.md) | high | spc/driver.asm | spc_upload_driver |
@@ -71,7 +71,8 @@ Conventions: `game_mode` 0-3 are the four scenes dispatched through `game_mode_t
 | 06A36B-06A56B | 512 | 256-colour palette -> CGRAM $00-$FF (title screen), also copied to $7F0F91 | high | loop at $BC2A; colour 0 = $0000, 1 = white | $BC24-$BC37 |
 | 06A56B-06A661 | 246 | tilemap-like words ($5240,$5340,... increasing), unreferenced | medium | word analysis | none |
 | 06A661-06FC26 | 21957 | stale duplicate of 0A7581-0ACB46 (bank CA sprite frames) | high | 21957-byte exact match at delta +0x3CF20 | none |
-| 06FC26-070000 | 986 | unreferenced tail | low | entropy 5.5 | none |
+| 06FC26-06FFFC | 982 | stale duplicate of 12F8AA-12FC80 inside sprite_frames_ce (not tile/frame aligned) | medium | 982-byte exact match at delta +0xBFC84 | none |
+| 06FFFC-070000 | 4 | unreferenced tail, no duplicate | low | diverges from the sprite_frames_ce match just above | none |
 | 070000-070340 | 832 | sprite frames, live format: 1 frames {8-byte header: n1, n2, tile-offset2, ?, ?, ntiles1, vram-offset2, ntiles2/flags; 2-byte OAM records (x,y); 4bpp tiles = (ntiles1+ntiles2)*32 bytes}; 2-40 byte trailers between frames | high | frame table 040000 entries point here; header/record/tile sizes chain contiguously | sub_C0A538 / sub_C0AE7E DMA |
 | 070340-070342 | 2 | unlabelled gap | low | entropy 1.00 | none |
 | 070342-077302 | 28608 | 4bpp BG1 tiles, 894 tiles -> VRAM $2000 (game_mode 2) | high | sub_C0A46A at $8813 ($C7:0342, $6FC0) | $8813-$8822 |
@@ -114,7 +115,7 @@ Conventions: `game_mode` 0-3 are the four scenes dispatched through `game_mode_t
 | 1CC066-1CC6AA | 1604 | tile-like data between the last table-referenced frame and the alternate-format frames | low | no header parses here | none |
 | 1CC6AA-1F0000 | 145750 | sprite frames in an ALTERNATE format not read by the live code: 8-byte header (byte 3 always 0x00, other bytes not resolved to a formula) + n x 3-byte OAM records {x, y, attr} + 4bpp tiles; frame boundaries recovered by chain-walking maximal runs of >=8 records with attr in 0x1C-0x22 (`tools/gen_assets.py:parse_sprite_frame_alt_region`); 82 frames, many identical headers; no duplicates elsewhere | high | header/record-run chain walk reproduces exactly 82 frames (confirms the older 68-strict/113-relaxed header-scan estimate); each frame is now its own `sprite_frame_alt` asset; render below | none (unreferenced) |
 | 1F0000-1F10C0 | 4288 | stale duplicate of 0A37A0-0A4860 (all 134 game_mode 3 metatiles) | high | 4288-byte exact match at delta -0x14C860 | none |
-| 1F10C0-1F1100 | 64 | 64-byte gap | low |  | none |
+| 1F10C0-1F1100 | 64 | stale duplicate of 0A3760-0A37A0 (last 2 metatiles of metatiles_mode1) | high | 64-byte exact match at delta -0x14D960 | none |
 | 1F1100-1F2780 | 5760 | stale duplicate of 09C660-09DCE0 (game_mode 2 metatiles 136-315) | high | 5760-byte exact match at delta -0x154AA0 | none |
 | 1F2780-1F2E14 | 1684 | unreferenced (tile-like, entropy 5.2) | low |  | none |
 | 1F2E14-1FFEE5 | 53457 | sprite frames, alternate format (as 1CC6AA): 31 frames, same chain-walk | high | reproduces exactly 31 frames; each is its own `sprite_frame_alt` asset | none |
