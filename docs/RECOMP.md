@@ -17,7 +17,8 @@ takes shape.
 ## Input
 
 - Modern controller only, through the platform gamepad API with its standard layout.
-  No launcher, no configuration screen, no remapping UI, no config file for input.
+  No launcher, no remapping UI, no config file for input. The only in-app UI is the menu
+  bar described below.
 - Fixed default mapping, SNES to gamepad: B = south face button, A = east, Y = west,
   X = north, L/R = shoulders, Start = start, Select = back/select, d-pad = d-pad and
   left stick. Keyboard fallback is likewise fixed (arrows, Z/X/A/S, Q/W, Enter, Shift).
@@ -31,12 +32,19 @@ takes shape.
 - Rendering reproduces the PPU output of the reference; enhancements (integer scaling,
   widescreen) come only after lockstep parity and never change simulation state.
 
-## Gallery viewer
+## Menu bar and gallery viewer
 
-The app boots straight into the game, but a **gallery** can be opened from the running game
-(hold Select+Start for half a second, or F1 on the keyboard; the same closes it). It is a
-viewer, not a settings screen: no options, nothing persisted, the game is paused underneath
-and resumes on close. It shows the ROM's content that the game itself never displays:
+The app boots straight into the game, with a conventional desktop-style menu bar drawn
+across the top of the window (SDL3 has no native menus, so it is rendered by the app).
+Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
+
+- **File**: Quit.
+- **View**: Scale 1x/2x/3x/4x, Fit to window (integer), Aspect 8:7 or 4:3, Fullscreen.
+  Scaling never touches emulation state; there is no config file, the window size is the
+  only memory.
+- **Gallery**: a viewer, not a settings screen. Opening a page pauses the game and shows
+  the page in the viewport; closing resumes exactly. It shows the ROM's content that the
+  game itself never displays:
 
 - the 113 alternate-format sprite frames and the 1555 live frames, with their palettes;
 - the unreferenced font and the three picture strips in bank `$C1`;
