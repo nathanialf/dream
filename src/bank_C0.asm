@@ -72,12 +72,12 @@ loc_C08065:
     asl                                    ; C0806E m0x0
     tax                                    ; C0806F m0x0
     jsr.w (game_mode_table,x)              ; C08070 m0x0
-    jsr.w sub_C0AEB9                       ; C08073 m0x0
-    jsr.w sub_C09D6A                       ; C08076 m0x0
+    jsr.w entity_render_order_reset        ; C08073 m0x0
+    jsr.w entity_init_from_table           ; C08076 m0x0
     ldx.w #$0004                           ; C08079 m0x0
 
 loc_C0807C:
-    lda.w $0708,x                          ; C0807C m0x0
+    lda.w entity_type,x                    ; C0807C m0x0
     cmp.w #$000E                           ; C0807F m0x0
     bcc loc_C08089                         ; C08082 m0x0
     cmp.w #$0012                           ; C08084 m0x0
@@ -106,7 +106,7 @@ loc_C08092:
     stz.b $30                              ; C080B0 m0x0
     lda.w #$0080                           ; C080B2 m0x0
     sta.b $32                              ; C080B5 m0x0
-    jsr.w sub_C0ADFD                       ; C080B7 m0x0
+    jsr.w oam_dma_upload                   ; C080B7 m0x0
     lda.w #$FFFF                           ; C080BA m0x0
     sta.w $0BC6                            ; C080BD m0x0
     sta.w $0BC4                            ; C080C0 m0x0
@@ -116,8 +116,8 @@ loc_C08092:
     stz.w $0B8A                            ; C080CC m0x0
     stz.w $0BB8                            ; C080CF m0x0
     stz.w $0BBA                            ; C080D2 m0x0
-    stz.b $70                              ; C080D5 m0x0
-    stz.b $72                              ; C080D7 m0x0
+    stz.b walk_cycle_timer                 ; C080D5 m0x0
+    stz.b walk_cycle_parity                ; C080D7 m0x0
     stz.b $74                              ; C080D9 m0x0
     stz.b $76                              ; C080DB m0x0
     stz.b $78                              ; C080DD m0x0
@@ -129,7 +129,7 @@ loc_C08092:
     lda.w #$80F4                           ; C080EE m0x0
     jmp.w loc_C0A4E9                       ; C080F1 m0x0
 
-nmi_handler_80F4:
+nmi_handler_gameplay:
     ldx.w #$01FF                           ; C080F4 m0x0
     txs                                    ; C080F7 m0x0
     stz.w OAMADDL                          ; C080F8 m0x0
@@ -137,8 +137,8 @@ nmi_handler_80F4:
     asl                                    ; C080FD m0x0
     tax                                    ; C080FE m0x0
     jsr.w (jtbl_C08272,x)                  ; C080FF m0x0
-    jsr.w sub_C09D32                       ; C08102 m0x0
-    jsr.w sub_C0AE7E                       ; C08105 m0x0
+    jsr.w cgram_upload_queue_flush         ; C08102 m0x0
+    jsr.w entity_upload_pending_tiles      ; C08105 m0x0
     stz.w $0A88                            ; C08108 m0x0
     sep.b #$20                             ; C0810B m0x0
     stz.w NMITIMEN                         ; C0810D m1x0
@@ -185,9 +185,9 @@ loc_C08147:
     jmp.w loc_C0822B                       ; C0814B m0x0
 
 loc_C0814E:
-    jsr.w sub_C0A1B0                       ; C0814E m0x0
-    jsr.w sub_C09E83                       ; C08151 m0x0
-    jsr.w sub_C09FB7                       ; C08154 m0x0
+    jsr.w camera_follow_player             ; C0814E m0x0
+    jsr.w build_metatile_column_500        ; C08151 m0x0
+    jsr.w build_metatile_column_580        ; C08154 m0x0
     lda.b game_mode                        ; C08157 m0x0
     asl                                    ; C08159 m0x0
     tax                                    ; C0815A m0x0
@@ -196,10 +196,10 @@ loc_C0814E:
     beq loc_C08192                         ; C08160 m0x0
     dec.b $78                              ; C08162 m0x0
     bne loc_C08192                         ; C08164 m0x0
-    lda.b $70                              ; C08166 m0x0
+    lda.b walk_cycle_timer                 ; C08166 m0x0
     bne loc_C08192                         ; C08168 m0x0
     lda.w #$003C                           ; C0816A m0x0
-    sta.b $70                              ; C0816D m0x0
+    sta.b walk_cycle_timer                 ; C0816D m0x0
     stz.w $0C1F                            ; C0816F m0x0
     lda.w #$0004                           ; C08172 m0x0
     sta.w $0C21                            ; C08175 m0x0
@@ -208,23 +208,23 @@ loc_C0814E:
     sta.w $0C29                            ; C0817E m0x0
     lda.w #$0080                           ; C08181 m0x0
     sta.w $0C25                            ; C08184 m0x0
-    lda.b $62                              ; C08187 m0x0
+    lda.b camera_x                         ; C08187 m0x0
     sta.w $0C27                            ; C08189 m0x0
     lda.w #$0001                           ; C0818C m0x0
     sta.w $0C2B                            ; C0818F m0x0
 
 loc_C08192:
-    ldx.b $70                              ; C08192 m0x0
+    ldx.b walk_cycle_timer                 ; C08192 m0x0
     beq loc_C081A6                         ; C08194 m0x0
     cpx.w #$003C                           ; C08196 m0x0
     bne loc_C0819E                         ; C08199 m0x0
-    jsr.w sub_C0B075                       ; C0819B m0x0
+    jsr.w play_footstep_sound              ; C0819B m0x0
 
 loc_C0819E:
-    dec.b $70                              ; C0819E m0x0
-    dec.b $70                              ; C081A0 m0x0
+    dec.b walk_cycle_timer                 ; C0819E m0x0
+    dec.b walk_cycle_timer                 ; C081A0 m0x0
     txa                                    ; C081A2 m0x0
-    ora.b $72                              ; C081A3 m0x0
+    ora.b walk_cycle_parity                ; C081A3 m0x0
     tax                                    ; C081A5 m0x0
 
 loc_C081A6:
@@ -240,13 +240,13 @@ loc_C081A6:
 loc_C081BA:
     lda.w $0C15                            ; C081BA m0x0
     beq loc_C081C2                         ; C081BD m0x0
-    jsr.w sub_C09253                       ; C081BF m0x0
+    jsr.w particle_spawn_mode0_weather     ; C081BF m0x0
 
 loc_C081C2:
     ldx.w #$0000                           ; C081C2 m0x0
 
 loc_C081C5:
-    jsr.w sub_C098DA                       ; C081C5 m0x0
+    jsr.w entity_update_tick               ; C081C5 m0x0
     inx                                    ; C081C8 m0x0
     inx                                    ; C081C9 m0x0
     cpx.b $A6                              ; C081CA m0x0
@@ -308,19 +308,19 @@ loc_C0822B:
     jsr.w read_joypads                     ; C0822B m0x0
     lda.b $4A                              ; C0822E m0x0
     bne loc_C08267                         ; C08230 m0x0
-    jsr.w sub_C0AE1F                       ; C08232 m0x0
+    jsr.w entity_sort_draw_order           ; C08232 m0x0
     jsr.w clear_sprite_table               ; C08235 m0x0
     lda.b game_mode                        ; C08238 m0x0
     asl                                    ; C0823A m0x0
     tax                                    ; C0823B m0x0
     jsr.w (jtbl_C0828A,x)                  ; C0823C m0x0
-    jsl.l $800000+(sub_C0A538&$FFFF)       ; C0823F m0x0
+    jsl.l $800000+(entity_build_oam_frame&$FFFF)   ; C0823F m0x0
     lda.b game_mode                        ; C08243 m0x0
     asl                                    ; C08245 m0x0
     tax                                    ; C08246 m0x0
     jsr.w (jtbl_C08282,x)                  ; C08247 m0x0
-    jsr.w sub_C0ADE7                       ; C0824A m0x0
-    jsr.w sub_C0ADFD                       ; C0824D m0x0
+    jsr.w oam_hide_unused_sprites          ; C0824A m0x0
+    jsr.w oam_dma_upload                   ; C0824D m0x0
     lda.b game_mode                        ; C08250 m0x0
     bne loc_C08267                         ; C08252 m0x0
     lda.w $0C04                            ; C08254 m0x0
@@ -336,36 +336,36 @@ loc_C08267:
     jmp.w loc_C0A4F5                       ; C08267 m0x0
 
 game_mode_table:
-    dw sub_C08292
-    dw sub_C084D7
-    dw sub_C08798
-    dw sub_C088AB
+    dw mode0_level_init
+    dw mode1_level_init
+    dw mode2_level_init
+    dw title_screen_init
 
 jtbl_C08272:
-    dw sub_C08E9B
-    dw sub_C08F47
-    dw sub_C09049
-    dw sub_C090FA
+    dw nmi_scroll_mode0
+    dw nmi_scroll_mode1
+    dw nmi_scroll_mode2
+    dw nmi_scroll_title
 
 jtbl_C0827A:
     dw sub_C08A74
-    dw sub_C08E8E
-    dw sub_C08E8E
-    dw sub_C08E8E
+    dw check_pending_player_attack
+    dw check_pending_player_attack
+    dw check_pending_player_attack
 
 jtbl_C08282:
-    dw sub_C09233
-    dw sub_C0922A
-    dw sub_C09230
-    dw sub_C09233
+    dw particle_dispatch_noop
+    dw mode1_particle_dispatch
+    dw mode2_particle_dispatch
+    dw particle_dispatch_noop
 
 jtbl_C0828A:
-    dw sub_C09227
-    dw sub_C09233
-    dw sub_C09233
-    dw sub_C09233
+    dw mode0_particle_draw_dispatch
+    dw particle_dispatch_noop
+    dw particle_dispatch_noop
+    dw particle_dispatch_noop
 
-sub_C08292:
+mode0_level_init:
     stz.w $0BAC                            ; C08292 m0x0
     lda.w #$0001                           ; C08295 m0x0
     sta.w BGMODE                           ; C08298 m0x0
@@ -379,96 +379,96 @@ sub_C08292:
     sta.w BG1SC                            ; C082B0 m0x0
     lda.w #$001C                           ; C082B3 m0x0
     sta.w BG3SC                            ; C082B6 m0x0
-    jsr.w sub_C0A4A6                       ; C082B9 m0x0
+    jsr.w set_bg_scroll_prep               ; C082B9 m0x0
     lda.w #$0DFF                           ; C082BC m0x0
-    sta.b $86                              ; C082BF m0x0
+    sta.b level_width_mask                 ; C082BF m0x0
     lda.w #$011F                           ; C082C1 m0x0
-    sta.b $88                              ; C082C4 m0x0
+    sta.b level_height_mask                ; C082C4 m0x0
     stz.b $82                              ; C082C6 m0x0
     lda.w #$0020                           ; C082C8 m0x0
     sta.b $84                              ; C082CB m0x0
     lda.w #$4860                           ; C082CD m0x0
-    sta.b $7A                              ; C082D0 m0x0
+    sta.b tilemap_a_addr                   ; C082D0 m0x0
     lda.w #$CACA                           ; C082D2 m0x0
-    sta.b $7C                              ; C082D5 m0x0
+    sta.b tilemap_a_bank                   ; C082D5 m0x0
     lda.w #$DCE0                           ; C082D7 m0x0
-    sta.b $7E                              ; C082DA m0x0
+    sta.b tilemap_b_addr                   ; C082DA m0x0
     lda.w #$C9C9                           ; C082DC m0x0
-    sta.b $80                              ; C082DF m0x0
+    sta.b metatile_data_bank               ; C082DF m0x0
     lda.w #$FFFF                           ; C082E1 m0x0
-    sta.b $98                              ; C082E4 m0x0
+    sta.b layer_parallax_mode              ; C082E4 m0x0
     stz.b $60                              ; C082E6 m0x0
     lda.w #$0048                           ; C082E8 m0x0
-    sta.b $68                              ; C082EB m0x0
+    sta.b camera_y                         ; C082EB m0x0
     lda.w #$0000                           ; C082ED m0x0
 
 loc_C082F0:
-    sta.b $62                              ; C082F0 m0x0
-    jsr.w sub_C09FB7                       ; C082F2 m0x0
-    jsr.w sub_C0A0F1                       ; C082F5 m0x0
-    lda.b $62                              ; C082F8 m0x0
+    sta.b camera_x                         ; C082F0 m0x0
+    jsr.w build_metatile_column_580        ; C082F2 m0x0
+    jsr.w vram_upload_column_580           ; C082F5 m0x0
+    lda.b camera_x                         ; C082F8 m0x0
     clc                                    ; C082FA m0x0
     adc.w #$0008                           ; C082FB m0x0
     cmp.w #$0100                           ; C082FE m0x0
     bne loc_C082F0                         ; C08301 m0x0
-    sta.b $62                              ; C08303 m0x0
+    sta.b camera_x                         ; C08303 m0x0
     lda.w #$1600                           ; C08305 m0x0
     sta.w VMADDL                           ; C08308 m0x0
     ldx.w #$00C5                           ; C0830B m0x0
     lda.w #$02C0                           ; C0830E m0x0
     ldy.w #$0C00                           ; C08311 m0x0
-    jsr.w sub_C0A46A                       ; C08314 m0x0
+    jsr.w dma_upload_to_vram               ; C08314 m0x0
     lda.w #$1C00                           ; C08317 m0x0
     sta.w VMADDL                           ; C0831A m0x0
     ldx.w #$00CA                           ; C0831D m0x0
     lda.w #$E38E                           ; C08320 m0x0
     ldy.w #$0800                           ; C08323 m0x0
-    jsr.w sub_C0A46A                       ; C08326 m0x0
+    jsr.w dma_upload_to_vram               ; C08326 m0x0
     lda.w #$2000                           ; C08329 m0x0
     sta.w VMADDL                           ; C0832C m0x0
     ldx.w #$00C9                           ; C0832F m0x0
     lda.w #$0000                           ; C08332 m0x0
     ldy.w #$5AC0                           ; C08335 m0x0
-    jsr.w sub_C0A46A                       ; C08338 m0x0
+    jsr.w dma_upload_to_vram               ; C08338 m0x0
     lda.w #$5000                           ; C0833B m0x0
     sta.w VMADDL                           ; C0833E m0x0
     ldx.w #$00C9                           ; C08341 m0x0
     lda.w #$8AC0                           ; C08344 m0x0
     ldy.w #$2AA0                           ; C08347 m0x0
-    jsr.w sub_C0A46A                       ; C0834A m0x0
+    jsr.w dma_upload_to_vram               ; C0834A m0x0
     lda.w #$6800                           ; C0834D m0x0
     sta.w VMADDL                           ; C08350 m0x0
     ldx.w #$00CA                           ; C08353 m0x0
     lda.w #$F38E                           ; C08356 m0x0
     ldy.w #$0800                           ; C08359 m0x0
-    jsr.w sub_C0A46A                       ; C0835C m0x0
+    jsr.w dma_upload_to_vram               ; C0835C m0x0
     lda.w #$6C00                           ; C0835F m0x0
-    jsr.w sub_C0A445                       ; C08362 m0x0
+    jsr.w dma_fill_vram_zero               ; C08362 m0x0
     lda.w #$7000                           ; C08365 m0x0
     sta.w VMADDL                           ; C08368 m0x0
     ldx.w #$00CA                           ; C0836B m0x0
     lda.w #$EB8E                           ; C0836E m0x0
     ldy.w #$0800                           ; C08371 m0x0
-    jsr.w sub_C0A46A                       ; C08374 m0x0
+    jsr.w dma_upload_to_vram               ; C08374 m0x0
     lda.w #$7400                           ; C08377 m0x0
-    jsr.w sub_C0A445                       ; C0837A m0x0
+    jsr.w dma_fill_vram_zero               ; C0837A m0x0
     ldy.w #$0000                           ; C0837D m0x0
     ldx.w #$0020                           ; C08380 m0x0
     lda.w #$6DA8                           ; C08383 m0x0
-    jsr.w sub_C0A483                       ; C08386 m0x0
+    jsr.w dma_upload_to_cgram              ; C08386 m0x0
     ldy.w #$0080                           ; C08389 m0x0
     ldx.w #$0020                           ; C0838C m0x0
     lda.w #$6C48                           ; C0838F m0x0
-    jsr.w sub_C0A483                       ; C08392 m0x0
+    jsr.w dma_upload_to_cgram              ; C08392 m0x0
     ldy.w #$00E0                           ; C08395 m0x0
     ldx.w #$0004                           ; C08398 m0x0
     lda.w #$6D68                           ; C0839B m0x0
-    jsr.w sub_C0A483                       ; C0839E m0x0
+    jsr.w dma_upload_to_cgram              ; C0839E m0x0
     ldy.w #$00F0                           ; C083A1 m0x0
     ldx.w #$0004                           ; C083A4 m0x0
     lda.w #$6D48                           ; C083A7 m0x0
-    jsr.w sub_C0A483                       ; C083AA m0x0
-    jsr.w sub_C09246                       ; C083AD m0x0
+    jsr.w dma_upload_to_cgram              ; C083AA m0x0
+    jsr.w particle_table_clear             ; C083AD m0x0
     lda.w #$1016                           ; C083B0 m0x0
     sta.w $0BD4                            ; C083B3 m0x0
     inc                                    ; C083B6 m0x0
@@ -479,19 +479,19 @@ loc_C082F0:
     lda.w #$84A2                           ; C083C2 m0x0
     ldy.w #$2C41                           ; C083C5 m0x0
     ldx.w #$0010                           ; C083C8 m0x0
-    jsr.w sub_C0848C                       ; C083CB m0x0
+    jsr.w dma_setup_channel_step           ; C083CB m0x0
     lda.w #$0080                           ; C083CE m0x0
     sta.b ptr_04                           ; C083D1 m0x0
     lda.w #$84A9                           ; C083D3 m0x0
     ldy.w #$1143                           ; C083D6 m0x0
     ldx.w #$0020                           ; C083D9 m0x0
-    jsr.w sub_C0848C                       ; C083DC m0x0
+    jsr.w dma_setup_channel_step           ; C083DC m0x0
     lda.w #$0080                           ; C083DF m0x0
     sta.b ptr_04                           ; C083E2 m0x0
     lda.w #$84B0                           ; C083E4 m0x0
     ldy.w #$0900                           ; C083E7 m0x0
     ldx.w #$0030                           ; C083EA m0x0
-    jsr.w sub_C0848C                       ; C083ED m0x0
+    jsr.w dma_setup_channel_step           ; C083ED m0x0
     lda.w #$7F00                           ; C083F0 m0x0
     sta.w $0C00                            ; C083F3 m0x0
     lda.w #$007F                           ; C083F6 m0x0
@@ -516,7 +516,7 @@ loc_C082F0:
     lda.w #$00D0                           ; C08432 m0x0
     ldy.w #$0740                           ; C08435 m0x0
     ldx.w #$0040                           ; C08438 m0x0
-    jsr.w sub_C0848C                       ; C0843B m0x0
+    jsr.w dma_setup_channel_step           ; C0843B m0x0
     lda.w #$FF00                           ; C0843E m0x0
     sta.w $0C04                            ; C08441 m0x0
     lda.w #$00FF                           ; C08444 m0x0
@@ -547,7 +547,7 @@ loc_C08477:
     ldy.w #$0D42                           ; C08486 m0x0
     ldx.w #$0050                           ; C08489 m0x0
 
-sub_C0848C:
+dma_setup_channel_step:
     sta.w A1TL0,x                          ; C0848C m0x0
     tya                                    ; C0848F m0x0
     sta.w DMAP0,x                          ; C08490 m0x0
@@ -563,7 +563,7 @@ sub_C0848C:
 data_C084B5:
     incbin "../data/01.bin":$04B5..$04D7      ; 34 bytes
 
-sub_C084D7:
+mode1_level_init:
     lda.w #$0018                           ; C084D7 m0x0
     sta.w $0BAC                            ; C084DA m0x0
     lda.w #$0001                           ; C084DD m0x0
@@ -587,80 +587,80 @@ sub_C084D7:
     sta.w COLDATA                          ; C0850E m1x0
     jsr.w set_bg_scroll                    ; C08511 m1x0
     lda.w #$03FF                           ; C08514 m0x0
-    sta.b $86                              ; C08517 m0x0
+    sta.b level_width_mask                 ; C08517 m0x0
     lda.w #$0030                           ; C08519 m0x0
-    sta.b $88                              ; C0851C m0x0
+    sta.b level_height_mask                ; C0851C m0x0
     lda.w #$0001                           ; C0851E m0x0
     sta.b $82                              ; C08521 m0x0
     lda.w #$0010                           ; C08523 m0x0
     sta.b $84                              ; C08526 m0x0
     lda.w #$FD80                           ; C08528 m0x0
-    sta.b $7A                              ; C0852B m0x0
+    sta.b tilemap_a_addr                   ; C0852B m0x0
     lda.w #$C9C9                           ; C0852D m0x0
-    sta.b $7C                              ; C08530 m0x0
+    sta.b tilemap_a_bank                   ; C08530 m0x0
     lda.w #$26A0                           ; C08532 m0x0
-    sta.b $7E                              ; C08535 m0x0
+    sta.b tilemap_b_addr                   ; C08535 m0x0
     lda.w #$CACA                           ; C08537 m0x0
-    sta.b $80                              ; C0853A m0x0
+    sta.b metatile_data_bank               ; C0853A m0x0
     stz.b $60                              ; C0853C m0x0
     lda.w #$0018                           ; C0853E m0x0
-    sta.b $68                              ; C08541 m0x0
+    sta.b camera_y                         ; C08541 m0x0
     lda.w #$0300                           ; C08543 m0x0
 
 loc_C08546:
-    sta.b $62                              ; C08546 m0x0
-    jsr.w sub_C09FB7                       ; C08548 m0x0
-    jsr.w sub_C0A0F1                       ; C0854B m0x0
-    lda.b $62                              ; C0854E m0x0
+    sta.b camera_x                         ; C08546 m0x0
+    jsr.w build_metatile_column_580        ; C08548 m0x0
+    jsr.w vram_upload_column_580           ; C0854B m0x0
+    lda.b camera_x                         ; C0854E m0x0
     clc                                    ; C08550 m0x0
     adc.w #$0008                           ; C08551 m0x0
     cmp.w #$0400                           ; C08554 m0x0
     bne loc_C08546                         ; C08557 m0x0
-    sta.b $62                              ; C08559 m0x0
+    sta.b camera_x                         ; C08559 m0x0
     lda.w #$2000                           ; C0855B m0x0
     sta.w VMADDL                           ; C0855E m0x0
     ldx.w #$00C8                           ; C08561 m0x0
     lda.w #$6AC0                           ; C08564 m0x0
     ldy.w #$6000                           ; C08567 m0x0
-    jsr.w sub_C0A46A                       ; C0856A m0x0
+    jsr.w dma_upload_to_vram               ; C0856A m0x0
     lda.w #$5000                           ; C0856D m0x0
     sta.w VMADDL                           ; C08570 m0x0
     ldx.w #$00C8                           ; C08573 m0x0
     lda.w #$C980                           ; C08576 m0x0
     ldy.w #$3620                           ; C08579 m0x0
-    jsr.w sub_C0A46A                       ; C0857C m0x0
+    jsr.w dma_upload_to_vram               ; C0857C m0x0
     lda.w #$6C00                           ; C0857F m0x0
-    jsr.w sub_C0A445                       ; C08582 m0x0
+    jsr.w dma_fill_vram_zero               ; C08582 m0x0
     lda.w #$6C40                           ; C08585 m0x0
     sta.w VMADDL                           ; C08588 m0x0
     ldx.w #$00CB                           ; C0858B m0x0
     lda.w #$0000                           ; C0858E m0x0
     ldy.w #$0800                           ; C08591 m0x0
-    jsr.w sub_C0A46A                       ; C08594 m0x0
+    jsr.w dma_upload_to_vram               ; C08594 m0x0
     lda.w #$7020                           ; C08597 m0x0
     sta.w VMADDL                           ; C0859A m0x0
     ldx.w #$00CC                           ; C0859D m0x0
     lda.w #$AB02                           ; C085A0 m0x0
     ldy.w #$0700                           ; C085A3 m0x0
-    jsr.w sub_C0A46A                       ; C085A6 m0x0
+    jsr.w dma_upload_to_vram               ; C085A6 m0x0
     lda.w #$7000                           ; C085A9 m0x0
     sta.w VMADDL                           ; C085AC m0x0
     ldx.w #$00CC                           ; C085AF m0x0
     lda.w #$AB02                           ; C085B2 m0x0
     ldy.w #$0700                           ; C085B5 m0x0
-    jsr.w sub_C0A46A                       ; C085B8 m0x0
+    jsr.w dma_upload_to_vram               ; C085B8 m0x0
     lda.w #$7420                           ; C085BB m0x0
     sta.w VMADDL                           ; C085BE m0x0
     ldx.w #$00CC                           ; C085C1 m0x0
     lda.w #$A402                           ; C085C4 m0x0
     ldy.w #$0700                           ; C085C7 m0x0
-    jsr.w sub_C0A46A                       ; C085CA m0x0
+    jsr.w dma_upload_to_vram               ; C085CA m0x0
     lda.w #$7400                           ; C085CD m0x0
     sta.w VMADDL                           ; C085D0 m0x0
     ldx.w #$00CC                           ; C085D3 m0x0
     lda.w #$A402                           ; C085D6 m0x0
     ldy.w #$0700                           ; C085D9 m0x0
-    jsr.w sub_C0A46A                       ; C085DC m0x0
+    jsr.w dma_upload_to_vram               ; C085DC m0x0
     ldx.w #$0000                           ; C085DF m0x0
     lda.w #$0068                           ; C085E2 m0x0
     sta.l $7F0000,x                        ; C085E5 m0x0
@@ -786,27 +786,27 @@ loc_C0861D:
     ldy.w #$0080                           ; C08731 m0x0
     ldx.w #$0020                           ; C08734 m0x0
     lda.w #$6C48                           ; C08737 m0x0
-    jsr.w sub_C0A483                       ; C0873A m0x0
+    jsr.w dma_upload_to_cgram              ; C0873A m0x0
     ldy.w #$00A0                           ; C0873D m0x0
     ldx.w #$0004                           ; C08740 m0x0
     lda.w #$6D08                           ; C08743 m0x0
-    jsr.w sub_C0A483                       ; C08746 m0x0
+    jsr.w dma_upload_to_cgram              ; C08746 m0x0
     ldy.w #$0000                           ; C08749 m0x0
     ldx.w #$0020                           ; C0874C m0x0
     lda.w #$6EA8                           ; C0874F m0x0
-    jsr.w sub_C0A483                       ; C08752 m0x0
-    jsr.w sub_C095E3                       ; C08755 m0x0
+    jsr.w dma_upload_to_cgram              ; C08752 m0x0
+    jsr.w particle_spawn_from_table        ; C08755 m0x0
     lda.w #$1E00                           ; C08758 m0x0
     sta.w VMADDL                           ; C0875B m0x0
     ldx.w #$00C5                           ; C0875E m0x0
     lda.w #$0000                           ; C08761 m0x0
     ldy.w #$0200                           ; C08764 m0x0
-    jsr.w sub_C0A46A                       ; C08767 m0x0
-    jsr.w sub_C094E4                       ; C0876A m0x0
+    jsr.w dma_upload_to_vram               ; C08767 m0x0
+    jsr.w sparkle_array_init               ; C0876A m0x0
     ldy.w #$00B0                           ; C0876D m0x0
     ldx.w #$0004                           ; C08770 m0x0
     lda.w #$6D88                           ; C08773 m0x0
-    jsr.w sub_C0A483                       ; C08776 m0x0
+    jsr.w dma_upload_to_cgram              ; C08776 m0x0
     sep.b #$20                             ; C08779 m0x0
     lda.b #$E1                             ; C0877B m1x0
     sta.w CGADD                            ; C0877D m1x0
@@ -823,7 +823,7 @@ data_C08791:
 data_C08792:
     incbin "../data/01.bin":$0792..$0798      ; 6 bytes
 
-sub_C08798:
+mode2_level_init:
     stz.w $0BAC                            ; C08798 m0x0
     lda.w #$0001                           ; C0879B m0x0
     sta.w BGMODE                           ; C0879E m0x0
@@ -842,91 +842,91 @@ sub_C08798:
     sta.w COLDATA                          ; C087C2 m1x0
     jsr.w set_bg_scroll                    ; C087C5 m1x0
     lda.w #$06FF                           ; C087C8 m0x0
-    sta.b $86                              ; C087CB m0x0
+    sta.b level_width_mask                 ; C087CB m0x0
     lda.w #$02A0                           ; C087CD m0x0
-    sta.b $88                              ; C087D0 m0x0
+    sta.b level_height_mask                ; C087D0 m0x0
     lda.w #$FFFF                           ; C087D2 m0x0
     sta.b $82                              ; C087D5 m0x0
     lda.w #$0030                           ; C087D7 m0x0
     sta.b $84                              ; C087DA m0x0
     lda.w #$5760                           ; C087DC m0x0
-    sta.b $7A                              ; C087DF m0x0
+    sta.b tilemap_a_addr                   ; C087DF m0x0
     lda.w #$CACA                           ; C087E1 m0x0
-    sta.b $7C                              ; C087E4 m0x0
+    sta.b tilemap_a_bank                   ; C087E4 m0x0
     lda.w #$B560                           ; C087E6 m0x0
-    sta.b $7E                              ; C087E9 m0x0
+    sta.b tilemap_b_addr                   ; C087E9 m0x0
     lda.w #$C9C9                           ; C087EB m0x0
-    sta.b $80                              ; C087EE m0x0
-    stz.b $98                              ; C087F0 m0x0
-    stz.b $9A                              ; C087F2 m0x0
+    sta.b metatile_data_bank               ; C087EE m0x0
+    stz.b layer_parallax_mode              ; C087F0 m0x0
+    stz.b camera_y_lookahead               ; C087F2 m0x0
     stz.b $60                              ; C087F4 m0x0
     lda.w #$0015                           ; C087F6 m0x0
-    sta.b $68                              ; C087F9 m0x0
+    sta.b camera_y                         ; C087F9 m0x0
     lda.w #$0600                           ; C087FB m0x0
 
 loc_C087FE:
-    sta.b $62                              ; C087FE m0x0
-    jsr.w sub_C09FB7                       ; C08800 m0x0
-    jsr.w sub_C0A0F1                       ; C08803 m0x0
-    lda.b $62                              ; C08806 m0x0
+    sta.b camera_x                         ; C087FE m0x0
+    jsr.w build_metatile_column_580        ; C08800 m0x0
+    jsr.w vram_upload_column_580           ; C08803 m0x0
+    lda.b camera_x                         ; C08806 m0x0
     clc                                    ; C08808 m0x0
     adc.w #$0008                           ; C08809 m0x0
     cmp.w #$0700                           ; C0880C m0x0
     bne loc_C087FE                         ; C0880F m0x0
-    sta.b $62                              ; C08811 m0x0
+    sta.b camera_x                         ; C08811 m0x0
     lda.w #$2000                           ; C08813 m0x0
     sta.w VMADDL                           ; C08816 m0x0
     ldx.w #$00C7                           ; C08819 m0x0
     lda.w #$0342                           ; C0881C m0x0
     ldy.w #$6FC0                           ; C0881F m0x0
-    jsr.w sub_C0A46A                       ; C08822 m0x0
+    jsr.w dma_upload_to_vram               ; C08822 m0x0
     lda.w #$5800                           ; C08825 m0x0
     sta.w VMADDL                           ; C08828 m0x0
     ldx.w #$00CB                           ; C0882B m0x0
     lda.w #$1000                           ; C0882E m0x0
     ldy.w #$0800                           ; C08831 m0x0
-    jsr.w sub_C0A46A                       ; C08834 m0x0
+    jsr.w dma_upload_to_vram               ; C08834 m0x0
     lda.w #$5C00                           ; C08837 m0x0
-    jsr.w sub_C0A445                       ; C0883A m0x0
+    jsr.w dma_fill_vram_zero               ; C0883A m0x0
     lda.w #$6000                           ; C0883D m0x0
     sta.w VMADDL                           ; C08840 m0x0
     ldx.w #$00C7                           ; C08843 m0x0
     lda.w #$DF82                           ; C08846 m0x0
     ldy.w #$19E0                           ; C08849 m0x0
-    jsr.w sub_C0A46A                       ; C0884C m0x0
+    jsr.w dma_upload_to_vram               ; C0884C m0x0
     lda.w #$7400                           ; C0884F m0x0
     sta.w VMADDL                           ; C08852 m0x0
     ldx.w #$00CB                           ; C08855 m0x0
     lda.w #$0800                           ; C08858 m0x0
     ldy.w #$0800                           ; C0885B m0x0
-    jsr.w sub_C0A46A                       ; C0885E m0x0
+    jsr.w dma_upload_to_vram               ; C0885E m0x0
     ldy.w #$0080                           ; C08861 m0x0
     ldx.w #$0020                           ; C08864 m0x0
     lda.w #$6C48                           ; C08867 m0x0
-    jsr.w sub_C0A483                       ; C0886A m0x0
+    jsr.w dma_upload_to_cgram              ; C0886A m0x0
     ldy.w #$00C0                           ; C0886D m0x0
     ldx.w #$0010                           ; C08870 m0x0
     lda.w #$6C48                           ; C08873 m0x0
-    jsr.w sub_C0A483                       ; C08876 m0x0
+    jsr.w dma_upload_to_cgram              ; C08876 m0x0
     ldy.w #$00E0                           ; C08879 m0x0
     ldx.w #$0004                           ; C0887C m0x0
     lda.w #$6CC8                           ; C0887F m0x0
-    jsr.w sub_C0A483                       ; C08882 m0x0
+    jsr.w dma_upload_to_cgram              ; C08882 m0x0
     ldy.w #$0000                           ; C08885 m0x0
     ldx.w #$0020                           ; C08888 m0x0
     lda.w #$6FE3                           ; C0888B m0x0
-    jsr.w sub_C0A483                       ; C0888E m0x0
-    jsr.w sub_C09781                       ; C08891 m0x0
+    jsr.w dma_upload_to_cgram              ; C0888E m0x0
+    jsr.w particle_spawn_random            ; C08891 m0x0
     lda.w #$0080                           ; C08894 m0x0
     sta.b ptr_04                           ; C08897 m0x0
     lda.w #$88A6                           ; C08899 m0x0
     ldy.w #$2C00                           ; C0889C m0x0
     ldx.w #$0010                           ; C0889F m0x0
-    jsr.w sub_C0848C                       ; C088A2 m0x0
+    jsr.w dma_setup_channel_step           ; C088A2 m0x0
     rts                                    ; C088A5 m0x0
     incbin "../data/01.bin":$08A6..$08AB      ; 5 bytes
 
-sub_C088AB:
+title_screen_init:
     stz.w $0BAC                            ; C088AB m0x0
     lda.w #$0009                           ; C088AE m0x0
     sta.w BGMODE                           ; C088B1 m0x0
@@ -945,87 +945,87 @@ sub_C088AB:
     sta.w COLDATA                          ; C088D5 m1x0
     jsr.w set_bg_scroll                    ; C088D8 m1x0
     lda.w #$02FF                           ; C088DB m0x0
-    sta.b $86                              ; C088DE m0x0
+    sta.b level_width_mask                 ; C088DE m0x0
     lda.w #$02A0                           ; C088E0 m0x0
-    sta.b $88                              ; C088E3 m0x0
+    sta.b level_height_mask                ; C088E3 m0x0
     lda.w #$FFFF                           ; C088E5 m0x0
     sta.b $82                              ; C088E8 m0x0
     lda.w #$0030                           ; C088EA m0x0
     sta.b $84                              ; C088ED m0x0
     lda.w #$8714                           ; C088EF m0x0
-    sta.b $7A                              ; C088F2 m0x0
+    sta.b tilemap_a_addr                   ; C088F2 m0x0
     lda.w #$CECE                           ; C088F4 m0x0
-    sta.b $7C                              ; C088F7 m0x0
+    sta.b tilemap_a_bank                   ; C088F7 m0x0
     lda.w #$37A0                           ; C088F9 m0x0
-    sta.b $7E                              ; C088FC m0x0
+    sta.b tilemap_b_addr                   ; C088FC m0x0
     lda.w #$CACA                           ; C088FE m0x0
-    sta.b $80                              ; C08901 m0x0
+    sta.b metatile_data_bank               ; C08901 m0x0
     lda.w #$FFFF                           ; C08903 m0x0
-    sta.b $98                              ; C08906 m0x0
-    stz.b $9A                              ; C08908 m0x0
+    sta.b layer_parallax_mode              ; C08906 m0x0
+    stz.b camera_y_lookahead               ; C08908 m0x0
     stz.b $60                              ; C0890A m0x0
     lda.w #$0088                           ; C0890C m0x0
-    sta.b $68                              ; C0890F m0x0
+    sta.b camera_y                         ; C0890F m0x0
     lda.w #$0000                           ; C08911 m0x0
 
 loc_C08914:
-    sta.b $62                              ; C08914 m0x0
-    jsr.w sub_C09FB7                       ; C08916 m0x0
-    jsr.w sub_C0A0F1                       ; C08919 m0x0
-    lda.b $62                              ; C0891C m0x0
+    sta.b camera_x                         ; C08914 m0x0
+    jsr.w build_metatile_column_580        ; C08916 m0x0
+    jsr.w vram_upload_column_580           ; C08919 m0x0
+    lda.b camera_x                         ; C0891C m0x0
     clc                                    ; C0891E m0x0
     adc.w #$0008                           ; C0891F m0x0
     cmp.w #$0100                           ; C08922 m0x0
     bne loc_C08914                         ; C08925 m0x0
-    sta.b $62                              ; C08927 m0x0
+    sta.b camera_x                         ; C08927 m0x0
     lda.w #$1800                           ; C08929 m0x0
-    jsr.w sub_C0A445                       ; C0892C m0x0
+    jsr.w dma_fill_vram_zero               ; C0892C m0x0
     lda.w #$1C00                           ; C0892F m0x0
     sta.w VMADDL                           ; C08932 m0x0
     ldx.w #$00CB                           ; C08935 m0x0
     lda.w #$3000                           ; C08938 m0x0
     ldy.w #$0800                           ; C0893B m0x0
-    jsr.w sub_C0A46A                       ; C0893E m0x0
+    jsr.w dma_upload_to_vram               ; C0893E m0x0
     lda.w #$2000                           ; C08941 m0x0
     sta.w VMADDL                           ; C08944 m0x0
     ldx.w #$00C8                           ; C08947 m0x0
     lda.w #$0000                           ; C0894A m0x0
     ldy.w #$6AC0                           ; C0894D m0x0
-    jsr.w sub_C0A46A                       ; C08950 m0x0
+    jsr.w dma_upload_to_vram               ; C08950 m0x0
     lda.w #$5800                           ; C08953 m0x0
     sta.w VMADDL                           ; C08956 m0x0
     ldx.w #$00CB                           ; C08959 m0x0
     lda.w #$3800                           ; C0895C m0x0
     ldy.w #$0800                           ; C0895F m0x0
-    jsr.w sub_C0A46A                       ; C08962 m0x0
+    jsr.w dma_upload_to_vram               ; C08962 m0x0
     lda.w #$5C00                           ; C08965 m0x0
     sta.w VMADDL                           ; C08968 m0x0
     ldx.w #$00CB                           ; C0896B m0x0
     lda.w #$2800                           ; C0896E m0x0
     ldy.w #$0800                           ; C08971 m0x0
-    jsr.w sub_C0A46A                       ; C08974 m0x0
+    jsr.w dma_upload_to_vram               ; C08974 m0x0
     lda.w #$6000                           ; C08977 m0x0
     sta.w VMADDL                           ; C0897A m0x0
     ldx.w #$00C9                           ; C0897D m0x0
     lda.w #$5AC0                           ; C08980 m0x0
     ldy.w #$3000                           ; C08983 m0x0
-    jsr.w sub_C0A46A                       ; C08986 m0x0
+    jsr.w dma_upload_to_vram               ; C08986 m0x0
     ldy.w #$0080                           ; C08989 m0x0
     ldx.w #$0020                           ; C0898C m0x0
     lda.w #$6C48                           ; C0898F m0x0
-    jsr.w sub_C0A483                       ; C08992 m0x0
+    jsr.w dma_upload_to_cgram              ; C08992 m0x0
     ldy.w #$00C0                           ; C08995 m0x0
     ldx.w #$0010                           ; C08998 m0x0
     lda.w #$6C48                           ; C0899B m0x0
-    jsr.w sub_C0A483                       ; C0899E m0x0
+    jsr.w dma_upload_to_cgram              ; C0899E m0x0
     ldy.w #$00A0                           ; C089A1 m0x0
     ldx.w #$0004                           ; C089A4 m0x0
     lda.w #$7443                           ; C089A7 m0x0
-    jsr.w sub_C0A483                       ; C089AA m0x0
+    jsr.w dma_upload_to_cgram              ; C089AA m0x0
     ldy.w #$0000                           ; C089AD m0x0
     ldx.w #$0020                           ; C089B0 m0x0
     lda.w #$7343                           ; C089B3 m0x0
-    jsr.w sub_C0A483                       ; C089B6 m0x0
+    jsr.w dma_upload_to_cgram              ; C089B6 m0x0
     lda.w #$0040                           ; C089B9 m0x0
     sta.l $7F00D0                          ; C089BC m0x0
     lda.w #$0038                           ; C089C0 m0x0
@@ -1055,31 +1055,31 @@ loc_C08914:
     lda.w #$00D0                           ; C08A09 m0x0
     ldy.w #$0740                           ; C08A0C m0x0
     ldx.w #$0010                           ; C08A0F m0x0
-    jsr.w sub_C0848C                       ; C08A12 m0x0
+    jsr.w dma_setup_channel_step           ; C08A12 m0x0
     lda.w #$0080                           ; C08A15 m0x0
     sta.b ptr_04                           ; C08A18 m0x0
     lda.w #$8A5A                           ; C08A1A m0x0
     ldy.w #$2C01                           ; C08A1D m0x0
     ldx.w #$0020                           ; C08A20 m0x0
-    jsr.w sub_C0848C                       ; C08A23 m0x0
+    jsr.w dma_setup_channel_step           ; C08A23 m0x0
     lda.w #$0080                           ; C08A26 m0x0
     sta.b ptr_04                           ; C08A29 m0x0
     lda.w #$8A61                           ; C08A2B m0x0
     ldy.w #$0900                           ; C08A2E m0x0
     ldx.w #$0030                           ; C08A31 m0x0
-    jsr.w sub_C0848C                       ; C08A34 m0x0
+    jsr.w dma_setup_channel_step           ; C08A34 m0x0
     lda.w #$0080                           ; C08A37 m0x0
     sta.b ptr_04                           ; C08A3A m0x0
     lda.w #$8A66                           ; C08A3C m0x0
     ldy.w #$1143                           ; C08A3F m0x0
     ldx.w #$0040                           ; C08A42 m0x0
-    jsr.w sub_C0848C                       ; C08A45 m0x0
+    jsr.w dma_setup_channel_step           ; C08A45 m0x0
     lda.w #$0080                           ; C08A48 m0x0
     sta.b ptr_04                           ; C08A4B m0x0
     lda.w #$8A6D                           ; C08A4D m0x0
     ldy.w #$0D43                           ; C08A50 m0x0
     ldx.w #$0050                           ; C08A53 m0x0
-    jsr.w sub_C0848C                       ; C08A56 m0x0
+    jsr.w dma_setup_channel_step           ; C08A56 m0x0
     rts                                    ; C08A59 m0x0
     incbin "../data/01.bin":$0A5A..$0A74      ; 26 bytes
 
@@ -1096,13 +1096,13 @@ sub_C08A74:
     sta.w $0C29                            ; C08A8E m0x0
     lda.w #$0070                           ; C08A91 m0x0
     sta.w $0C25                            ; C08A94 m0x0
-    lda.b $62                              ; C08A97 m0x0
+    lda.b camera_x                         ; C08A97 m0x0
     sta.w $0C27                            ; C08A99 m0x0
     stz.w $0C2B                            ; C08A9C m0x0
 
 loc_C08A9F:
     dec.w $0C1F                            ; C08A9F m0x0
-    lda.b $62                              ; C08AA2 m0x0
+    lda.b camera_x                         ; C08AA2 m0x0
     cmp.w #$0100                           ; C08AA4 m0x0
     bcs loc_C08AAD                         ; C08AA7 m0x0
     stz.b $78                              ; C08AA9 m0x0
@@ -1136,15 +1136,15 @@ loc_C08AD1:
     sta.b $78                              ; C08AD1 m0x0
 
 loc_C08AD3:
-    stz.b $72                              ; C08AD3 m0x0
+    stz.b walk_cycle_parity                ; C08AD3 m0x0
 
 loc_C08AD5:
-    lda.b $62                              ; C08AD5 m0x0
+    lda.b camera_x                         ; C08AD5 m0x0
     tax                                    ; C08AD7 m0x0
     lsr                                    ; C08AD8 m0x0
     lsr                                    ; C08AD9 m0x0
     sta.w $0BF0                            ; C08ADA m0x0
-    lda.b $68                              ; C08ADD m0x0
+    lda.b camera_y                         ; C08ADD m0x0
     lsr                                    ; C08ADF m0x0
     lsr                                    ; C08AE0 m0x0
     sta.w $0BF2                            ; C08AE1 m0x0
@@ -1193,10 +1193,10 @@ loc_C08B24:
     jmp.w loc_C08E39                       ; C08B29 m0x0
 
 loc_C08B2C:
-    lda.w $0788                            ; C08B2C m0x0
+    lda.w entity_flags                     ; C08B2C m0x0
     and.w #$CFFF                           ; C08B2F m0x0
     ora.w #$2000                           ; C08B32 m0x0
-    sta.w $0788                            ; C08B35 m0x0
+    sta.w entity_flags                     ; C08B35 m0x0
     lda.w $0C1B                            ; C08B38 m0x0
     beq loc_C08B49                         ; C08B3B m0x0
     lda.w #$FFFF                           ; C08B3D m0x0
@@ -1229,7 +1229,7 @@ loc_C08B80:
     sta.w $0BD8                            ; C08B83 m0x0
     lda.w #$1013                           ; C08B86 m0x0
     sta.w $0BDA                            ; C08B89 m0x0
-    lda.b $68                              ; C08B8C m0x0
+    lda.b camera_y                         ; C08B8C m0x0
     adc.w #$0088                           ; C08B8E m0x0
     tay                                    ; C08B91 m0x0
     lda.w #$6969                           ; C08B92 m0x0
@@ -1249,7 +1249,7 @@ loc_C08BA0:
     lda.w #$1417                           ; C08BA9 m0x0
     sta.w $0BDA                            ; C08BAC m0x0
     ldy.w #$0020                           ; C08BAF m0x0
-    lda.w $0728                            ; C08BB2 m0x0
+    lda.w entity_state                     ; C08BB2 m0x0
     and.w #$FFFC                           ; C08BB5 m0x0
     cmp.w #$0008                           ; C08BB8 m0x0
     bne loc_C08BC0                         ; C08BBB m0x0
@@ -1257,7 +1257,7 @@ loc_C08BA0:
 
 loc_C08BC0:
     sty.b $18                              ; C08BC0 m0x0
-    lda.b $62                              ; C08BC2 m0x0
+    lda.b camera_x                         ; C08BC2 m0x0
     sec                                    ; C08BC4 m0x0
     sbc.w $0C0F                            ; C08BC5 m0x0
     sta.b $20                              ; C08BC8 m0x0
@@ -1281,7 +1281,7 @@ loc_C08BE4:
     lda.w $0C0D                            ; C08BE4 m0x0
     asl                                    ; C08BE7 m0x0
     tax                                    ; C08BE8 m0x0
-    lda.b $62                              ; C08BE9 m0x0
+    lda.b camera_x                         ; C08BE9 m0x0
     sec                                    ; C08BEB m0x0
     sbc.w $0C0F                            ; C08BEC m0x0
     bpl loc_C08BF8                         ; C08BEF m0x0
@@ -1374,7 +1374,7 @@ loc_C08C80:
     cmp.w #$0100                           ; C08C8A m0x0
     bne loc_C08CC1                         ; C08C8D m0x0
     tay                                    ; C08C8F m0x0
-    jsr.w sub_C0B0BC                       ; C08C90 m0x0
+    jsr.w play_zone_transition_sound       ; C08C90 m0x0
     tya                                    ; C08C93 m0x0
     stz.w $0C1F                            ; C08C94 m0x0
     ldy.w #$0010                           ; C08C97 m0x0
@@ -1401,20 +1401,20 @@ loc_C08CC1:
     ldy.b $1A                              ; C08CC9 m0x0
     cpy.w #$0030                           ; C08CCB m0x0
     bcs loc_C08CFA                         ; C08CCE m0x0
-    lda.w $0728                            ; C08CD0 m0x0
+    lda.w entity_state                     ; C08CD0 m0x0
     and.w #$FFFC                           ; C08CD3 m0x0
     cmp.w #$0014                           ; C08CD6 m0x0
     beq loc_C08CFA                         ; C08CD9 m0x0
     and.w #$0002                           ; C08CDB m0x0
     ora.w #$0014                           ; C08CDE m0x0
-    sta.w $0728                            ; C08CE1 m0x0
+    sta.w entity_state                     ; C08CE1 m0x0
     bra loc_C08CFA                         ; C08CE4 m0x0
 
 loc_C08CE6:
     lda.w #$003C                           ; C08CE6 m0x0
-    sta.b $70                              ; C08CE9 m0x0
+    sta.b walk_cycle_timer                 ; C08CE9 m0x0
     lda.w #$0080                           ; C08CEB m0x0
-    sta.b $72                              ; C08CEE m0x0
+    sta.b walk_cycle_parity                ; C08CEE m0x0
     stz.b $74                              ; C08CF0 m0x0
     stz.b $76                              ; C08CF2 m0x0
     lda.w #$3F00                           ; C08CF4 m0x0
@@ -1426,7 +1426,7 @@ loc_C08CFA:
     ldy.b $1A                              ; C08CFA m0x0
     cpy.w #$0030                           ; C08CFC m0x0
     bcc loc_C08D27                         ; C08CFF m0x0
-    lda.w $0788                            ; C08D01 m0x0
+    lda.w entity_flags                     ; C08D01 m0x0
     and.w #$CFFF                           ; C08D04 m0x0
     ora.w #$2000                           ; C08D07 m0x0
     ldy.b $20                              ; C08D0A m0x0
@@ -1434,7 +1434,7 @@ loc_C08CFA:
     ora.w #$3000                           ; C08D0E m0x0
 
 loc_C08D11:
-    sta.w $0788                            ; C08D11 m0x0
+    sta.w entity_flags                     ; C08D11 m0x0
     lda.w $0C1B                            ; C08D14 m0x0
     beq loc_C08D48                         ; C08D17 m0x0
     lda.w #$FFFF                           ; C08D19 m0x0
@@ -1444,10 +1444,10 @@ loc_C08D11:
     bra loc_C08D48                         ; C08D25 m0x0
 
 loc_C08D27:
-    lda.w $0788                            ; C08D27 m0x0
+    lda.w entity_flags                     ; C08D27 m0x0
     and.w #$CFFF                           ; C08D2A m0x0
     ora.w #$2000                           ; C08D2D m0x0
-    sta.w $0788                            ; C08D30 m0x0
+    sta.w entity_flags                     ; C08D30 m0x0
     lda.w $0C0C                            ; C08D33 m0x0
     cmp.w #$2E00                           ; C08D36 m0x0
     bne loc_C08D48                         ; C08D39 m0x0
@@ -1460,7 +1460,7 @@ loc_C08D45:
     sta.w $0C1B                            ; C08D45 m0x0
 
 loc_C08D48:
-    lda.b $68                              ; C08D48 m0x0
+    lda.b camera_y                         ; C08D48 m0x0
     sec                                    ; C08D4A m0x0
     sbc.w #$0076                           ; C08D4B m0x0
     clc                                    ; C08D4E m0x0
@@ -1484,7 +1484,7 @@ loc_C08D67:
     sta.w $0C0A                            ; C08D6F m0x0
     lda.w #$0012                           ; C08D72 m0x0
     sta.w $0C08                            ; C08D75 m0x0
-    lda.b $68                              ; C08D78 m0x0
+    lda.b camera_y                         ; C08D78 m0x0
     sec                                    ; C08D7A m0x0
     sbc.w #$007F                           ; C08D7B m0x0
     clc                                    ; C08D7E m0x0
@@ -1580,20 +1580,20 @@ loc_C08E10:
     jmp.w loc_C08E7F                       ; C08E28 m0x0
 
 loc_C08E2B:
-    lda.b $68                              ; C08E2B m0x0
+    lda.b camera_y                         ; C08E2B m0x0
     lsr                                    ; C08E2D m0x0
     clc                                    ; C08E2E m0x0
-    adc.b $68                              ; C08E2F m0x0
+    adc.b camera_y                         ; C08E2F m0x0
     sec                                    ; C08E31 m0x0
     sbc.w #$0048                           ; C08E32 m0x0
     bmi loc_C08E4A                         ; C08E35 m0x0
     bra loc_C08E45                         ; C08E37 m0x0
 
 loc_C08E39:
-    lda.b $68                              ; C08E39 m0x0
+    lda.b camera_y                         ; C08E39 m0x0
     lsr                                    ; C08E3B m0x0
     clc                                    ; C08E3C m0x0
-    adc.b $68                              ; C08E3D m0x0
+    adc.b camera_y                         ; C08E3D m0x0
     sec                                    ; C08E3F m0x0
     sbc.w #$0048                           ; C08E40 m0x0
     bmi loc_C08E4A                         ; C08E43 m0x0
@@ -1629,7 +1629,7 @@ loc_C08E4D:
     clc                                    ; C08E71 m0x0
     adc.b $06                              ; C08E72 m0x0
     tay                                    ; C08E74 m0x0
-    lda.b $62                              ; C08E75 m0x0
+    lda.b camera_x                         ; C08E75 m0x0
     asl                                    ; C08E77 m0x0
     clc                                    ; C08E78 m0x0
     adc.b ptr_04                           ; C08E79 m0x0
@@ -1641,9 +1641,9 @@ loc_C08E7F:
     stx.w $0BE4                            ; C08E82 m0x0
     sty.w $0BE6                            ; C08E85 m0x0
     lda.w #$0000                           ; C08E88 m0x0
-    jsr.w sub_C09C62                       ; C08E8B m0x0
+    jsr.w vram_stream_descriptor_dispatch   ; C08E8B m0x0
 
-sub_C08E8E:
+check_pending_player_attack:
     ldx.w $0BB4                            ; C08E8E m0x0
     beq loc_C08E9A                         ; C08E91 m0x0
     lda.b $8E                              ; C08E93 m0x0
@@ -1653,23 +1653,23 @@ sub_C08E8E:
 loc_C08E9A:
     rts                                    ; C08E9A m0x0
 
-sub_C08E9B:
-    lda.b $02                              ; C08E9B m0x0
+nmi_scroll_mode0:
+    lda.b dma_pending_mask                 ; C08E9B m0x0
     ora.w #$3E00                           ; C08E9D m0x0
     sta.w MDMAEN                           ; C08EA0 m0x0
-    stz.b $02                              ; C08EA3 m0x0
-    jsr.w sub_C0A0F1                       ; C08EA5 m0x0
-    jsr.w sub_C0A148                       ; C08EA8 m0x0
+    stz.b dma_pending_mask                 ; C08EA3 m0x0
+    jsr.w vram_upload_column_580           ; C08EA5 m0x0
+    jsr.w vram_upload_column_500           ; C08EA8 m0x0
     lda.b $76                              ; C08EAB m0x0
     clc                                    ; C08EAD m0x0
     adc.w $0BE6                            ; C08EAE m0x0
     sta.b ptr_04                           ; C08EB1 m0x0
-    lda.b $62                              ; C08EB3 m0x0
+    lda.b camera_x                         ; C08EB3 m0x0
     sep.b #$20                             ; C08EB5 m0x0
     sta.w BG2HOFS                          ; C08EB7 m1x0
     xba                                    ; C08EBA m1x0
     sta.w BG2HOFS                          ; C08EBB m1x0
-    lda.b $68                              ; C08EBE m1x0
+    lda.b camera_y                         ; C08EBE m1x0
     sta.w BG2VOFS                          ; C08EC0 m1x0
     sta.w BG2VOFS                          ; C08EC3 m1x0
     lda.w $0BE4                            ; C08EC6 m1x0
@@ -1719,31 +1719,31 @@ loc_C08EF6:
     sta.l $7F053F                          ; C08F42 m0x0
     rts                                    ; C08F46 m0x0
 
-sub_C08F47:
-    lda.b $02                              ; C08F47 m0x0
+nmi_scroll_mode1:
+    lda.b dma_pending_mask                 ; C08F47 m0x0
     ora.w #$FE00                           ; C08F49 m0x0
     sta.w MDMAEN                           ; C08F4C m0x0
-    stz.b $02                              ; C08F4F m0x0
-    jsr.w sub_C0A0F1                       ; C08F51 m0x0
-    jsr.w sub_C0A148                       ; C08F54 m0x0
-    lda.b $62                              ; C08F57 m0x0
+    stz.b dma_pending_mask                 ; C08F4F m0x0
+    jsr.w vram_upload_column_580           ; C08F51 m0x0
+    jsr.w vram_upload_column_500           ; C08F54 m0x0
+    lda.b camera_x                         ; C08F57 m0x0
     lsr                                    ; C08F59 m0x0
     sta.b ptr_04                           ; C08F5A m0x0
     lda.b $60                              ; C08F5C m0x0
     ror                                    ; C08F5E m0x0
     clc                                    ; C08F5F m0x0
     adc.b $60                              ; C08F60 m0x0
-    lda.b $62                              ; C08F62 m0x0
+    lda.b camera_x                         ; C08F62 m0x0
     adc.b ptr_04                           ; C08F64 m0x0
     sta.l $7F0087                          ; C08F66 m0x0
-    lda.b $62                              ; C08F6A m0x0
+    lda.b camera_x                         ; C08F6A m0x0
     sta.l $7F0081                          ; C08F6C m0x0
     sta.l $7F0084                          ; C08F70 m0x0
     lsr                                    ; C08F74 m0x0
     sep.b #$20                             ; C08F75 m0x0
     sta.w BG3HOFS                          ; C08F77 m1x0
     stz.w BG3HOFS                          ; C08F7A m1x0
-    lda.b $68                              ; C08F7D m1x0
+    lda.b camera_y                         ; C08F7D m1x0
     sta.w BG1VOFS                          ; C08F7F m1x0
     sta.w BG1VOFS                          ; C08F82 m1x0
     eor.b #$FF                             ; C08F85 m1x0
@@ -1783,7 +1783,7 @@ sub_C08F47:
     lda.b $60                              ; C08FCA m0x0
     asl                                    ; C08FCC m0x0
     sta.b $06                              ; C08FCD m0x0
-    lda.b $62                              ; C08FCF m0x0
+    lda.b camera_x                         ; C08FCF m0x0
     rol                                    ; C08FD1 m0x0
     sta.b $08                              ; C08FD2 m0x0
     lda.b $5E                              ; C08FD4 m0x0
@@ -1813,7 +1813,7 @@ sub_C08F47:
 loc_C08FFF:
     lda.l $800000+(data_C084B5&$FFFF),x    ; C08FFF m0x0
     clc                                    ; C09003 m0x0
-    adc.b $62                              ; C09004 m0x0
+    adc.b camera_x                         ; C09004 m0x0
     sta.b $AC,x                            ; C09006 m0x0
     inx                                    ; C09008 m0x0
     inx                                    ; C09009 m0x0
@@ -1847,14 +1847,14 @@ loc_C08FFF:
     sta.l $7F0044                          ; C09044 m0x0
     rts                                    ; C09048 m0x0
 
-sub_C09049:
-    lda.b $02                              ; C09049 m0x0
+nmi_scroll_mode2:
+    lda.b dma_pending_mask                 ; C09049 m0x0
     sta.w MDMAEN                           ; C0904B m0x0
-    stz.b $02                              ; C0904E m0x0
-    jsr.w sub_C0A0F1                       ; C09050 m0x0
-    jsr.w sub_C0A148                       ; C09053 m0x0
-    lda.b $62                              ; C09056 m0x0
-    ldy.b $68                              ; C09058 m0x0
+    stz.b dma_pending_mask                 ; C0904E m0x0
+    jsr.w vram_upload_column_580           ; C09050 m0x0
+    jsr.w vram_upload_column_500           ; C09053 m0x0
+    lda.b camera_x                         ; C09056 m0x0
+    ldy.b camera_y                         ; C09058 m0x0
     dey                                    ; C0905A m0x0
     sty.b ptr_04                           ; C0905B m0x0
     sep.b #$20                             ; C0905D m0x0
@@ -1884,7 +1884,7 @@ sub_C09049:
     ror                                    ; C0908F m0x0
     sta.b $06                              ; C09090 m0x0
     clc                                    ; C09092 m0x0
-    adc.b $62                              ; C09093 m0x0
+    adc.b camera_x                         ; C09093 m0x0
     sep.b #$20                             ; C09095 m0x0
     sta.w BG3HOFS                          ; C09097 m1x0
     xba                                    ; C0909A m1x0
@@ -1927,10 +1927,10 @@ loc_C090D2:
     cmp.w #$8000                           ; C090DF m0x0
     ror                                    ; C090E2 m0x0
     sta.b $06                              ; C090E3 m0x0
-    lda.b $62                              ; C090E5 m0x0
+    lda.b camera_x                         ; C090E5 m0x0
     lsr                                    ; C090E7 m0x0
     clc                                    ; C090E8 m0x0
-    adc.b $62                              ; C090E9 m0x0
+    adc.b camera_x                         ; C090E9 m0x0
     clc                                    ; C090EB m0x0
     adc.b $06                              ; C090EC m0x0
     sep.b #$20                             ; C090EE m0x0
@@ -1940,15 +1940,15 @@ loc_C090D2:
     rep.b #$20                             ; C090F7 m1x0
     rts                                    ; C090F9 m0x0
 
-sub_C090FA:
-    lda.b $02                              ; C090FA m0x0
+nmi_scroll_title:
+    lda.b dma_pending_mask                 ; C090FA m0x0
     ora.w #$3E00                           ; C090FC m0x0
     sta.w MDMAEN                           ; C090FF m0x0
-    stz.b $02                              ; C09102 m0x0
-    jsr.w sub_C0A0F1                       ; C09104 m0x0
-    jsr.w sub_C0A148                       ; C09107 m0x0
-    lda.b $62                              ; C0910A m0x0
-    ldy.b $68                              ; C0910C m0x0
+    stz.b dma_pending_mask                 ; C09102 m0x0
+    jsr.w vram_upload_column_580           ; C09104 m0x0
+    jsr.w vram_upload_column_500           ; C09107 m0x0
+    lda.b camera_x                         ; C0910A m0x0
+    ldy.b camera_y                         ; C0910C m0x0
     dey                                    ; C0910E m0x0
     sty.b ptr_04                           ; C0910F m0x0
     sep.b #$20                             ; C09111 m0x0
@@ -1961,10 +1961,10 @@ sub_C090FA:
     xba                                    ; C0911F m1x0
     sta.w BG2VOFS                          ; C09120 m1x0
     rep.b #$20                             ; C09123 m1x0
-    lda.b $62                              ; C09125 m0x0
+    lda.b camera_x                         ; C09125 m0x0
     lsr                                    ; C09127 m0x0
     sta.w $0BE8                            ; C09128 m0x0
-    lda.b $68                              ; C0912B m0x0
+    lda.b camera_y                         ; C0912B m0x0
     lsr                                    ; C0912D m0x0
     sta.w $0BEA                            ; C0912E m0x0
     lda.b $5E                              ; C09131 m0x0
@@ -1972,9 +1972,9 @@ sub_C090FA:
     lsr                                    ; C09134 m0x0
     lsr                                    ; C09135 m0x0
     clc                                    ; C09136 m0x0
-    adc.b $62                              ; C09137 m0x0
+    adc.b camera_x                         ; C09137 m0x0
     sta.w $0BEC                            ; C09139 m0x0
-    lda.b $68                              ; C0913C m0x0
+    lda.b camera_y                         ; C0913C m0x0
     lsr                                    ; C0913E m0x0
     sta.b $18                              ; C0913F m0x0
     lsr                                    ; C09141 m0x0
@@ -1983,15 +1983,15 @@ sub_C090FA:
     sec                                    ; C09145 m0x0
     sbc.w #$006C                           ; C09146 m0x0
     sta.w $0BEE                            ; C09149 m0x0
-    lda.b $62                              ; C0914C m0x0
+    lda.b camera_x                         ; C0914C m0x0
     lsr                                    ; C0914E m0x0
     clc                                    ; C0914F m0x0
-    adc.b $62                              ; C09150 m0x0
+    adc.b camera_x                         ; C09150 m0x0
     sta.w $0BE0                            ; C09152 m0x0
-    lda.b $62                              ; C09155 m0x0
+    lda.b camera_x                         ; C09155 m0x0
     asl                                    ; C09157 m0x0
     sta.w $0BDC                            ; C09158 m0x0
-    lda.b $68                              ; C0915B m0x0
+    lda.b camera_y                         ; C0915B m0x0
     sec                                    ; C0915D m0x0
     sbc.w #$0030                           ; C0915E m0x0
     asl                                    ; C09161 m0x0
@@ -2016,7 +2016,7 @@ loc_C09178:
     inc                                    ; C0917C m1x0
     sta.l $7F00D0                          ; C0917D m1x0
     rep.b #$20                             ; C09181 m1x0
-    lda.b $68                              ; C09183 m0x0
+    lda.b camera_y                         ; C09183 m0x0
     sec                                    ; C09185 m0x0
     sbc.w #$0091                           ; C09186 m0x0
     bmi loc_C09190                         ; C09189 m0x0
@@ -2109,28 +2109,28 @@ loc_C0921C:
     rts                                    ; C0921C m0x0
     incbin "../data/01.bin":$121D..$1227      ; 10 bytes
 
-sub_C09227:
-    jmp.w sub_C09331                       ; C09227 m0x0
+mode0_particle_draw_dispatch:
+    jmp.w particle_update_and_draw_mode0   ; C09227 m0x0
 
-sub_C0922A:
-    jsr.w sub_C09521                       ; C0922A m0x0
+mode1_particle_dispatch:
+    jsr.w sparkle_update_and_draw          ; C0922A m0x0
     jmp.w loc_C09679                       ; C0922D m0x0
 
-sub_C09230:
+mode2_particle_dispatch:
     jmp.w loc_C097DD                       ; C09230 m0x0
 
-sub_C09233:
+particle_dispatch_noop:
     rts                                    ; C09233 m0x0
 
-sub_C09234:
+vram_upload_shared_tileset_c5:
     lda.w #$0000                           ; C09234 m0x0
     sta.w VMADDL                           ; C09237 m0x0
     ldx.w #$00C5                           ; C0923A m0x0
     lda.w #$02C0                           ; C0923D m0x0
     ldy.w #$0C00                           ; C09240 m0x0
-    jsr.w sub_C0A46A                       ; C09243 m0x0
+    jsr.w dma_upload_to_vram               ; C09243 m0x0
 
-sub_C09246:
+particle_table_clear:
     ldx.w #$004E                           ; C09246 m0x0
     tdc                                    ; C09249 m0x0
 
@@ -2141,7 +2141,7 @@ loc_C0924A:
     bpl loc_C0924A                         ; C09250 m0x0
     rts                                    ; C09252 m0x0
 
-sub_C09253:
+particle_spawn_mode0_weather:
     stz.w $0C15                            ; C09253 m0x0
     ldx.w #$004E                           ; C09256 m0x0
 
@@ -2151,7 +2151,7 @@ loc_C09259:
     jmp.w loc_C092EB                       ; C0925F m0x0
 
 loc_C09262:
-    jsr.w sub_C0A212                       ; C09262 m0x0
+    jsr.w random_next                      ; C09262 m0x0
     lda.b init_magic_AA55                  ; C09265 m0x0
     and.w #$003F                           ; C09267 m0x0
     sta.b ptr_04                           ; C0926A m0x0
@@ -2170,7 +2170,7 @@ loc_C09262:
     clc                                    ; C09284 m0x0
     adc.w #$0080                           ; C09285 m0x0
     sta.l $7F0B86,x                        ; C09288 m0x0
-    lda.b $68                              ; C0928C m0x0
+    lda.b camera_y                         ; C0928C m0x0
     adc.w #$0090                           ; C0928E m0x0
     sta.l $7F0A86,x                        ; C09291 m0x0
     lda.b $9D                              ; C09295 m0x0
@@ -2220,11 +2220,11 @@ loc_C092EB:
 loc_C092F2:
     rts                                    ; C092F2 m0x0
 
-sub_C092F3:
+mode1_reset_particles_and_oam:
     rep.b #$30                             ; C092F3 m0x0
-    stz.b $62                              ; C092F5 m0x0
-    stz.b $68                              ; C092F7 m0x0
-    stz.b $88                              ; C092F9 m0x0
+    stz.b camera_x                         ; C092F5 m0x0
+    stz.b camera_y                         ; C092F7 m0x0
+    stz.b level_height_mask                ; C092F9 m0x0
     stz.w $0C1F                            ; C092FB m0x0
     lda.w #$0001                           ; C092FE m0x0
     sta.w $0C21                            ; C09301 m0x0
@@ -2240,18 +2240,18 @@ sub_C092F3:
     ora.w #$0E00                           ; C0931E m0x0
     sta.w $0C2D                            ; C09321 m0x0
     jsr.w clear_sprite_table               ; C09324 m0x0
-    jsr.w sub_C09331                       ; C09327 m0x0
-    jsr.w sub_C0ADE7                       ; C0932A m0x0
-    jsr.w sub_C0ADFD                       ; C0932D m0x0
+    jsr.w particle_update_and_draw_mode0   ; C09327 m0x0
+    jsr.w oam_hide_unused_sprites          ; C0932A m0x0
+    jsr.w oam_dma_upload                   ; C0932D m0x0
     rts                                    ; C09330 m0x0
 
-sub_C09331:
+particle_update_and_draw_mode0:
     tsc                                    ; C09331 m0x0
     sta.b $18                              ; C09332 m0x0
-    lda.b $68                              ; C09334 m0x0
+    lda.b camera_y                         ; C09334 m0x0
     and.w #$00FF                           ; C09336 m0x0
     sta.b $1A                              ; C09339 m0x0
-    lda.b $88                              ; C0933B m0x0
+    lda.b level_height_mask                ; C0933B m0x0
     clc                                    ; C0933D m0x0
     adc.w #$00F0                           ; C0933E m0x0
     sta.b $1C                              ; C09341 m0x0
@@ -2276,20 +2276,20 @@ loc_C0935E:
     dec.w $0C21                            ; C0935E m0x0
     sep.b #$20                             ; C09361 m0x0
     lda.b $9D                              ; C09363 m1x0
-    sta.b $28                              ; C09365 m1x0
+    sta.b sprite_frame_bank                ; C09365 m1x0
     asl                                    ; C09367 m1x0
     lda.b init_magic_FFFF                  ; C09368 m1x0
     rol.b init_magic_FFFF                  ; C0936A m1x0
     rol.b init_magic_FFFF                  ; C0936C m1x0
     eor.b $9F                              ; C0936E m1x0
     sta.b $9D                              ; C09370 m1x0
-    lda.b $28                              ; C09372 m1x0
+    lda.b sprite_frame_bank                ; C09372 m1x0
     sta.b $9F                              ; C09374 m1x0
     eor.b init_magic_FFFF                  ; C09376 m1x0
-    sta.b $28                              ; C09378 m1x0
+    sta.b sprite_frame_bank                ; C09378 m1x0
     lda.b init_magic_AA55                  ; C0937A m1x0
     sta.b init_magic_FFFF                  ; C0937C m1x0
-    lda.b $28                              ; C0937E m1x0
+    lda.b sprite_frame_bank                ; C0937E m1x0
     sta.b init_magic_AA55                  ; C09380 m1x0
     rep.b #$20                             ; C09382 m1x0
     lda.b init_magic_AA55                  ; C09384 m0x0
@@ -2329,7 +2329,7 @@ loc_C093B3:
     sta.l $7F0A06,x                        ; C093E3 m0x0
 
 loc_C093E7:
-    lda.b $68                              ; C093E7 m0x0
+    lda.b camera_y                         ; C093E7 m0x0
     sta.l $7F0A86,x                        ; C093E9 m0x0
 
 loc_C093ED:
@@ -2404,7 +2404,7 @@ loc_C09425:
 loc_C09488:
     lda.l $7F0B06,x                        ; C09488 m0x0
     sec                                    ; C0948C m0x0
-    sbc.b $62                              ; C0948D m0x0
+    sbc.b camera_x                         ; C0948D m0x0
     bmi loc_C094D7                         ; C0948F m0x0
     cmp.w #$00F0                           ; C09491 m0x0
     bcs loc_C094D7                         ; C09494 m0x0
@@ -2436,7 +2436,7 @@ loc_C09488:
     lda.b $08                              ; C094C4 m0x0
     clc                                    ; C094C6 m0x0
     adc.l $7F0906,x                        ; C094C7 m0x0
-    sta.w $0002,y                          ; C094CB m0x0
+    sta.w dma_pending_mask,y               ; C094CB m0x0
     inc                                    ; C094CE m0x0
     sta.w $0006,y                          ; C094CF m0x0
     tya                                    ; C094D2 m0x0
@@ -2455,14 +2455,14 @@ loc_C094DE:
     tcs                                    ; C094E2 m0x0
     rts                                    ; C094E3 m0x0
 
-sub_C094E4:
+sparkle_array_init:
     lda.w #$00F8                           ; C094E4 m0x0
 
 loc_C094E7:
     tax                                    ; C094E7 m0x0
     tdc                                    ; C094E8 m0x0
     sta.l $7F0E86,x                        ; C094E9 m0x0
-    jsr.w sub_C0A212                       ; C094ED m0x0
+    jsr.w random_next                      ; C094ED m0x0
     lda.b init_magic_AA55                  ; C094F0 m0x0
     and.w #$07FF                           ; C094F2 m0x0
     sta.l $7F0E87,x                        ; C094F5 m0x0
@@ -2486,7 +2486,7 @@ loc_C09515:
     bpl loc_C094E7                         ; C0951E m0x0
     rts                                    ; C09520 m0x0
 
-sub_C09521:
+sparkle_update_and_draw:
     ldy.b oam_write_ptr                    ; C09521 m0x0
     cpy.w #$0400                           ; C09523 m0x0
     bcc loc_C09529                         ; C09526 m0x0
@@ -2501,7 +2501,7 @@ loc_C0952C:
     sta.b $06                              ; C09531 m0x0
     lda.l $7F0E87,x                        ; C09533 m0x0
     sec                                    ; C09537 m0x0
-    sbc.b $62                              ; C09538 m0x0
+    sbc.b camera_x                         ; C09538 m0x0
     bmi loc_C09593                         ; C0953A m0x0
     cmp.w #$0100                           ; C0953C m0x0
     bcs loc_C09593                         ; C0953F m0x0
@@ -2537,7 +2537,7 @@ loc_C0954E:
     ora.w #$4000                           ; C09583 m0x0
 
 loc_C09586:
-    sta.w $0002,y                          ; C09586 m0x0
+    sta.w dma_pending_mask,y               ; C09586 m0x0
     inc                                    ; C09589 m0x0
     sta.w $0006,y                          ; C0958A m0x0
     tya                                    ; C0958D m0x0
@@ -2588,9 +2588,9 @@ loc_C095E0:
     sty.b oam_write_ptr                    ; C095E0 m0x0
     rts                                    ; C095E2 m0x0
 
-sub_C095E3:
+particle_spawn_from_table:
     lda.w #$1F00                           ; C095E3 m0x0
-    jsr.w sub_C09C16                       ; C095E6 m0x0
+    jsr.w vram_generate_particle_tile      ; C095E6 m0x0
     lda.b game_mode                        ; C095E9 m0x0
     asl                                    ; C095EB m0x0
     tax                                    ; C095EC m0x0
@@ -2613,17 +2613,17 @@ loc_C095F9:
     lda.w #$8000                           ; C09611 m0x0
     sta.w $0B06,y                          ; C09614 m0x0
     sta.w $0B86,y                          ; C09617 m0x0
-    jsr.w sub_C0A212                       ; C0961A m0x0
+    jsr.w random_next                      ; C0961A m0x0
     lda.b init_magic_AA55                  ; C0961D m0x0
     and.w #$1FFF                           ; C0961F m0x0
     sta.w $0C06,y                          ; C09622 m0x0
-    jsr.w sub_C0A212                       ; C09625 m0x0
+    jsr.w random_next                      ; C09625 m0x0
     lda.b init_magic_AA55                  ; C09628 m0x0
     and.w #$01FF                           ; C0962A m0x0
     clc                                    ; C0962D m0x0
     adc.w #$0100                           ; C0962E m0x0
     sta.w $0C86,y                          ; C09631 m0x0
-    jsr.w sub_C0A212                       ; C09634 m0x0
+    jsr.w random_next                      ; C09634 m0x0
     lda.b init_magic_AA55                  ; C09637 m0x0
     and.w #$01FF                           ; C09639 m0x0
     adc.w #$0100                           ; C0963C m0x0
@@ -2631,7 +2631,7 @@ loc_C095F9:
     tdc                                    ; C09642 m0x0
     sta.w $0D86,y                          ; C09643 m0x0
     sta.w $0E06,y                          ; C09646 m0x0
-    jsr.w sub_C0A212                       ; C09649 m0x0
+    jsr.w random_next                      ; C09649 m0x0
     lda.b init_magic_AA55                  ; C0964C m0x0
     and.w #$00FF                           ; C0964E m0x0
     adc.w #$0080                           ; C09651 m0x0
@@ -2688,7 +2688,7 @@ loc_C09691:
     bne loc_C096CF                         ; C09697 m0x0
     lda.l $7F0986,x                        ; C09699 m0x0
     bne loc_C096B6                         ; C0969D m0x0
-    jsr.w sub_C0A212                       ; C0969F m0x0
+    jsr.w random_next                      ; C0969F m0x0
     lda.b init_magic_AA55                  ; C096A2 m0x0
     and.w #$00FF                           ; C096A4 m0x0
     adc.w #$0080                           ; C096A7 m0x0
@@ -2749,7 +2749,7 @@ loc_C09729:
     clc                                    ; C09730 m0x0
     adc.l $7F0A06,x                        ; C09731 m0x0
     sec                                    ; C09735 m0x0
-    sbc.b $62                              ; C09736 m0x0
+    sbc.b camera_x                         ; C09736 m0x0
     bmi loc_C096C8                         ; C09738 m0x0
     cmp.w #$0100                           ; C0973A m0x0
     bcs loc_C096C8                         ; C0973D m0x0
@@ -2758,7 +2758,7 @@ loc_C09729:
     and.w #$00FF                           ; C09746 m0x0
     adc.l $7F0A86,x                        ; C09749 m0x0
     sec                                    ; C0974D m0x0
-    sbc.b $68                              ; C0974E m0x0
+    sbc.b camera_y                         ; C0974E m0x0
     bmi loc_C09777                         ; C09750 m0x0
     cmp.w #$00E0                           ; C09752 m0x0
     bcs loc_C09777                         ; C09755 m0x0
@@ -2773,7 +2773,7 @@ loc_C09729:
 loc_C0976C:
     clc                                    ; C0976C m0x0
     adc.w #$2FF0                           ; C0976D m0x0
-    sta.w $0002,y                          ; C09770 m0x0
+    sta.w dma_pending_mask,y               ; C09770 m0x0
     iny                                    ; C09773 m0x0
     iny                                    ; C09774 m0x0
     iny                                    ; C09775 m0x0
@@ -2789,13 +2789,13 @@ loc_C0977E:
     sty.b oam_write_ptr                    ; C0977E m0x0
     rts                                    ; C09780 m0x0
 
-sub_C09781:
+particle_spawn_random:
     lda.w #$1F00                           ; C09781 m0x0
-    jsr.w sub_C09C16                       ; C09784 m0x0
+    jsr.w vram_generate_particle_tile      ; C09784 m0x0
     ldx.w #$003A                           ; C09787 m0x0
 
 loc_C0978A:
-    jsr.w sub_C0A212                       ; C0978A m0x0
+    jsr.w random_next                      ; C0978A m0x0
     lda.b init_magic_AA55                  ; C0978D m0x0
     and.w #$07FF                           ; C0978F m0x0
     sta.l $7F0A06,x                        ; C09792 m0x0
@@ -2854,7 +2854,7 @@ loc_C097FC:
     jmp.w loc_C0988D                       ; C0980D m0x0
 
 loc_C09810:
-    jsr.w sub_C0A212                       ; C09810 m0x0
+    jsr.w random_next                      ; C09810 m0x0
     lda.b init_magic_AA55                  ; C09813 m0x0
     and.w #$00FF                           ; C09815 m0x0
     sta.l $7F0986,x                        ; C09818 m0x0
@@ -2908,7 +2908,7 @@ loc_C0988D:
     clc                                    ; C09894 m0x0
     adc.l $7F0A06,x                        ; C09895 m0x0
     sec                                    ; C09899 m0x0
-    sbc.b $62                              ; C0989A m0x0
+    sbc.b camera_x                         ; C0989A m0x0
     bmi loc_C098D0                         ; C0989C m0x0
     cmp.w #$0100                           ; C0989E m0x0
     bcs loc_C098D0                         ; C098A1 m0x0
@@ -2917,7 +2917,7 @@ loc_C0988D:
     and.w #$00FF                           ; C098AA m0x0
     adc.l $7F0A86,x                        ; C098AD m0x0
     sec                                    ; C098B1 m0x0
-    sbc.b $68                              ; C098B2 m0x0
+    sbc.b camera_y                         ; C098B2 m0x0
     bmi loc_C098D0                         ; C098B4 m0x0
     cmp.w #$00E0                           ; C098B6 m0x0
     bcs loc_C098D0                         ; C098B9 m0x0
@@ -2926,7 +2926,7 @@ loc_C0988D:
     and.w #$000F                           ; C098C2 m0x0
     clc                                    ; C098C5 m0x0
     adc.w #$29F0                           ; C098C6 m0x0
-    sta.w $0002,y                          ; C098C9 m0x0
+    sta.w dma_pending_mask,y               ; C098C9 m0x0
     iny                                    ; C098CC m0x0
     iny                                    ; C098CD m0x0
     iny                                    ; C098CE m0x0
@@ -2942,39 +2942,39 @@ loc_C098D7:
     sty.b oam_write_ptr                    ; C098D7 m0x0
     rts                                    ; C098D9 m0x0
 
-sub_C098DA:
+entity_update_tick:
     txy                                    ; C098DA m0x0
-    lda.w $0708,x                          ; C098DB m0x0
+    lda.w entity_type,x                    ; C098DB m0x0
     tax                                    ; C098DE m0x0
     jsr.w (jtbl_C099DD,x)                  ; C098DF m0x0
-    lda.w $0768,x                          ; C098E2 m0x0
+    lda.w entity_hitstun_timer,x           ; C098E2 m0x0
     beq loc_C098EA                         ; C098E5 m0x0
-    dec.w $0768,x                          ; C098E7 m0x0
+    dec.w entity_hitstun_timer,x           ; C098E7 m0x0
 
 loc_C098EA:
-    lda.w $0708,x                          ; C098EA m0x0
+    lda.w entity_type,x                    ; C098EA m0x0
     tay                                    ; C098ED m0x0
     pea.w $8080                            ; C098EE m0x0
     plb                                    ; C098F1 m0x0
-    lda.w $0768,x                          ; C098F2 m0x0
+    lda.w entity_hitstun_timer,x           ; C098F2 m0x0
     beq loc_C098FC                         ; C098F5 m0x0
-    lda.w $0888,x                          ; C098F7 m0x0
+    lda.w entity_vel_x_target,x            ; C098F7 m0x0
     bne loc_C0990D                         ; C098FA m0x0
 
 loc_C098FC:
-    lda.w $0728,x                          ; C098FC m0x0
+    lda.w entity_state,x                   ; C098FC m0x0
     clc                                    ; C098FF m0x0
     adc.w $0BAC                            ; C09900 m0x0
     adc.w entity_state_velocity_table,y    ; C09903 m0x0
     tay                                    ; C09906 m0x0
     lda.w entity_state_velocity_table,y    ; C09907 m0x0
-    sta.w $0888,x                          ; C0990A m0x0
+    sta.w entity_vel_x_target,x            ; C0990A m0x0
 
 loc_C0990D:
-    jsr.w sub_C0A232                       ; C0990D m0x0
-    lda.w $09E8,x                          ; C09910 m0x0
+    jsr.w entity_accelerate_velocity_x     ; C0990D m0x0
+    lda.w entity_anim_id,x                 ; C09910 m0x0
     beq loc_C09927                         ; C09913 m0x0
-    lda.w $0728,x                          ; C09915 m0x0
+    lda.w entity_state,x                   ; C09915 m0x0
     cmp.w #$000C                           ; C09918 m0x0
     bcc loc_C09927                         ; C0991B m0x0
     cmp.w #$0024                           ; C0991D m0x0
@@ -2983,29 +2983,29 @@ loc_C0990D:
     bcc loc_C0993D                         ; C09925 m0x0
 
 loc_C09927:
-    lda.w $0868,x                          ; C09927 m0x0
+    lda.w entity_vel_x,x                   ; C09927 m0x0
     bne loc_C09948                         ; C0992A m0x0
-    stz.w $0948,x                          ; C0992C m0x0
+    stz.w entity_vel_y,x                   ; C0992C m0x0
     lda.w #$0000                           ; C0992F m0x0
-    bit.w $0788,x                          ; C09932 m0x0
+    bit.w entity_flags,x                   ; C09932 m0x0
     bvs loc_C0993A                         ; C09935 m0x0
     lda.w #$0002                           ; C09937 m0x0
 
 loc_C0993A:
-    sta.w $0728,x                          ; C0993A m0x0
+    sta.w entity_state,x                   ; C0993A m0x0
 
 loc_C0993D:
-    jsr.w sub_C09BDA                       ; C0993D m0x0
-    lda.w $0788,x                          ; C09940 m0x0
+    jsr.w entity_ground_y_lookup           ; C0993D m0x0
+    lda.w entity_flags,x                   ; C09940 m0x0
     cmp.w #$4000                           ; C09943 m0x0
     bra loc_C0995A                         ; C09946 m0x0
 
 loc_C09948:
-    jsr.w sub_C09BDA                       ; C09948 m0x0
+    jsr.w entity_ground_y_lookup           ; C09948 m0x0
     jsr.w sub_C0A1F3                       ; C0994B m0x0
-    jsr.w sub_C0A26F                       ; C0994E m0x0
-    jsr.w sub_C0A2B9                       ; C09951 m0x0
-    lda.w $0868,x                          ; C09954 m0x0
+    jsr.w entity_apply_velocity_x          ; C0994E m0x0
+    jsr.w entity_apply_velocity_y          ; C09951 m0x0
+    lda.w entity_vel_x,x                   ; C09954 m0x0
     cmp.w #$8000                           ; C09957 m0x0
 
 loc_C0995A:
@@ -3016,26 +3016,26 @@ loc_C0995A:
     and.w #$000E                           ; C09962 m0x0
     asl                                    ; C09965 m0x0
     tay                                    ; C09966 m0x0
-    lda.w $0788,x                          ; C09967 m0x0
+    lda.w entity_flags,x                   ; C09967 m0x0
     and.w #$BFFF                           ; C0996A m0x0
     ora.w facing_flag_table,y              ; C0996D m0x0
-    sta.w $0788,x                          ; C09970 m0x0
-    lda.w $0728,x                          ; C09973 m0x0
+    sta.w entity_flags,x                   ; C09970 m0x0
+    lda.w entity_state,x                   ; C09973 m0x0
     and.w #$FFFC                           ; C09976 m0x0
     ora.w facing_state_bits_table,y        ; C09979 m0x0
-    sta.w $0728,x                          ; C0997C m0x0
-    lda.w $0708,x                          ; C0997F m0x0
+    sta.w entity_state,x                   ; C0997C m0x0
+    lda.w entity_type,x                    ; C0997F m0x0
     tay                                    ; C09982 m0x0
-    lda.w $0728,x                          ; C09983 m0x0
+    lda.w entity_state,x                   ; C09983 m0x0
     clc                                    ; C09986 m0x0
     adc.w $0BAC                            ; C09987 m0x0
     adc.w entity_state_anim_table,y        ; C0998A m0x0
     tay                                    ; C0998D m0x0
     lda.w entity_state_anim_table,y        ; C0998E m0x0
-    sta.w $09E8,x                          ; C09991 m0x0
-    lda.w $0708,x                          ; C09994 m0x0
+    sta.w entity_anim_id,x                 ; C09991 m0x0
+    lda.w entity_type,x                    ; C09994 m0x0
     tay                                    ; C09997 m0x0
-    lda.w $0728,x                          ; C09998 m0x0
+    lda.w entity_state,x                   ; C09998 m0x0
     adc.w $0BAC                            ; C0999B m0x0
     lsr                                    ; C0999E m0x0
     and.w #$FFFE                           ; C0999F m0x0
@@ -3044,7 +3044,7 @@ loc_C0995A:
     lda.w anim_rate_fn_table,y             ; C099A6 m0x0
     beq anim_rate_store                    ; C099A9 m0x0
     sta.b ptr_04                           ; C099AB m0x0
-    lda.w $0868,x                          ; C099AD m0x0
+    lda.w entity_vel_x,x                   ; C099AD m0x0
     bpl loc_C099B6                         ; C099B0 m0x0
     eor.w #$FFFF                           ; C099B2 m0x0
     inc                                    ; C099B5 m0x0
@@ -3088,30 +3088,30 @@ anim_rate_1_2:
     lsr                                    ; C099D3 m0x0
 
 anim_rate_store:
-    sta.w $0A68,x                          ; C099D4 m0x0
+    sta.w entity_anim_rate,x               ; C099D4 m0x0
     plb                                    ; C099D7 m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C099D8 m0x0
     rts                                    ; C099DC m0x0
 
 jtbl_C099DD:
-    dw sub_C09AF6
-    dw sub_C09A61
-    dw sub_C09AB8
-    dw sub_C09B00
-    dw sub_C09B00
-    dw sub_C09B89
-    dw sub_C099EF
-    dw sub_C09A5F
-    dw sub_C09A5F
+    dw entity_animate_only
+    dw entity_apply_hit_reaction
+    dw entity_spawn_transform_a
+    dw entity_spawn_transform_b
+    dw entity_spawn_transform_b
+    dw entity_spawn_transform_c
+    dw entity_ai_chase_player
+    dw entity_ai_none
+    dw entity_ai_none
 
-sub_C099EF:
+entity_ai_chase_player:
     tyx                                    ; C099EF m0x0
-    lda.w $0708,x                          ; C099F0 m0x0
+    lda.w entity_type,x                    ; C099F0 m0x0
     cmp.w #$000C                           ; C099F3 m0x0
     bne loc_C09A51                         ; C099F6 m0x0
-    lda.w $0768,x                          ; C099F8 m0x0
+    lda.w entity_hitstun_timer,x           ; C099F8 m0x0
     bne loc_C09A51                         ; C099FB m0x0
-    lda.w $0728                            ; C099FD m0x0
+    lda.w entity_state                     ; C099FD m0x0
     cmp.w #$000C                           ; C09A00 m0x0
     bcs loc_C09A11                         ; C09A03 m0x0
     lda.w $0748,x                          ; C09A05 m0x0
@@ -3121,9 +3121,9 @@ sub_C099EF:
     bne loc_C09A51                         ; C09A0F m0x0
 
 loc_C09A11:
-    lda.w $0828                            ; C09A11 m0x0
+    lda.w entity_x                         ; C09A11 m0x0
     sec                                    ; C09A14 m0x0
-    sbc.w $0828,x                          ; C09A15 m0x0
+    sbc.w entity_x,x                       ; C09A15 m0x0
     sta.b ptr_04                           ; C09A18 m0x0
     bpl loc_C09A20                         ; C09A1A m0x0
     eor.w #$FFFF                           ; C09A1C m0x0
@@ -3147,8 +3147,8 @@ loc_C09A32:
     inc                                    ; C09A37 m0x0
 
 loc_C09A38:
-    sta.w $0728,x                          ; C09A38 m0x0
-    jsr.w sub_C0A212                       ; C09A3B m0x0
+    sta.w entity_state,x                   ; C09A38 m0x0
+    jsr.w random_next                      ; C09A3B m0x0
     lda.b init_magic_AA55                  ; C09A3E m0x0
     and.w #$003F                           ; C09A40 m0x0
     ora.w #$8000                           ; C09A43 m0x0
@@ -3165,25 +3165,25 @@ loc_C09A51:
 
 loc_C09A52:
     lda.w #$0000                           ; C09A52 m0x0
-    sta.w $0728,x                          ; C09A55 m0x0
+    sta.w entity_state,x                   ; C09A55 m0x0
     lda.w #$0001                           ; C09A58 m0x0
     sta.w $0748,x                          ; C09A5B m0x0
     rts                                    ; C09A5E m0x0
 
-sub_C09A5F:
+entity_ai_none:
     tyx                                    ; C09A5F m0x0
     rts                                    ; C09A60 m0x0
 
-sub_C09A61:
+entity_apply_hit_reaction:
     tyx                                    ; C09A61 m0x0
     lda.b $8A                              ; C09A62 m0x0
     ldy.b $8C                              ; C09A64 m0x0
 
 loc_C09A66:
     sta.b ptr_04                           ; C09A66 m0x0
-    lda.w $0768,x                          ; C09A68 m0x0
+    lda.w entity_hitstun_timer,x           ; C09A68 m0x0
     bne loc_C09AA9                         ; C09A6B m0x0
-    lda.w $0728,x                          ; C09A6D m0x0
+    lda.w entity_state,x                   ; C09A6D m0x0
     cmp.w #$000C                           ; C09A70 m0x0
     bcc loc_C09A7F                         ; C09A73 m0x0
     cmp.w #$0024                           ; C09A75 m0x0
@@ -3209,14 +3209,14 @@ loc_C09A93:
     adc.w #$0004                           ; C09A97 m0x0
 
 loc_C09A9A:
-    sta.w $0728,x                          ; C09A9A m0x0
+    sta.w entity_state,x                   ; C09A9A m0x0
 
 loc_C09A9D:
     tya                                    ; C09A9D m0x0
     bit.w #$8000                           ; C09A9E m0x0
     beq loc_C09AAA                         ; C09AA1 m0x0
     lda.w #$000C                           ; C09AA3 m0x0
-    sta.w $0728,x                          ; C09AA6 m0x0
+    sta.w entity_state,x                   ; C09AA6 m0x0
 
 loc_C09AA9:
     rts                                    ; C09AA9 m0x0
@@ -3226,78 +3226,78 @@ loc_C09AAA:
     and.w #$0300                           ; C09AAC m0x0
     bne loc_C09AB7                         ; C09AAF m0x0
     lda.w #$0000                           ; C09AB1 m0x0
-    sta.w $0728,x                          ; C09AB4 m0x0
+    sta.w entity_state,x                   ; C09AB4 m0x0
 
 loc_C09AB7:
     rts                                    ; C09AB7 m0x0
 
-sub_C09AB8:
+entity_spawn_transform_a:
     tyx                                    ; C09AB8 m0x0
-    lda.w $0968,x                          ; C09AB9 m0x0
+    lda.w entity_parent_index,x            ; C09AB9 m0x0
     tay                                    ; C09ABC m0x0
-    lda.w $0828,y                          ; C09ABD m0x0
-    sta.w $0828,x                          ; C09AC0 m0x0
-    lda.w $08A8,y                          ; C09AC3 m0x0
-    sta.w $08A8,x                          ; C09AC6 m0x0
+    lda.w entity_x,y                       ; C09ABD m0x0
+    sta.w entity_x,x                       ; C09AC0 m0x0
+    lda.w entity_y,y                       ; C09AC3 m0x0
+    sta.w entity_y,x                       ; C09AC6 m0x0
     lda.w $08E8,y                          ; C09AC9 m0x0
     sta.w $08E8,x                          ; C09ACC m0x0
-    lda.w $0788,y                          ; C09ACF m0x0
-    eor.w $0788,x                          ; C09AD2 m0x0
+    lda.w entity_flags,y                   ; C09ACF m0x0
+    eor.w entity_flags,x                   ; C09AD2 m0x0
     and.w #$7000                           ; C09AD5 m0x0
-    eor.w $0788,x                          ; C09AD8 m0x0
-    sta.w $0788,x                          ; C09ADB m0x0
-    lda.w $09E8,y                          ; C09ADE m0x0
+    eor.w entity_flags,x                   ; C09AD8 m0x0
+    sta.w entity_flags,x                   ; C09ADB m0x0
+    lda.w entity_anim_id,y                 ; C09ADE m0x0
     beq loc_C09AE7                         ; C09AE1 m0x0
     clc                                    ; C09AE3 m0x0
     adc.w #$0002                           ; C09AE4 m0x0
 
 loc_C09AE7:
-    sta.w $09E8,x                          ; C09AE7 m0x0
-    lda.w $0A68,y                          ; C09AEA m0x0
-    sta.w $0A68,x                          ; C09AED m0x0
+    sta.w entity_anim_id,x                 ; C09AE7 m0x0
+    lda.w entity_anim_rate,y               ; C09AEA m0x0
+    sta.w entity_anim_rate,x               ; C09AED m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C09AF0 m0x0
     pla                                    ; C09AF4 m0x0
     rts                                    ; C09AF5 m0x0
 
-sub_C09AF6:
+entity_animate_only:
     tyx                                    ; C09AF6 m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C09AF7 m0x0
     pla                                    ; C09AFB m0x0
     rts                                    ; C09AFC m0x0
     incbin "../data/01.bin":$1AFD..$1B00      ; 3 bytes
 
-sub_C09B00:
+entity_spawn_transform_b:
     tyx                                    ; C09B00 m0x0
     lda.w $0BAC                            ; C09B01 m0x0
     bne loc_C09B51                         ; C09B04 m0x0
     lda.b game_mode                        ; C09B06 m0x0
     cmp.w #$0002                           ; C09B08 m0x0
     beq loc_C09B4F                         ; C09B0B m0x0
-    lda.w $0968,x                          ; C09B0D m0x0
+    lda.w entity_parent_index,x            ; C09B0D m0x0
     tay                                    ; C09B10 m0x0
-    lda.w $0828,y                          ; C09B11 m0x0
-    sta.w $0828,x                          ; C09B14 m0x0
+    lda.w entity_x,y                       ; C09B11 m0x0
+    sta.w entity_x,x                       ; C09B14 m0x0
     lda.w $08E8,y                          ; C09B17 m0x0
     clc                                    ; C09B1A m0x0
     adc.w #$0010                           ; C09B1B m0x0
     sta.w $08E8,x                          ; C09B1E m0x0
-    lda.w $08A8,y                          ; C09B21 m0x0
-    sta.w $08A8,x                          ; C09B24 m0x0
-    lda.w $0788,y                          ; C09B27 m0x0
-    eor.w $0788,x                          ; C09B2A m0x0
+    lda.w entity_y,y                       ; C09B21 m0x0
+    sta.w entity_y,x                       ; C09B24 m0x0
+    lda.w entity_flags,y                   ; C09B27 m0x0
+    eor.w entity_flags,x                   ; C09B2A m0x0
     and.w #$4000                           ; C09B2D m0x0
-    eor.w $0788,x                          ; C09B30 m0x0
+    eor.w entity_flags,x                   ; C09B30 m0x0
     ora.w #$8000                           ; C09B33 m0x0
-    sta.w $0788,x                          ; C09B36 m0x0
-    lda.w $09E8,y                          ; C09B39 m0x0
+    sta.w entity_flags,x                   ; C09B36 m0x0
+    lda.w entity_anim_id,y                 ; C09B39 m0x0
     beq loc_C09B42                         ; C09B3C m0x0
     clc                                    ; C09B3E m0x0
     adc.w #$0004                           ; C09B3F m0x0
 
 loc_C09B42:
-    sta.w $09E8,x                          ; C09B42 m0x0
-    lda.w $0A68,y                          ; C09B45 m0x0
-    sta.w $0A68,x                          ; C09B48 m0x0
+    sta.w entity_anim_id,x                 ; C09B42 m0x0
+    lda.w entity_anim_rate,y               ; C09B45 m0x0
+    sta.w entity_anim_rate,x               ; C09B48 m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C09B4B m0x0
 
 loc_C09B4F:
@@ -3305,57 +3305,57 @@ loc_C09B4F:
     rts                                    ; C09B50 m0x0
 
 loc_C09B51:
-    lda.w $0968,x                          ; C09B51 m0x0
+    lda.w entity_parent_index,x            ; C09B51 m0x0
     tay                                    ; C09B54 m0x0
-    lda.w $0828,y                          ; C09B55 m0x0
-    sta.w $0828,x                          ; C09B58 m0x0
+    lda.w entity_x,y                       ; C09B55 m0x0
+    sta.w entity_x,x                       ; C09B58 m0x0
     lda.w $08E8,y                          ; C09B5B m0x0
     sta.w $08E8,x                          ; C09B5E m0x0
-    lda.w $08A8,y                          ; C09B61 m0x0
+    lda.w entity_y,y                       ; C09B61 m0x0
     dec                                    ; C09B64 m0x0
-    sta.w $08A8,x                          ; C09B65 m0x0
-    lda.w $0788,y                          ; C09B68 m0x0
-    eor.w $0788,x                          ; C09B6B m0x0
+    sta.w entity_y,x                       ; C09B65 m0x0
+    lda.w entity_flags,y                   ; C09B68 m0x0
+    eor.w entity_flags,x                   ; C09B6B m0x0
     and.w #$C000                           ; C09B6E m0x0
-    eor.w $0788,x                          ; C09B71 m0x0
-    sta.w $0788,x                          ; C09B74 m0x0
+    eor.w entity_flags,x                   ; C09B71 m0x0
+    sta.w entity_flags,x                   ; C09B74 m0x0
     lda.w #$0158                           ; C09B77 m0x0
-    sta.w $09E8,x                          ; C09B7A m0x0
-    lda.w $0A68,y                          ; C09B7D m0x0
-    sta.w $0A68,x                          ; C09B80 m0x0
+    sta.w entity_anim_id,x                 ; C09B7A m0x0
+    lda.w entity_anim_rate,y               ; C09B7D m0x0
+    sta.w entity_anim_rate,x               ; C09B80 m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C09B83 m0x0
     pla                                    ; C09B87 m0x0
     rts                                    ; C09B88 m0x0
 
-sub_C09B89:
+entity_spawn_transform_c:
     tyx                                    ; C09B89 m0x0
-    lda.w $0968,x                          ; C09B8A m0x0
+    lda.w entity_parent_index,x            ; C09B8A m0x0
     tay                                    ; C09B8D m0x0
-    lda.w $0828,y                          ; C09B8E m0x0
-    sta.w $0828,x                          ; C09B91 m0x0
-    lda.w $08A8,y                          ; C09B94 m0x0
-    sta.w $08A8,x                          ; C09B97 m0x0
+    lda.w entity_x,y                       ; C09B8E m0x0
+    sta.w entity_x,x                       ; C09B91 m0x0
+    lda.w entity_y,y                       ; C09B94 m0x0
+    sta.w entity_y,x                       ; C09B97 m0x0
     lda.w $08E8,y                          ; C09B9A m0x0
     sta.w $08E8,x                          ; C09B9D m0x0
-    lda.w $0788,y                          ; C09BA0 m0x0
-    eor.w $0788,x                          ; C09BA3 m0x0
+    lda.w entity_flags,y                   ; C09BA0 m0x0
+    eor.w entity_flags,x                   ; C09BA3 m0x0
     and.w #$7000                           ; C09BA6 m0x0
-    eor.w $0788,x                          ; C09BA9 m0x0
-    sta.w $0788,x                          ; C09BAC m0x0
+    eor.w entity_flags,x                   ; C09BA9 m0x0
+    sta.w entity_flags,x                   ; C09BAC m0x0
     lda.w $0BB6                            ; C09BAF m0x0
     beq loc_C09BD5                         ; C09BB2 m0x0
     lda.w #$0002                           ; C09BB4 m0x0
     sta.w $07A8,x                          ; C09BB7 m0x0
-    lda.w $09E8,y                          ; C09BBA m0x0
+    lda.w entity_anim_id,y                 ; C09BBA m0x0
     beq loc_C09BC6                         ; C09BBD m0x0
     clc                                    ; C09BBF m0x0
     adc.w #$0004                           ; C09BC0 m0x0
     adc.w $0BB6                            ; C09BC3 m0x0
 
 loc_C09BC6:
-    sta.w $09E8,x                          ; C09BC6 m0x0
-    lda.w $0A68,y                          ; C09BC9 m0x0
-    sta.w $0A68,x                          ; C09BCC m0x0
+    sta.w entity_anim_id,x                 ; C09BC6 m0x0
+    lda.w entity_anim_rate,y               ; C09BC9 m0x0
+    sta.w entity_anim_rate,x               ; C09BCC m0x0
     jsl.l $800000+(anim_update&$FFFF)      ; C09BCF m0x0
     pla                                    ; C09BD3 m0x0
     rts                                    ; C09BD4 m0x0
@@ -3365,9 +3365,9 @@ loc_C09BD5:
     pla                                    ; C09BD8 m0x0
     rts                                    ; C09BD9 m0x0
 
-sub_C09BDA:
+entity_ground_y_lookup:
     txy                                    ; C09BDA m0x0
-    lda.w $0828,x                          ; C09BDB m0x0
+    lda.w entity_x,x                       ; C09BDB m0x0
     bpl loc_C09BE1                         ; C09BDE m0x0
     tdc                                    ; C09BE0 m0x0
 
@@ -3399,21 +3399,21 @@ loc_C09C03:
     lda.l $800000+(data_C0B2FA&$FFFF),x    ; C09C0A m0x0
     beq loc_C09C14                         ; C09C0E m0x0
     tyx                                    ; C09C10 m0x0
-    sta.w $08A8,x                          ; C09C11 m0x0
+    sta.w entity_y,x                       ; C09C11 m0x0
 
 loc_C09C14:
     tyx                                    ; C09C14 m0x0
     rts                                    ; C09C15 m0x0
 
-sub_C09C16:
+vram_generate_particle_tile:
     ldy.w #$0080                           ; C09C16 m0x0
     sty.w VMAIN                            ; C09C19 m0x0
     sta.w VMADDL                           ; C09C1C m0x0
     ldy.w #$0001                           ; C09C1F m0x0
-    jsr.w sub_C09C28                       ; C09C22 m0x0
+    jsr.w vram_write_tile_row_planes       ; C09C22 m0x0
     ldy.w #$000F                           ; C09C25 m0x0
 
-sub_C09C28:
+vram_write_tile_row_planes:
     tdc                                    ; C09C28 m0x0
 
 loc_C09C29:
@@ -3453,11 +3453,11 @@ loc_C09C55:
     bcc loc_C09C29                         ; C09C5F m0x0
     rts                                    ; C09C61 m0x0
 
-sub_C09C62:
+vram_stream_descriptor_dispatch:
     sta.b ptr_04                           ; C09C62 m0x0
     lda.w $0BC6                            ; C09C64 m0x0
     bpl loc_C09C84                         ; C09C67 m0x0
-    lda.b $62                              ; C09C69 m0x0
+    lda.b camera_x                         ; C09C69 m0x0
     xba                                    ; C09C6B m0x0
     and.w #$00FF                           ; C09C6C m0x0
     asl                                    ; C09C6F m0x0
@@ -3554,7 +3554,7 @@ loc_C09D02:
     stz.w $0BCA                            ; C09D2E m0x0
     rts                                    ; C09D31 m0x0
 
-sub_C09D32:
+cgram_upload_queue_flush:
     ldx.w $0B8A                            ; C09D32 m0x0
     beq loc_C09D69                         ; C09D35 m0x0
     lda.w #$2202                           ; C09D37 m0x0
@@ -3583,7 +3583,7 @@ loc_C09D3D:
 loc_C09D69:
     rts                                    ; C09D69 m0x0
 
-sub_C09D6A:
+entity_init_from_table:
     pea.w $8000                            ; C09D6A m0x0
     plb                                    ; C09D6D m0x0
     stz.b $A6                              ; C09D6E m0x0
@@ -3600,10 +3600,10 @@ loc_C09D7B:
     jmp.w loc_C09E28                       ; C09D82 m0x0
 
 loc_C09D85:
-    sta.w $0708,y                          ; C09D85 m0x0
+    sta.w entity_type,y                    ; C09D85 m0x0
     sta.b ptr_04                           ; C09D88 m0x0
     lda.l $800000+(data_C0B4A6&$FFFF),x    ; C09D8A m0x0
-    sta.w $0728,y                          ; C09D8E m0x0
+    sta.w entity_state,y                   ; C09D8E m0x0
     clc                                    ; C09D91 m0x0
     adc.w $0BAC                            ; C09D92 m0x0
     phx                                    ; C09D95 m0x0
@@ -3612,45 +3612,45 @@ loc_C09D85:
     tax                                    ; C09D9C m0x0
     lda.l $800000+(entity_state_anim_table&$FFFF),x   ; C09D9D m0x0
     plx                                    ; C09DA1 m0x0
-    sta.w $09E8,y                          ; C09DA2 m0x0
+    sta.w entity_anim_id,y                 ; C09DA2 m0x0
     lda.l $800000+(data_C0B4A8&$FFFF),x    ; C09DA5 m0x0
     sta.w $07A8,y                          ; C09DA9 m0x0
     lda.l $800000+(data_C0B4AA&$FFFF),x    ; C09DAC m0x0
-    sta.w $0828,y                          ; C09DB0 m0x0
+    sta.w entity_x,y                       ; C09DB0 m0x0
     lda.l $800000+(data_C0B4AC&$FFFF),x    ; C09DB3 m0x0
-    sta.w $08A8,y                          ; C09DB7 m0x0
+    sta.w entity_y,y                       ; C09DB7 m0x0
     lda.l $800000+(data_C0B4AE&$FFFF),x    ; C09DBA m0x0
     sta.w $08E8,y                          ; C09DBE m0x0
     lda.l $800000+(data_C0B4B0&$FFFF),x    ; C09DC1 m0x0
-    sta.w $0788,y                          ; C09DC5 m0x0
+    sta.w entity_flags,y                   ; C09DC5 m0x0
     lda.l $800000+(data_C0B4B2&$FFFF),x    ; C09DC8 m0x0
-    sta.w $0968,y                          ; C09DCC m0x0
+    sta.w entity_parent_index,y            ; C09DCC m0x0
     lda.l $800000+(data_C0B4B4&$FFFF),x    ; C09DCF m0x0
-    sta.w $0768,y                          ; C09DD3 m0x0
-    lda.w $0708,y                          ; C09DD6 m0x0
+    sta.w entity_hitstun_timer,y           ; C09DD3 m0x0
+    lda.w entity_type,y                    ; C09DD6 m0x0
     bne loc_C09DE2                         ; C09DD9 m0x0
     lda.l $800000+(data_C0B4A6&$FFFF),x    ; C09DDB m0x0
-    sta.w $09E8,y                          ; C09DDF m0x0
+    sta.w entity_anim_id,y                 ; C09DDF m0x0
 
 loc_C09DE2:
     tdc                                    ; C09DE2 m0x0
-    sta.w $07C8,y                          ; C09DE3 m0x0
+    sta.w entity_frame_id,y                ; C09DE3 m0x0
     sta.w $07E8,y                          ; C09DE6 m0x0
     sta.w $0808,y                          ; C09DE9 m0x0
     sta.w $0748,y                          ; C09DEC m0x0
-    sta.w $0848,y                          ; C09DEF m0x0
-    sta.w $0868,y                          ; C09DF2 m0x0
-    sta.w $0888,y                          ; C09DF5 m0x0
-    sta.w $08C8,y                          ; C09DF8 m0x0
+    sta.w entity_x_sub,y                   ; C09DEF m0x0
+    sta.w entity_vel_x,y                   ; C09DF2 m0x0
+    sta.w entity_vel_x_target,y            ; C09DF5 m0x0
+    sta.w entity_y_sub,y                   ; C09DF8 m0x0
     sta.w $0908,y                          ; C09DFB m0x0
     sta.w $0928,y                          ; C09DFE m0x0
-    sta.w $0948,y                          ; C09E01 m0x0
-    sta.w $0988,y                          ; C09E04 m0x0
+    sta.w entity_vel_y,y                   ; C09E01 m0x0
+    sta.w entity_depth_key,y               ; C09E04 m0x0
     sta.w $09C8,y                          ; C09E07 m0x0
     sta.w $0A08,y                          ; C09E0A m0x0
     sta.w $0A28,y                          ; C09E0D m0x0
     sta.w $0A48,y                          ; C09E10 m0x0
-    sta.w $0A68,y                          ; C09E13 m0x0
+    sta.w entity_anim_rate,y               ; C09E13 m0x0
     inc.b $A6                              ; C09E16 m0x0
     inc.b $A6                              ; C09E18 m0x0
     iny                                    ; C09E1A m0x0
@@ -3665,33 +3665,33 @@ loc_C09E28:
     tdc                                    ; C09E28 m0x0
 
 loc_C09E29:
-    sta.w $0708,y                          ; C09E29 m0x0
-    sta.w $0728,y                          ; C09E2C m0x0
-    sta.w $0768,y                          ; C09E2F m0x0
+    sta.w entity_type,y                    ; C09E29 m0x0
+    sta.w entity_state,y                   ; C09E2C m0x0
+    sta.w entity_hitstun_timer,y           ; C09E2F m0x0
     sta.w $0748,y                          ; C09E32 m0x0
-    sta.w $09E8,y                          ; C09E35 m0x0
+    sta.w entity_anim_id,y                 ; C09E35 m0x0
     sta.w $07A8,y                          ; C09E38 m0x0
-    sta.w $0828,y                          ; C09E3B m0x0
-    sta.w $08A8,y                          ; C09E3E m0x0
+    sta.w entity_x,y                       ; C09E3B m0x0
+    sta.w entity_y,y                       ; C09E3E m0x0
     sta.w $08E8,y                          ; C09E41 m0x0
-    sta.w $0788,y                          ; C09E44 m0x0
-    sta.w $0968,y                          ; C09E47 m0x0
-    sta.w $07C8,y                          ; C09E4A m0x0
+    sta.w entity_flags,y                   ; C09E44 m0x0
+    sta.w entity_parent_index,y            ; C09E47 m0x0
+    sta.w entity_frame_id,y                ; C09E4A m0x0
     sta.w $07E8,y                          ; C09E4D m0x0
     sta.w $0808,y                          ; C09E50 m0x0
-    sta.w $0848,y                          ; C09E53 m0x0
-    sta.w $0868,y                          ; C09E56 m0x0
-    sta.w $0888,y                          ; C09E59 m0x0
-    sta.w $08C8,y                          ; C09E5C m0x0
+    sta.w entity_x_sub,y                   ; C09E53 m0x0
+    sta.w entity_vel_x,y                   ; C09E56 m0x0
+    sta.w entity_vel_x_target,y            ; C09E59 m0x0
+    sta.w entity_y_sub,y                   ; C09E5C m0x0
     sta.w $0908,y                          ; C09E5F m0x0
     sta.w $0928,y                          ; C09E62 m0x0
-    sta.w $0948,y                          ; C09E65 m0x0
-    sta.w $0988,y                          ; C09E68 m0x0
+    sta.w entity_vel_y,y                   ; C09E65 m0x0
+    sta.w entity_depth_key,y               ; C09E68 m0x0
     sta.w $09C8,y                          ; C09E6B m0x0
     sta.w $0A08,y                          ; C09E6E m0x0
     sta.w $0A28,y                          ; C09E71 m0x0
     sta.w $0A48,y                          ; C09E74 m0x0
-    sta.w $0A68,y                          ; C09E77 m0x0
+    sta.w entity_anim_rate,y               ; C09E77 m0x0
     iny                                    ; C09E7A m0x0
     iny                                    ; C09E7B m0x0
     cpy.w #$0020                           ; C09E7C m0x0
@@ -3701,8 +3701,8 @@ loc_C09E81:
     plb                                    ; C09E81 m0x0
     rts                                    ; C09E82 m0x0
 
-sub_C09E83:
-    lda.b $62                              ; C09E83 m0x0
+build_metatile_column_500:
+    lda.b camera_x                         ; C09E83 m0x0
     and.w #$FFE0                           ; C09E85 m0x0
     ldy.b $82                              ; C09E88 m0x0
     bmi loc_C09E91                         ; C09E8A m0x0
@@ -3718,17 +3718,17 @@ loc_C09E91:
 
 loc_C09E97:
     clc                                    ; C09E97 m0x0
-    adc.b $7A                              ; C09E98 m0x0
+    adc.b tilemap_a_addr                   ; C09E98 m0x0
     sta.b $18                              ; C09E9A m0x0
-    lda.b $7C                              ; C09E9C m0x0
+    lda.b tilemap_a_bank                   ; C09E9C m0x0
     sta.b $1A                              ; C09E9E m0x0
-    lda.b $9A                              ; C09EA0 m0x0
+    lda.b camera_y_lookahead               ; C09EA0 m0x0
     bpl loc_C09EA8                         ; C09EA2 m0x0
-    lda.b $68                              ; C09EA4 m0x0
+    lda.b camera_y                         ; C09EA4 m0x0
     bra loc_C09EAE                         ; C09EA6 m0x0
 
 loc_C09EA8:
-    lda.b $68                              ; C09EA8 m0x0
+    lda.b camera_y                         ; C09EA8 m0x0
     clc                                    ; C09EAA m0x0
     adc.w #$00E0                           ; C09EAB m0x0
 
@@ -3743,18 +3743,18 @@ loc_C09EAE:
     sta.b $18                              ; C09EB8 m0x0
     tya                                    ; C09EBA m0x0
     and.w #$0018                           ; C09EBB m0x0
-    adc.b $7E                              ; C09EBE m0x0
+    adc.b tilemap_b_addr                   ; C09EBE m0x0
     sta.b $1C                              ; C09EC0 m0x0
     tya                                    ; C09EC2 m0x0
     and.w #$0018                           ; C09EC3 m0x0
     eor.w #$0018                           ; C09EC6 m0x0
-    adc.b $7E                              ; C09EC9 m0x0
+    adc.b tilemap_b_addr                   ; C09EC9 m0x0
     sta.b $1E                              ; C09ECB m0x0
     phk                                    ; C09ECD m0x0
     ldx.w #$06C0                           ; C09ECE m0x0
 
 loc_C09ED1:
-    lda.b $80                              ; C09ED1 m0x0
+    lda.b metatile_data_bank               ; C09ED1 m0x0
     pha                                    ; C09ED3 m0x0
     plb                                    ; C09ED4 m0x0
     plb                                    ; C09ED5 m0x0
@@ -3771,8 +3771,8 @@ loc_C09ED1:
     tay                                    ; C09EE6 m0x0
     lda.w nmi_handler_ptr,y                ; C09EE7 m0x0
     sta.b nmi_handler_ptr,x                ; C09EEA m0x0
-    lda.w $0002,y                          ; C09EEC m0x0
-    sta.b $02,x                            ; C09EEF m0x0
+    lda.w dma_pending_mask,y               ; C09EEC m0x0
+    sta.b dma_pending_mask,x               ; C09EEF m0x0
     lda.w ptr_04,y                         ; C09EF1 m0x0
     sta.b ptr_04,x                         ; C09EF4 m0x0
     lda.w $0006,y                          ; C09EF6 m0x0
@@ -3805,8 +3805,8 @@ loc_C09F11:
     sta.b nmi_handler_ptr,x                ; C09F1F m0x0
     lda.w ptr_04,y                         ; C09F21 m0x0
     eor.w #$4000                           ; C09F24 m0x0
-    sta.b $02,x                            ; C09F27 m0x0
-    lda.w $0002,y                          ; C09F29 m0x0
+    sta.b dma_pending_mask,x               ; C09F27 m0x0
+    lda.w dma_pending_mask,y               ; C09F29 m0x0
     eor.w #$4000                           ; C09F2C m0x0
     sta.b ptr_04,x                         ; C09F2F m0x0
     lda.w nmi_handler_ptr,y                ; C09F31 m0x0
@@ -3826,9 +3826,9 @@ loc_C09F39:
     lda.w nmi_handler_ptr,y                ; C09F46 m0x0
     eor.w #$8000                           ; C09F49 m0x0
     sta.b nmi_handler_ptr,x                ; C09F4C m0x0
-    lda.w $0002,y                          ; C09F4E m0x0
+    lda.w dma_pending_mask,y               ; C09F4E m0x0
     eor.w #$8000                           ; C09F51 m0x0
-    sta.b $02,x                            ; C09F54 m0x0
+    sta.b dma_pending_mask,x               ; C09F54 m0x0
     lda.w ptr_04,y                         ; C09F56 m0x0
     eor.w #$8000                           ; C09F59 m0x0
     sta.b ptr_04,x                         ; C09F5C m0x0
@@ -3849,8 +3849,8 @@ loc_C09F66:
     sta.b nmi_handler_ptr,x                ; C09F74 m0x0
     lda.w ptr_04,y                         ; C09F76 m0x0
     eor.w #$C000                           ; C09F79 m0x0
-    sta.b $02,x                            ; C09F7C m0x0
-    lda.w $0002,y                          ; C09F7E m0x0
+    sta.b dma_pending_mask,x               ; C09F7C m0x0
+    lda.w dma_pending_mask,y               ; C09F7E m0x0
     eor.w #$C000                           ; C09F81 m0x0
     sta.b ptr_04,x                         ; C09F84 m0x0
     lda.w nmi_handler_ptr,y                ; C09F86 m0x0
@@ -3858,7 +3858,7 @@ loc_C09F66:
     jmp.w loc_C09EF9                       ; C09F8C m0x0
 
 loc_C09F8F:
-    lda.b $62                              ; C09F8F m0x0
+    lda.b camera_x                         ; C09F8F m0x0
     and.w #$01F8                           ; C09F91 m0x0
     lsr                                    ; C09F94 m0x0
     lsr                                    ; C09F95 m0x0
@@ -3883,14 +3883,14 @@ loc_C09FA1:
     bne loc_C09FA1                         ; C09FB4 m0x0
     rts                                    ; C09FB6 m0x0
 
-sub_C09FB7:
-    lda.b $98                              ; C09FB7 m0x0
+build_metatile_column_580:
+    lda.b layer_parallax_mode              ; C09FB7 m0x0
     bpl loc_C09FBF                         ; C09FB9 m0x0
-    lda.b $62                              ; C09FBB m0x0
+    lda.b camera_x                         ; C09FBB m0x0
     bra loc_C09FC5                         ; C09FBD m0x0
 
 loc_C09FBF:
-    lda.b $62                              ; C09FBF m0x0
+    lda.b camera_x                         ; C09FBF m0x0
     clc                                    ; C09FC1 m0x0
     adc.w #$0100                           ; C09FC2 m0x0
 
@@ -3911,11 +3911,11 @@ loc_C09FD2:
 
 loc_C09FD8:
     clc                                    ; C09FD8 m0x0
-    adc.b $7A                              ; C09FD9 m0x0
+    adc.b tilemap_a_addr                   ; C09FD9 m0x0
     sta.b $18                              ; C09FDB m0x0
-    lda.b $7C                              ; C09FDD m0x0
+    lda.b tilemap_a_bank                   ; C09FDD m0x0
     sta.b $1A                              ; C09FDF m0x0
-    lda.b $68                              ; C09FE1 m0x0
+    lda.b camera_y                         ; C09FE1 m0x0
     and.w #$FFE0                           ; C09FE3 m0x0
     lsr                                    ; C09FE6 m0x0
     lsr                                    ; C09FE7 m0x0
@@ -3928,20 +3928,20 @@ loc_C09FD8:
     and.w #$0018                           ; C09FF0 m0x0
     lsr                                    ; C09FF3 m0x0
     lsr                                    ; C09FF4 m0x0
-    adc.b $7E                              ; C09FF5 m0x0
+    adc.b tilemap_b_addr                   ; C09FF5 m0x0
     sta.b $1C                              ; C09FF7 m0x0
     tya                                    ; C09FF9 m0x0
     and.w #$0018                           ; C09FFA m0x0
     eor.w #$0018                           ; C09FFD m0x0
     lsr                                    ; C0A000 m0x0
     lsr                                    ; C0A001 m0x0
-    adc.b $7E                              ; C0A002 m0x0
+    adc.b tilemap_b_addr                   ; C0A002 m0x0
     sta.b $1E                              ; C0A004 m0x0
     phk                                    ; C0A006 m0x0
     ldx.w #$06C0                           ; C0A007 m0x0
 
 loc_C0A00A:
-    lda.b $80                              ; C0A00A m0x0
+    lda.b metatile_data_bank               ; C0A00A m0x0
     pha                                    ; C0A00C m0x0
     plb                                    ; C0A00D m0x0
     plb                                    ; C0A00E m0x0
@@ -3959,7 +3959,7 @@ loc_C0A00A:
     lda.w nmi_handler_ptr,y                ; C0A020 m0x0
     sta.b nmi_handler_ptr,x                ; C0A023 m0x0
     lda.w $0008,y                          ; C0A025 m0x0
-    sta.b $02,x                            ; C0A028 m0x0
+    sta.b dma_pending_mask,x               ; C0A028 m0x0
     lda.w $0010,y                          ; C0A02A m0x0
     sta.b ptr_04,x                         ; C0A02D m0x0
     lda.w $0018,y                          ; C0A02F m0x0
@@ -3992,7 +3992,7 @@ loc_C0A04B:
     sta.b nmi_handler_ptr,x                ; C0A059 m0x0
     lda.w $0008,y                          ; C0A05B m0x0
     eor.w #$4000                           ; C0A05E m0x0
-    sta.b $02,x                            ; C0A061 m0x0
+    sta.b dma_pending_mask,x               ; C0A061 m0x0
     lda.w $0010,y                          ; C0A063 m0x0
     eor.w #$4000                           ; C0A066 m0x0
     sta.b ptr_04,x                         ; C0A069 m0x0
@@ -4015,7 +4015,7 @@ loc_C0A073:
     sta.b nmi_handler_ptr,x                ; C0A086 m0x0
     lda.w $0010,y                          ; C0A088 m0x0
     eor.w #$8000                           ; C0A08B m0x0
-    sta.b $02,x                            ; C0A08E m0x0
+    sta.b dma_pending_mask,x               ; C0A08E m0x0
     lda.w $0008,y                          ; C0A090 m0x0
     eor.w #$8000                           ; C0A093 m0x0
     sta.b ptr_04,x                         ; C0A096 m0x0
@@ -4036,7 +4036,7 @@ loc_C0A0A0:
     sta.b nmi_handler_ptr,x                ; C0A0AE m0x0
     lda.w $0010,y                          ; C0A0B0 m0x0
     eor.w #$C000                           ; C0A0B3 m0x0
-    sta.b $02,x                            ; C0A0B6 m0x0
+    sta.b dma_pending_mask,x               ; C0A0B6 m0x0
     lda.w $0008,y                          ; C0A0B8 m0x0
     eor.w #$C000                           ; C0A0BB m0x0
     sta.b ptr_04,x                         ; C0A0BE m0x0
@@ -4045,7 +4045,7 @@ loc_C0A0A0:
     jmp.w loc_C0A032                       ; C0A0C6 m0x0
 
 loc_C0A0C9:
-    lda.b $68                              ; C0A0C9 m0x0
+    lda.b camera_y                         ; C0A0C9 m0x0
     and.w #$00F8                           ; C0A0CB m0x0
     lsr                                    ; C0A0CE m0x0
     lsr                                    ; C0A0CF m0x0
@@ -4070,18 +4070,18 @@ loc_C0A0DB:
     bne loc_C0A0DB                         ; C0A0EE m0x0
     rts                                    ; C0A0F0 m0x0
 
-sub_C0A0F1:
+vram_upload_column_580:
     sep.b #$20                             ; C0A0F1 m0x0
     lda.b #$81                             ; C0A0F3 m1x0
     sta.w VMAIN                            ; C0A0F5 m1x0
     rep.b #$20                             ; C0A0F8 m1x0
-    lda.b $98                              ; C0A0FA m0x0
+    lda.b layer_parallax_mode              ; C0A0FA m0x0
     bpl loc_C0A102                         ; C0A0FC m0x0
-    lda.b $62                              ; C0A0FE m0x0
+    lda.b camera_x                         ; C0A0FE m0x0
     bra loc_C0A108                         ; C0A100 m0x0
 
 loc_C0A102:
-    lda.b $62                              ; C0A102 m0x0
+    lda.b camera_x                         ; C0A102 m0x0
     clc                                    ; C0A104 m0x0
     adc.w #$0100                           ; C0A105 m0x0
 
@@ -4116,14 +4116,14 @@ loc_C0A117:
     rep.b #$20                             ; C0A145 m1x0
     rts                                    ; C0A147 m0x0
 
-sub_C0A148:
-    lda.b $9A                              ; C0A148 m0x0
+vram_upload_column_500:
+    lda.b camera_y_lookahead               ; C0A148 m0x0
     bpl loc_C0A150                         ; C0A14A m0x0
-    lda.b $68                              ; C0A14C m0x0
+    lda.b camera_y                         ; C0A14C m0x0
     bra loc_C0A156                         ; C0A14E m0x0
 
 loc_C0A150:
-    lda.b $68                              ; C0A150 m0x0
+    lda.b camera_y                         ; C0A150 m0x0
     clc                                    ; C0A152 m0x0
     adc.w #$00E0                           ; C0A153 m0x0
 
@@ -4165,54 +4165,54 @@ loc_C0A156:
     rep.b #$20                             ; C0A1AD m1x0
     rts                                    ; C0A1AF m0x0
 
-sub_C0A1B0:
-    lda.w $0828                            ; C0A1B0 m0x0
+camera_follow_player:
+    lda.w entity_x                         ; C0A1B0 m0x0
     sec                                    ; C0A1B3 m0x0
     sbc.w #$0080                           ; C0A1B4 m0x0
     bpl loc_C0A1BC                         ; C0A1B7 m0x0
     lda.w #$0000                           ; C0A1B9 m0x0
 
 loc_C0A1BC:
-    cmp.b $86                              ; C0A1BC m0x0
+    cmp.b level_width_mask                 ; C0A1BC m0x0
     bcc loc_C0A1C2                         ; C0A1BE m0x0
-    lda.b $86                              ; C0A1C0 m0x0
+    lda.b level_width_mask                 ; C0A1C0 m0x0
 
 loc_C0A1C2:
     sec                                    ; C0A1C2 m0x0
-    sbc.b $62                              ; C0A1C3 m0x0
-    sta.b $98                              ; C0A1C5 m0x0
+    sbc.b camera_x                         ; C0A1C3 m0x0
+    sta.b layer_parallax_mode              ; C0A1C5 m0x0
     clc                                    ; C0A1C7 m0x0
-    adc.b $62                              ; C0A1C8 m0x0
-    sta.b $62                              ; C0A1CA m0x0
+    adc.b camera_x                         ; C0A1C8 m0x0
+    sta.b camera_x                         ; C0A1CA m0x0
     lda.b game_mode                        ; C0A1CC m0x0
     cmp.w #$0001                           ; C0A1CE m0x0
     beq loc_C0A1F2                         ; C0A1D1 m0x0
-    lda.w $08A8                            ; C0A1D3 m0x0
+    lda.w entity_y                         ; C0A1D3 m0x0
     sec                                    ; C0A1D6 m0x0
     sbc.w #$0020                           ; C0A1D7 m0x0
     bpl loc_C0A1DF                         ; C0A1DA m0x0
     lda.w #$0000                           ; C0A1DC m0x0
 
 loc_C0A1DF:
-    cmp.b $88                              ; C0A1DF m0x0
+    cmp.b level_height_mask                ; C0A1DF m0x0
     bcc loc_C0A1E5                         ; C0A1E1 m0x0
-    lda.b $88                              ; C0A1E3 m0x0
+    lda.b level_height_mask                ; C0A1E3 m0x0
 
 loc_C0A1E5:
     sec                                    ; C0A1E5 m0x0
-    sbc.b $68                              ; C0A1E6 m0x0
+    sbc.b camera_y                         ; C0A1E6 m0x0
     clc                                    ; C0A1E8 m0x0
     adc.b $74                              ; C0A1E9 m0x0
-    sta.b $9A                              ; C0A1EB m0x0
+    sta.b camera_y_lookahead               ; C0A1EB m0x0
     clc                                    ; C0A1ED m0x0
-    adc.b $68                              ; C0A1EE m0x0
-    sta.b $68                              ; C0A1F0 m0x0
+    adc.b camera_y                         ; C0A1EE m0x0
+    sta.b camera_y                         ; C0A1F0 m0x0
 
 loc_C0A1F2:
     rts                                    ; C0A1F2 m0x0
 
 sub_C0A1F3:
-    lda.w $0868,x                          ; C0A1F3 m0x0
+    lda.w entity_vel_x,x                   ; C0A1F3 m0x0
     eor.w #$FFFF                           ; C0A1F6 m0x0
     inc                                    ; C0A1F9 m0x0
     cmp.w #$8000                           ; C0A1FA m0x0
@@ -4229,10 +4229,10 @@ loc_C0A20A:
     inc                                    ; C0A20D m0x0
 
 loc_C0A20E:
-    sta.w $0948,x                          ; C0A20E m0x0
+    sta.w entity_vel_y,x                   ; C0A20E m0x0
     rts                                    ; C0A211 m0x0
 
-sub_C0A212:
+random_next:
     sep.b #$20                             ; C0A212 m0x0
     lda.b $9D                              ; C0A214 m1x0
     pha                                    ; C0A216 m1x0
@@ -4253,21 +4253,21 @@ sub_C0A212:
     rep.b #$20                             ; C0A22F m1x0
     rts                                    ; C0A231 m0x0
 
-sub_C0A232:
-    lda.w $0888,x                          ; C0A232 m0x0
+entity_accelerate_velocity_x:
+    lda.w entity_vel_x_target,x            ; C0A232 m0x0
     bne loc_C0A247                         ; C0A235 m0x0
-    lda.w $0868,x                          ; C0A237 m0x0
+    lda.w entity_vel_x,x                   ; C0A237 m0x0
     clc                                    ; C0A23A m0x0
     adc.w #$0100                           ; C0A23B m0x0
     cmp.w #$0200                           ; C0A23E m0x0
     bcs loc_C0A247                         ; C0A241 m0x0
-    stz.w $0868,x                          ; C0A243 m0x0
+    stz.w entity_vel_x,x                   ; C0A243 m0x0
     rts                                    ; C0A246 m0x0
 
 loc_C0A247:
-    lda.w $0888,x                          ; C0A247 m0x0
+    lda.w entity_vel_x_target,x            ; C0A247 m0x0
     sec                                    ; C0A24A m0x0
-    sbc.w $0868,x                          ; C0A24B m0x0
+    sbc.w entity_vel_x,x                   ; C0A24B m0x0
     beq loc_C0A263                         ; C0A24E m0x0
     bmi loc_C0A264                         ; C0A250 m0x0
     lsr                                    ; C0A252 m0x0
@@ -4276,15 +4276,15 @@ loc_C0A247:
 
 loc_C0A255:
     bne loc_C0A25C                         ; C0A255 m0x0
-    lda.w $0888,x                          ; C0A257 m0x0
+    lda.w entity_vel_x_target,x            ; C0A257 m0x0
     bra loc_C0A260                         ; C0A25A m0x0
 
 loc_C0A25C:
     clc                                    ; C0A25C m0x0
-    adc.w $0868,x                          ; C0A25D m0x0
+    adc.w entity_vel_x,x                   ; C0A25D m0x0
 
 loc_C0A260:
-    sta.w $0868,x                          ; C0A260 m0x0
+    sta.w entity_vel_x,x                   ; C0A260 m0x0
 
 loc_C0A263:
     rts                                    ; C0A263 m0x0
@@ -4299,13 +4299,13 @@ loc_C0A264:
     cmp.w #$FFFF                           ; C0A26A m0x0
     bra loc_C0A255                         ; C0A26D m0x0
 
-sub_C0A26F:
+entity_apply_velocity_x:
     ldy.w #$0000                           ; C0A26F m0x0
     lda.w $0867,x                          ; C0A272 m0x0
     and.w #$FF00                           ; C0A275 m0x0
     clc                                    ; C0A278 m0x0
-    adc.w $0848,x                          ; C0A279 m0x0
-    sta.w $0848,x                          ; C0A27C m0x0
+    adc.w entity_x_sub,x                   ; C0A279 m0x0
+    sta.w entity_x_sub,x                   ; C0A27C m0x0
     lda.w $0869,x                          ; C0A27F m0x0
     and.w #$00FF                           ; C0A282 m0x0
     bit.w #$0080                           ; C0A285 m0x0
@@ -4313,8 +4313,8 @@ sub_C0A26F:
     ora.w #$FF00                           ; C0A28A m0x0
 
 loc_C0A28D:
-    adc.w $0828,x                          ; C0A28D m0x0
-    sta.w $0828,x                          ; C0A290 m0x0
+    adc.w entity_x,x                       ; C0A28D m0x0
+    sta.w entity_x,x                       ; C0A290 m0x0
     rts                                    ; C0A293 m0x0
 
 orphan_C0A294:
@@ -4335,13 +4335,13 @@ loc_C0A2B2:
     sta.w $08E8,x                          ; C0A2B5 m0x0
     rts                                    ; C0A2B8 m0x0
 
-sub_C0A2B9:
+entity_apply_velocity_y:
     ldy.w #$0000                           ; C0A2B9 m0x0
     lda.w $0947,x                          ; C0A2BC m0x0
     and.w #$FF00                           ; C0A2BF m0x0
     clc                                    ; C0A2C2 m0x0
-    adc.w $08C8,x                          ; C0A2C3 m0x0
-    sta.w $08C8,x                          ; C0A2C6 m0x0
+    adc.w entity_y_sub,x                   ; C0A2C3 m0x0
+    sta.w entity_y_sub,x                   ; C0A2C6 m0x0
     lda.w $0949,x                          ; C0A2C9 m0x0
     and.w #$00FF                           ; C0A2CC m0x0
     bit.w #$0080                           ; C0A2CF m0x0
@@ -4349,8 +4349,8 @@ sub_C0A2B9:
     ora.w #$FF00                           ; C0A2D4 m0x0
 
 loc_C0A2D7:
-    adc.w $08A8,x                          ; C0A2D7 m0x0
-    sta.w $08A8,x                          ; C0A2DA m0x0
+    adc.w entity_y,x                       ; C0A2D7 m0x0
+    sta.w entity_y,x                       ; C0A2DA m0x0
     rts                                    ; C0A2DD m0x0
 
 read_joypads:
@@ -4527,7 +4527,7 @@ unused_vec:
     rti                                    ; C0A442 m1x1
     incbin "../data/01.bin":$2443..$2445      ; 2 bytes
 
-sub_C0A445:
+dma_fill_vram_zero:
     sta.w VMADDL                           ; C0A445 m0x0
     lda.w #$A443                           ; C0A448 m0x0
     sta.w A1TL0                            ; C0A44B m0x0
@@ -4543,7 +4543,7 @@ sub_C0A445:
     rep.b #$20                             ; C0A467 m1x0
     rts                                    ; C0A469 m0x0
 
-sub_C0A46A:
+dma_upload_to_vram:
     sta.w A1TL0                            ; C0A46A m0x0
     sty.w DASL0                            ; C0A46D m0x0
     lda.w #$1801                           ; C0A470 m0x0
@@ -4555,7 +4555,7 @@ sub_C0A46A:
     rep.b #$30                             ; C0A480 m1x1
     rts                                    ; C0A482 m0x0
 
-sub_C0A483:
+dma_upload_to_cgram:
     sta.w A1TL0                            ; C0A483 m0x0
     txa                                    ; C0A486 m0x0
     asl                                    ; C0A487 m0x0
@@ -4574,7 +4574,7 @@ sub_C0A483:
     rep.b #$20                             ; C0A4A3 m1x0
     rts                                    ; C0A4A5 m0x0
 
-sub_C0A4A6:
+set_bg_scroll_prep:
     sep.b #$20                             ; C0A4A6 m0x0
 
 set_bg_scroll:
@@ -4646,12 +4646,12 @@ clear_sprite_table:
     stz.w $041E                            ; C0A52D m0x0
     lda.w #$0200                           ; C0A530 m0x0
     sta.b oam_write_ptr                    ; C0A533 m0x0
-    stz.b $96                              ; C0A535 m0x0
+    stz.b entity_render_index              ; C0A535 m0x0
     rts                                    ; C0A537 m0x0
 
-sub_C0A538:
+entity_build_oam_frame:
     lda.w #$0400                           ; C0A538 m0x0
-    sta.b $54                              ; C0A53B m0x0
+    sta.b oam_entry_ptr                    ; C0A53B m0x0
 
 loc_C0A53D:
     lda.b oam_write_ptr                    ; C0A53D m0x0
@@ -4669,8 +4669,8 @@ loc_C0A53D:
 loc_C0A553:
     phk                                    ; C0A553 m0x0
     plb                                    ; C0A554 m0x0
-    ldy.b $96                              ; C0A555 m0x0
-    lda.w $09A8,y                          ; C0A557 m0x0
+    ldy.b entity_render_index              ; C0A555 m0x0
+    lda.w entity_render_order,y            ; C0A557 m0x0
     tay                                    ; C0A55A m0x0
     lda.w $07A8,y                          ; C0A55B m0x0
     bne loc_C0A563                         ; C0A55E m0x0
@@ -4679,40 +4679,40 @@ loc_C0A560:
     jmp.w loc_C0A6BF                       ; C0A560 m0x0
 
 loc_C0A563:
-    ldx.w $07C8,y                          ; C0A563 m0x0
+    ldx.w entity_frame_id,y                ; C0A563 m0x0
     txa                                    ; C0A566 m0x0
     sta.w $07E8,y                          ; C0A567 m0x0
     beq loc_C0A560                         ; C0A56A m0x0
     lda.l data_C40000,x                    ; C0A56C m0x0
-    sta.b $26                              ; C0A570 m0x0
+    sta.b sprite_frame_ptr                 ; C0A570 m0x0
     inc                                    ; C0A572 m0x0
-    sta.b $2A                              ; C0A573 m0x0
+    sta.b sprite_frame_ptr2                ; C0A573 m0x0
     lda.l data_C40002,x                    ; C0A575 m0x0
-    sta.b $28                              ; C0A579 m0x0
-    sta.b $2C                              ; C0A57B m0x0
+    sta.b sprite_frame_bank                ; C0A579 m0x0
+    sta.b sprite_frame_bank2               ; C0A57B m0x0
     xba                                    ; C0A57D m0x0
     and.w #$00FF                           ; C0A57E m0x0
     clc                                    ; C0A581 m0x0
-    adc.w $08A8,y                          ; C0A582 m0x0
-    sta.w $0988,y                          ; C0A585 m0x0
+    adc.w entity_y,y                       ; C0A582 m0x0
+    sta.w entity_depth_key,y               ; C0A585 m0x0
     lda.w $08E8,y                          ; C0A588 m0x0
     clc                                    ; C0A58B m0x0
-    adc.w $08A8,y                          ; C0A58C m0x0
+    adc.w entity_y,y                       ; C0A58C m0x0
     sec                                    ; C0A58F m0x0
     sbc.w #$0100                           ; C0A590 m0x0
     sec                                    ; C0A593 m0x0
-    sbc.b $68                              ; C0A594 m0x0
+    sbc.b camera_y                         ; C0A594 m0x0
     sec                                    ; C0A596 m0x0
     sbc.b $76                              ; C0A597 m0x0
     clc                                    ; C0A599 m0x0
     adc.b $92                              ; C0A59A m0x0
-    sta.b $4E                              ; C0A59C m0x0
+    sta.b entity_screen_y                  ; C0A59C m0x0
     adc.w #$0090                           ; C0A59E m0x0
     cmp.w #$0130                           ; C0A5A1 m0x0
     bcs loc_C0A560                         ; C0A5A4 m0x0
-    lda.w $0828,y                          ; C0A5A6 m0x0
-    sbc.b $62                              ; C0A5A9 m0x0
-    sta.b $4C                              ; C0A5AB m0x0
+    lda.w entity_x,y                       ; C0A5A6 m0x0
+    sbc.b camera_x                         ; C0A5A9 m0x0
+    sta.b entity_screen_x                  ; C0A5AB m0x0
     clc                                    ; C0A5AD m0x0
     adc.w #$0030                           ; C0A5AE m0x0
     cmp.w #$0160                           ; C0A5B1 m0x0
@@ -4720,72 +4720,72 @@ loc_C0A563:
     jmp.w loc_C0A6BF                       ; C0A5B6 m0x0
 
 loc_C0A5B9:
-    lda.w $0788,y                          ; C0A5B9 m0x0
+    lda.w entity_flags,y                   ; C0A5B9 m0x0
     sta.b $18                              ; C0A5BC m0x0
     sta.b $1A                              ; C0A5BE m0x0
     bit.w #$8000                           ; C0A5C0 m0x0
     bne loc_C0A60A                         ; C0A5C3 m0x0
     bit.w #$4000                           ; C0A5C5 m0x0
     bne loc_C0A5EA                         ; C0A5C8 m0x0
-    lda.b $4C                              ; C0A5CA m0x0
+    lda.b entity_screen_x                  ; C0A5CA m0x0
     sec                                    ; C0A5CC m0x0
     sbc.w #$0080                           ; C0A5CD m0x0
-    sta.b $4C                              ; C0A5D0 m0x0
-    lda.b $4E                              ; C0A5D2 m0x0
+    sta.b entity_screen_x                  ; C0A5D0 m0x0
+    lda.b entity_screen_y                  ; C0A5D2 m0x0
     clc                                    ; C0A5D4 m0x0
     adc.w #$0010                           ; C0A5D5 m0x0
-    sta.b $4E                              ; C0A5D8 m0x0
+    sta.b entity_screen_y                  ; C0A5D8 m0x0
     cpx.w #$0004                           ; C0A5DA m0x0
     bcs loc_C0A5E5                         ; C0A5DD m0x0
-    jsr.w sub_C0A757                       ; C0A5DF m0x0
+    jsr.w oam_emit_frame_1row              ; C0A5DF m0x0
     jmp.w loc_C0A6BF                       ; C0A5E2 m0x0
 
 loc_C0A5E5:
-    jsr.w sub_C0A772                       ; C0A5E5 m0x0
+    jsr.w oam_emit_frame_2row              ; C0A5E5 m0x0
     bra loc_C0A62B                         ; C0A5E8 m0x0
 
 loc_C0A5EA:
-    lda.b $4C                              ; C0A5EA m0x0
+    lda.b entity_screen_x                  ; C0A5EA m0x0
     sec                                    ; C0A5EC m0x0
     sbc.w #$008F                           ; C0A5ED m0x0
-    sta.b $4C                              ; C0A5F0 m0x0
-    lda.b $4E                              ; C0A5F2 m0x0
+    sta.b entity_screen_x                  ; C0A5F0 m0x0
+    lda.b entity_screen_y                  ; C0A5F2 m0x0
     clc                                    ; C0A5F4 m0x0
     adc.w #$0010                           ; C0A5F5 m0x0
-    sta.b $4E                              ; C0A5F8 m0x0
+    sta.b entity_screen_y                  ; C0A5F8 m0x0
     cpx.w #$0004                           ; C0A5FA m0x0
     bcs loc_C0A605                         ; C0A5FD m0x0
-    jsr.w sub_C0A8F6                       ; C0A5FF m0x0
+    jsr.w oam_emit_frame_1row_flip         ; C0A5FF m0x0
     jmp.w loc_C0A6BF                       ; C0A602 m0x0
 
 loc_C0A605:
-    jsr.w sub_C0A911                       ; C0A605 m0x0
+    jsr.w oam_emit_frame_2row_flip         ; C0A605 m0x0
     bra loc_C0A62B                         ; C0A608 m0x0
 
 loc_C0A60A:
     bit.w #$4000                           ; C0A60A m0x0
     bne loc_C0A61E                         ; C0A60D m0x0
-    lda.b $4C                              ; C0A60F m0x0
+    lda.b entity_screen_x                  ; C0A60F m0x0
     sec                                    ; C0A611 m0x0
     sbc.w #$0080                           ; C0A612 m0x0
-    sta.b $4C                              ; C0A615 m0x0
-    inc.b $4E                              ; C0A617 m0x0
-    jsr.w sub_C0AAAA                       ; C0A619 m0x0
+    sta.b entity_screen_x                  ; C0A615 m0x0
+    inc.b entity_screen_y                  ; C0A617 m0x0
+    jsr.w oam_emit_frame_3row              ; C0A619 m0x0
     bra loc_C0A62B                         ; C0A61C m0x0
 
 loc_C0A61E:
-    lda.b $4C                              ; C0A61E m0x0
+    lda.b entity_screen_x                  ; C0A61E m0x0
     sec                                    ; C0A620 m0x0
     sbc.w #$008F                           ; C0A621 m0x0
-    sta.b $4C                              ; C0A624 m0x0
-    inc.b $4E                              ; C0A626 m0x0
-    jsr.w sub_C0AC40                       ; C0A628 m0x0
+    sta.b entity_screen_x                  ; C0A624 m0x0
+    inc.b entity_screen_y                  ; C0A626 m0x0
+    jsr.w oam_emit_frame_3row_flip         ; C0A628 m0x0
 
 loc_C0A62B:
-    ldx.b $96                              ; C0A62B m0x0
-    lda.w $09A8,x                          ; C0A62D m0x0
+    ldx.b entity_render_index              ; C0A62B m0x0
+    lda.w entity_render_order,x            ; C0A62D m0x0
     tax                                    ; C0A630 m0x0
-    lda.w $07C8,x                          ; C0A631 m0x0
+    lda.w entity_frame_id,x                ; C0A631 m0x0
     cmp.w $0808,x                          ; C0A634 m0x0
     bne loc_C0A63C                         ; C0A637 m0x0
     jmp.w loc_C0A6BF                       ; C0A639 m0x0
@@ -4795,7 +4795,7 @@ loc_C0A63C:
     ldx.w $0A88                            ; C0A63F m0x0
     tya                                    ; C0A642 m0x0
     clc                                    ; C0A643 m0x0
-    adc.b $26                              ; C0A644 m0x0
+    adc.b sprite_frame_ptr                 ; C0A644 m0x0
     tay                                    ; C0A646 m0x0
     sta.w $0A8E,x                          ; C0A647 m0x0
     lda.b $21                              ; C0A64A m0x0
@@ -4818,7 +4818,7 @@ loc_C0A63C:
     asl                                    ; C0A665 m0x0
     asl                                    ; C0A666 m0x0
     sta.w $0A8C,x                          ; C0A667 m0x0
-    lda.b $28                              ; C0A66A m0x0
+    lda.b sprite_frame_bank                ; C0A66A m0x0
     ora.w #$FF00                           ; C0A66C m0x0
     sta.w $0A90,x                          ; C0A66F m0x0
     txa                                    ; C0A672 m0x0
@@ -4854,7 +4854,7 @@ loc_C0A63C:
     sta.w $0A8C,x                          ; C0A6A4 m0x0
     tya                                    ; C0A6A7 m0x0
     sta.w $0A8E,x                          ; C0A6A8 m0x0
-    lda.b $28                              ; C0A6AB m0x0
+    lda.b sprite_frame_bank                ; C0A6AB m0x0
     ora.w #$FF00                           ; C0A6AD m0x0
     sta.w $0A90,x                          ; C0A6B0 m0x0
     txa                                    ; C0A6B3 m0x0
@@ -4867,9 +4867,9 @@ loc_C0A6B9:
     stz.w $0A90,x                          ; C0A6BC m0x0
 
 loc_C0A6BF:
-    inc.b $96                              ; C0A6BF m0x0
-    inc.b $96                              ; C0A6C1 m0x0
-    lda.b $96                              ; C0A6C3 m0x0
+    inc.b entity_render_index              ; C0A6BF m0x0
+    inc.b entity_render_index              ; C0A6C1 m0x0
+    lda.b entity_render_index              ; C0A6C3 m0x0
     cmp.w #$0020                           ; C0A6C5 m0x0
     beq loc_C0A6CD                         ; C0A6C8 m0x0
     jmp.w loc_C0A53D                       ; C0A6CA m0x0
@@ -4886,31 +4886,31 @@ data_C0A6D3:
 data_C0A6D7:
     incbin "../data/01.bin":$26D7..$2757      ; 128 bytes
 
-sub_C0A757:
+oam_emit_frame_1row:
     ldy.w #$0000                           ; C0A757 m0x0
-    lda.b [$26],y                          ; C0A75A m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A75A m0x0
     sta.b $1C                              ; C0A75C m0x0
     ldy.w #$0002                           ; C0A75E m0x0
-    lda.b [$26],y                          ; C0A761 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A761 m0x0
     sta.b $1E                              ; C0A763 m0x0
     ldy.w #$0004                           ; C0A765 m0x0
-    lda.b [$26],y                          ; C0A768 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A768 m0x0
     sta.b $20                              ; C0A76A m0x0
     ldy.w #$0005                           ; C0A76C m0x0
     jmp.w loc_C0A791                       ; C0A76F m0x0
 
-sub_C0A772:
+oam_emit_frame_2row:
     ldy.w #$0000                           ; C0A772 m0x0
-    lda.b [$26],y                          ; C0A775 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A775 m0x0
     sta.b $1C                              ; C0A777 m0x0
     ldy.w #$0002                           ; C0A779 m0x0
-    lda.b [$26],y                          ; C0A77C m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A77C m0x0
     sta.b $1E                              ; C0A77E m0x0
     ldy.w #$0004                           ; C0A780 m0x0
-    lda.b [$26],y                          ; C0A783 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A783 m0x0
     sta.b $20                              ; C0A785 m0x0
     ldy.w #$0006                           ; C0A787 m0x0
-    lda.b [$26],y                          ; C0A78A m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A78A m0x0
     sta.b $22                              ; C0A78C m0x0
     ldy.w #$0008                           ; C0A78E m0x0
 
@@ -4931,7 +4931,7 @@ loc_C0A7A2:
     lsr                                    ; C0A7A3 m1x0
     lsr                                    ; C0A7A4 m1x0
     and.b #$1F                             ; C0A7A5 m1x0
-    sta.b $54                              ; C0A7A7 m1x0
+    sta.b oam_entry_ptr                    ; C0A7A7 m1x0
     txa                                    ; C0A7A9 m1x0
     and.b #$03                             ; C0A7AA m1x0
     tax                                    ; C0A7AC m1x0
@@ -4943,18 +4943,18 @@ loc_C0A7A2:
 loc_C0A7B5:
     dec.b $1C                              ; C0A7B5 m1x0
     bmi loc_C0A813                         ; C0A7B7 m1x0
-    lda.b [$2A],y                          ; C0A7B9 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0A7B9 m1x0
     rep.b #$20                             ; C0A7BB m1x0
     and.w #$00FF                           ; C0A7BD m0x0
-    adc.b $4E                              ; C0A7C0 m0x0
+    adc.b entity_screen_y                  ; C0A7C0 m0x0
     cmp.w #$00F0                           ; C0A7C2 m0x0
     bcs loc_C0A7FE                         ; C0A7C5 m0x0
     sbc.w #$000F                           ; C0A7C7 m0x0
     sta.b $01,x                            ; C0A7CA m0x0
-    lda.b [$26],y                          ; C0A7CC m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A7CC m0x0
     and.w #$00FF                           ; C0A7CE m0x0
     clc                                    ; C0A7D1 m0x0
-    adc.b $4C                              ; C0A7D2 m0x0
+    adc.b entity_screen_x                  ; C0A7D2 m0x0
     cmp.w #$0100                           ; C0A7D4 m0x0
     sep.b #$20                             ; C0A7D7 m0x0
     sta.b nmi_handler_ptr,x                ; C0A7D9 m1x0
@@ -4963,11 +4963,11 @@ loc_C0A7B5:
     and.b #$AA                             ; C0A7DF m1x0
 
 loc_C0A7E1:
-    ora.b ($54)                            ; C0A7E1 m1x0
-    sta.b ($54)                            ; C0A7E3 m1x0
+    ora.b (oam_entry_ptr)                  ; C0A7E1 m1x0
+    sta.b (oam_entry_ptr)                  ; C0A7E3 m1x0
     lda.b $24                              ; C0A7E5 m1x0
     bpl loc_C0A7F0                         ; C0A7E7 m1x0
-    inc.b $54                              ; C0A7E9 m1x0
+    inc.b oam_entry_ptr                    ; C0A7E9 m1x0
     lda.b #$03                             ; C0A7EB m1x0
     clc                                    ; C0A7ED m1x0
     bra loc_C0A7F2                         ; C0A7EE m1x0
@@ -4980,7 +4980,7 @@ loc_C0A7F2:
     sta.b $24                              ; C0A7F2 m1x0
     rep.b #$20                             ; C0A7F4 m1x0
     lda.b $1A                              ; C0A7F6 m0x0
-    sta.b $02,x                            ; C0A7F8 m0x0
+    sta.b dma_pending_mask,x               ; C0A7F8 m0x0
     inx                                    ; C0A7FA m0x0
     inx                                    ; C0A7FB m0x0
     inx                                    ; C0A7FC m0x0
@@ -5024,19 +5024,19 @@ loc_C0A826:
 loc_C0A82D:
     dec.b $1D                              ; C0A82D m1x0
     bmi loc_C0A882                         ; C0A82F m1x0
-    lda.b [$2A],y                          ; C0A831 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0A831 m1x0
     rep.b #$20                             ; C0A833 m1x0
     and.w #$00FF                           ; C0A835 m0x0
     clc                                    ; C0A838 m0x0
-    adc.b $4E                              ; C0A839 m0x0
+    adc.b entity_screen_y                  ; C0A839 m0x0
     cmp.w #$00F0                           ; C0A83B m0x0
     bcs loc_C0A87A                         ; C0A83E m0x0
     sbc.w #$000F                           ; C0A840 m0x0
     sta.b $01,x                            ; C0A843 m0x0
-    lda.b [$26],y                          ; C0A845 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A845 m0x0
     and.w #$00FF                           ; C0A847 m0x0
     clc                                    ; C0A84A m0x0
-    adc.b $4C                              ; C0A84B m0x0
+    adc.b entity_screen_x                  ; C0A84B m0x0
     bit.w #$0100                           ; C0A84D m0x0
     sep.b #$20                             ; C0A850 m0x0
     sta.b nmi_handler_ptr,x                ; C0A852 m1x0
@@ -5051,16 +5051,16 @@ loc_C0A82D:
     lsr                                    ; C0A861 m0x0
     lsr                                    ; C0A862 m0x0
     sep.b #$20                             ; C0A863 m0x0
-    sta.b $54                              ; C0A865 m1x0
+    sta.b oam_entry_ptr                    ; C0A865 m1x0
     lda.w data_C0A6D7,x                    ; C0A867 m1x0
-    ora.b ($54)                            ; C0A86A m1x0
-    sta.b ($54)                            ; C0A86C m1x0
+    ora.b (oam_entry_ptr)                  ; C0A86A m1x0
+    sta.b (oam_entry_ptr)                  ; C0A86C m1x0
     ldx.b $52                              ; C0A86E m1x0
 
 loc_C0A870:
     rep.b #$20                             ; C0A870 m1x0
     lda.b $1A                              ; C0A872 m0x0
-    sta.b $02,x                            ; C0A874 m0x0
+    sta.b dma_pending_mask,x               ; C0A874 m0x0
     inx                                    ; C0A876 m0x0
     inx                                    ; C0A877 m0x0
     inx                                    ; C0A878 m0x0
@@ -5095,19 +5095,19 @@ loc_C0A895:
 loc_C0A89C:
     dec.b $1F                              ; C0A89C m1x0
     bmi loc_C0A8F1                         ; C0A89E m1x0
-    lda.b [$2A],y                          ; C0A8A0 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0A8A0 m1x0
     rep.b #$20                             ; C0A8A2 m1x0
     and.w #$00FF                           ; C0A8A4 m0x0
     clc                                    ; C0A8A7 m0x0
-    adc.b $4E                              ; C0A8A8 m0x0
+    adc.b entity_screen_y                  ; C0A8A8 m0x0
     cmp.w #$00F0                           ; C0A8AA m0x0
     bcs loc_C0A8E9                         ; C0A8AD m0x0
     sbc.w #$000F                           ; C0A8AF m0x0
     sta.b $01,x                            ; C0A8B2 m0x0
-    lda.b [$26],y                          ; C0A8B4 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A8B4 m0x0
     and.w #$00FF                           ; C0A8B6 m0x0
     clc                                    ; C0A8B9 m0x0
-    adc.b $4C                              ; C0A8BA m0x0
+    adc.b entity_screen_x                  ; C0A8BA m0x0
     bit.w #$0100                           ; C0A8BC m0x0
     sep.b #$20                             ; C0A8BF m0x0
     sta.b nmi_handler_ptr,x                ; C0A8C1 m1x0
@@ -5122,16 +5122,16 @@ loc_C0A89C:
     lsr                                    ; C0A8D0 m0x0
     lsr                                    ; C0A8D1 m0x0
     sep.b #$20                             ; C0A8D2 m0x0
-    sta.b $54                              ; C0A8D4 m1x0
+    sta.b oam_entry_ptr                    ; C0A8D4 m1x0
     lda.w data_C0A6D7,x                    ; C0A8D6 m1x0
-    ora.b ($54)                            ; C0A8D9 m1x0
-    sta.b ($54)                            ; C0A8DB m1x0
+    ora.b (oam_entry_ptr)                  ; C0A8D9 m1x0
+    sta.b (oam_entry_ptr)                  ; C0A8DB m1x0
     ldx.b $52                              ; C0A8DD m1x0
 
 loc_C0A8DF:
     rep.b #$20                             ; C0A8DF m1x0
     lda.b $1A                              ; C0A8E1 m0x0
-    sta.b $02,x                            ; C0A8E3 m0x0
+    sta.b dma_pending_mask,x               ; C0A8E3 m0x0
     inx                                    ; C0A8E5 m0x0
     inx                                    ; C0A8E6 m0x0
     inx                                    ; C0A8E7 m0x0
@@ -5149,31 +5149,31 @@ loc_C0A8F1:
     stx.b oam_write_ptr                    ; C0A8F3 m0x0
     rts                                    ; C0A8F5 m0x0
 
-sub_C0A8F6:
+oam_emit_frame_1row_flip:
     ldy.w #$0000                           ; C0A8F6 m0x0
-    lda.b [$26],y                          ; C0A8F9 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A8F9 m0x0
     sta.b $1C                              ; C0A8FB m0x0
     ldy.w #$0002                           ; C0A8FD m0x0
-    lda.b [$26],y                          ; C0A900 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A900 m0x0
     sta.b $1E                              ; C0A902 m0x0
     ldy.w #$0004                           ; C0A904 m0x0
-    lda.b [$26],y                          ; C0A907 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A907 m0x0
     sta.b $20                              ; C0A909 m0x0
     ldy.w #$0005                           ; C0A90B m0x0
     jmp.w loc_C0A930                       ; C0A90E m0x0
 
-sub_C0A911:
+oam_emit_frame_2row_flip:
     ldy.w #$0000                           ; C0A911 m0x0
-    lda.b [$26],y                          ; C0A914 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A914 m0x0
     sta.b $1C                              ; C0A916 m0x0
     ldy.w #$0002                           ; C0A918 m0x0
-    lda.b [$26],y                          ; C0A91B m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A91B m0x0
     sta.b $1E                              ; C0A91D m0x0
     ldy.w #$0004                           ; C0A91F m0x0
-    lda.b [$26],y                          ; C0A922 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A922 m0x0
     sta.b $20                              ; C0A924 m0x0
     ldy.w #$0006                           ; C0A926 m0x0
-    lda.b [$26],y                          ; C0A929 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A929 m0x0
     sta.b $22                              ; C0A92B m0x0
     ldy.w #$0008                           ; C0A92D m0x0
 
@@ -5194,7 +5194,7 @@ loc_C0A941:
     lsr                                    ; C0A942 m1x0
     lsr                                    ; C0A943 m1x0
     and.b #$1F                             ; C0A944 m1x0
-    sta.b $54                              ; C0A946 m1x0
+    sta.b oam_entry_ptr                    ; C0A946 m1x0
     txa                                    ; C0A948 m1x0
     and.b #$03                             ; C0A949 m1x0
     tax                                    ; C0A94B m1x0
@@ -5206,19 +5206,19 @@ loc_C0A941:
 loc_C0A954:
     dec.b $1C                              ; C0A954 m1x0
     bmi loc_C0A9B5                         ; C0A956 m1x0
-    lda.b [$2A],y                          ; C0A958 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0A958 m1x0
     rep.b #$20                             ; C0A95A m1x0
     and.w #$00FF                           ; C0A95C m0x0
-    adc.b $4E                              ; C0A95F m0x0
+    adc.b entity_screen_y                  ; C0A95F m0x0
     cmp.w #$00F0                           ; C0A961 m0x0
     bcs loc_C0A9A0                         ; C0A964 m0x0
     sbc.w #$000F                           ; C0A966 m0x0
     sta.b $01,x                            ; C0A969 m0x0
-    lda.b [$26],y                          ; C0A96B m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A96B m0x0
     eor.w #$00FF                           ; C0A96D m0x0
     and.w #$00FF                           ; C0A970 m0x0
     clc                                    ; C0A973 m0x0
-    adc.b $4C                              ; C0A974 m0x0
+    adc.b entity_screen_x                  ; C0A974 m0x0
     cmp.w #$0100                           ; C0A976 m0x0
     sep.b #$20                             ; C0A979 m0x0
     sta.b nmi_handler_ptr,x                ; C0A97B m1x0
@@ -5227,11 +5227,11 @@ loc_C0A954:
     and.b #$AA                             ; C0A981 m1x0
 
 loc_C0A983:
-    ora.b ($54)                            ; C0A983 m1x0
-    sta.b ($54)                            ; C0A985 m1x0
+    ora.b (oam_entry_ptr)                  ; C0A983 m1x0
+    sta.b (oam_entry_ptr)                  ; C0A985 m1x0
     lda.b $24                              ; C0A987 m1x0
     bpl loc_C0A992                         ; C0A989 m1x0
-    inc.b $54                              ; C0A98B m1x0
+    inc.b oam_entry_ptr                    ; C0A98B m1x0
     lda.b #$03                             ; C0A98D m1x0
     clc                                    ; C0A98F m1x0
     bra loc_C0A994                         ; C0A990 m1x0
@@ -5244,7 +5244,7 @@ loc_C0A994:
     sta.b $24                              ; C0A994 m1x0
     rep.b #$20                             ; C0A996 m1x0
     lda.b $1A                              ; C0A998 m0x0
-    sta.b $02,x                            ; C0A99A m0x0
+    sta.b dma_pending_mask,x               ; C0A99A m0x0
     inx                                    ; C0A99C m0x0
     inx                                    ; C0A99D m0x0
     inx                                    ; C0A99E m0x0
@@ -5285,29 +5285,29 @@ loc_C0A9C8:
     adc.b $18                              ; C0A9CB m1x0
     sta.b $1A                              ; C0A9CD m1x0
     rep.b #$20                             ; C0A9CF m1x0
-    lda.b $4C                              ; C0A9D1 m0x0
+    lda.b entity_screen_x                  ; C0A9D1 m0x0
     clc                                    ; C0A9D3 m0x0
     adc.w #$0008                           ; C0A9D4 m0x0
-    sta.b $4C                              ; C0A9D7 m0x0
+    sta.b entity_screen_x                  ; C0A9D7 m0x0
     sep.b #$20                             ; C0A9D9 m0x0
 
 loc_C0A9DB:
     dec.b $1D                              ; C0A9DB m1x0
     bmi loc_C0AA33                         ; C0A9DD m1x0
-    lda.b [$2A],y                          ; C0A9DF m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0A9DF m1x0
     rep.b #$20                             ; C0A9E1 m1x0
     and.w #$00FF                           ; C0A9E3 m0x0
     clc                                    ; C0A9E6 m0x0
-    adc.b $4E                              ; C0A9E7 m0x0
+    adc.b entity_screen_y                  ; C0A9E7 m0x0
     cmp.w #$00F0                           ; C0A9E9 m0x0
     bcs loc_C0AA2B                         ; C0A9EC m0x0
     sbc.w #$000F                           ; C0A9EE m0x0
     sta.b $01,x                            ; C0A9F1 m0x0
-    lda.b [$26],y                          ; C0A9F3 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0A9F3 m0x0
     eor.w #$00FF                           ; C0A9F5 m0x0
     and.w #$00FF                           ; C0A9F8 m0x0
     clc                                    ; C0A9FB m0x0
-    adc.b $4C                              ; C0A9FC m0x0
+    adc.b entity_screen_x                  ; C0A9FC m0x0
     bit.w #$0100                           ; C0A9FE m0x0
     sep.b #$20                             ; C0AA01 m0x0
     sta.b nmi_handler_ptr,x                ; C0AA03 m1x0
@@ -5322,16 +5322,16 @@ loc_C0A9DB:
     lsr                                    ; C0AA12 m0x0
     lsr                                    ; C0AA13 m0x0
     sep.b #$20                             ; C0AA14 m0x0
-    sta.b $54                              ; C0AA16 m1x0
+    sta.b oam_entry_ptr                    ; C0AA16 m1x0
     lda.w data_C0A6D7,x                    ; C0AA18 m1x0
-    ora.b ($54)                            ; C0AA1B m1x0
-    sta.b ($54)                            ; C0AA1D m1x0
+    ora.b (oam_entry_ptr)                  ; C0AA1B m1x0
+    sta.b (oam_entry_ptr)                  ; C0AA1D m1x0
     ldx.b $52                              ; C0AA1F m1x0
 
 loc_C0AA21:
     rep.b #$20                             ; C0AA21 m1x0
     lda.b $1A                              ; C0AA23 m0x0
-    sta.b $02,x                            ; C0AA25 m0x0
+    sta.b dma_pending_mask,x               ; C0AA25 m0x0
     inx                                    ; C0AA27 m0x0
     inx                                    ; C0AA28 m0x0
     inx                                    ; C0AA29 m0x0
@@ -5366,20 +5366,20 @@ loc_C0AA46:
 loc_C0AA4D:
     dec.b $1F                              ; C0AA4D m1x0
     bmi loc_C0AAA5                         ; C0AA4F m1x0
-    lda.b [$2A],y                          ; C0AA51 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AA51 m1x0
     rep.b #$20                             ; C0AA53 m1x0
     and.w #$00FF                           ; C0AA55 m0x0
     clc                                    ; C0AA58 m0x0
-    adc.b $4E                              ; C0AA59 m0x0
+    adc.b entity_screen_y                  ; C0AA59 m0x0
     cmp.w #$00F0                           ; C0AA5B m0x0
     bcs loc_C0AA9D                         ; C0AA5E m0x0
     sbc.w #$000F                           ; C0AA60 m0x0
     sta.b $01,x                            ; C0AA63 m0x0
-    lda.b [$26],y                          ; C0AA65 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AA65 m0x0
     eor.w #$00FF                           ; C0AA67 m0x0
     and.w #$00FF                           ; C0AA6A m0x0
     clc                                    ; C0AA6D m0x0
-    adc.b $4C                              ; C0AA6E m0x0
+    adc.b entity_screen_x                  ; C0AA6E m0x0
     bit.w #$0100                           ; C0AA70 m0x0
     sep.b #$20                             ; C0AA73 m0x0
     sta.b nmi_handler_ptr,x                ; C0AA75 m1x0
@@ -5394,16 +5394,16 @@ loc_C0AA4D:
     lsr                                    ; C0AA84 m0x0
     lsr                                    ; C0AA85 m0x0
     sep.b #$20                             ; C0AA86 m0x0
-    sta.b $54                              ; C0AA88 m1x0
+    sta.b oam_entry_ptr                    ; C0AA88 m1x0
     lda.w data_C0A6D7,x                    ; C0AA8A m1x0
-    ora.b ($54)                            ; C0AA8D m1x0
-    sta.b ($54)                            ; C0AA8F m1x0
+    ora.b (oam_entry_ptr)                  ; C0AA8D m1x0
+    sta.b (oam_entry_ptr)                  ; C0AA8F m1x0
     ldx.b $52                              ; C0AA91 m1x0
 
 loc_C0AA93:
     rep.b #$20                             ; C0AA93 m1x0
     lda.b $1A                              ; C0AA95 m0x0
-    sta.b $02,x                            ; C0AA97 m0x0
+    sta.b dma_pending_mask,x               ; C0AA97 m0x0
     inx                                    ; C0AA99 m0x0
     inx                                    ; C0AA9A m0x0
     inx                                    ; C0AA9B m0x0
@@ -5421,18 +5421,18 @@ loc_C0AAA5:
     stx.b oam_write_ptr                    ; C0AAA7 m0x0
     rts                                    ; C0AAA9 m0x0
 
-sub_C0AAAA:
+oam_emit_frame_3row:
     ldy.w #$0000                           ; C0AAAA m0x0
-    lda.b [$26],y                          ; C0AAAD m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AAAD m0x0
     sta.b $1C                              ; C0AAAF m0x0
     ldy.w #$0002                           ; C0AAB1 m0x0
-    lda.b [$26],y                          ; C0AAB4 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AAB4 m0x0
     sta.b $1E                              ; C0AAB6 m0x0
     ldy.w #$0004                           ; C0AAB8 m0x0
-    lda.b [$26],y                          ; C0AABB m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AABB m0x0
     sta.b $20                              ; C0AABD m0x0
     ldy.w #$0006                           ; C0AABF m0x0
-    lda.b [$26],y                          ; C0AAC2 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AAC2 m0x0
     sta.b $22                              ; C0AAC4 m0x0
     ldy.w #$0008                           ; C0AAC6 m0x0
     lda.b oam_write_ptr                    ; C0AAC9 m0x0
@@ -5451,7 +5451,7 @@ loc_C0AADA:
     lsr                                    ; C0AADB m1x0
     lsr                                    ; C0AADC m1x0
     and.b #$1F                             ; C0AADD m1x0
-    sta.b $54                              ; C0AADF m1x0
+    sta.b oam_entry_ptr                    ; C0AADF m1x0
     txa                                    ; C0AAE1 m1x0
     and.b #$03                             ; C0AAE2 m1x0
     tax                                    ; C0AAE4 m1x0
@@ -5463,19 +5463,19 @@ loc_C0AADA:
 loc_C0AAED:
     dec.b $1C                              ; C0AAED m1x0
     bmi loc_C0AB4D                         ; C0AAEF m1x0
-    lda.b [$2A],y                          ; C0AAF1 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AAF1 m1x0
     eor.b #$FF                             ; C0AAF3 m1x0
     rep.b #$20                             ; C0AAF5 m1x0
     and.w #$00FF                           ; C0AAF7 m0x0
-    adc.b $4E                              ; C0AAFA m0x0
+    adc.b entity_screen_y                  ; C0AAFA m0x0
     cmp.w #$00F0                           ; C0AAFC m0x0
     bcs loc_C0AB38                         ; C0AAFF m0x0
     sbc.w #$000F                           ; C0AB01 m0x0
     sta.b $01,x                            ; C0AB04 m0x0
-    lda.b [$26],y                          ; C0AB06 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AB06 m0x0
     and.w #$00FF                           ; C0AB08 m0x0
     clc                                    ; C0AB0B m0x0
-    adc.b $4C                              ; C0AB0C m0x0
+    adc.b entity_screen_x                  ; C0AB0C m0x0
     cmp.w #$0100                           ; C0AB0E m0x0
     sep.b #$20                             ; C0AB11 m0x0
     sta.b nmi_handler_ptr,x                ; C0AB13 m1x0
@@ -5484,11 +5484,11 @@ loc_C0AAED:
     and.b #$AA                             ; C0AB19 m1x0
 
 loc_C0AB1B:
-    ora.b ($54)                            ; C0AB1B m1x0
-    sta.b ($54)                            ; C0AB1D m1x0
+    ora.b (oam_entry_ptr)                  ; C0AB1B m1x0
+    sta.b (oam_entry_ptr)                  ; C0AB1D m1x0
     lda.b $24                              ; C0AB1F m1x0
     bpl loc_C0AB2A                         ; C0AB21 m1x0
-    inc.b $54                              ; C0AB23 m1x0
+    inc.b oam_entry_ptr                    ; C0AB23 m1x0
     lda.b #$03                             ; C0AB25 m1x0
     clc                                    ; C0AB27 m1x0
     bra loc_C0AB2C                         ; C0AB28 m1x0
@@ -5501,7 +5501,7 @@ loc_C0AB2C:
     sta.b $24                              ; C0AB2C m1x0
     rep.b #$20                             ; C0AB2E m1x0
     lda.b $1A                              ; C0AB30 m0x0
-    sta.b $02,x                            ; C0AB32 m0x0
+    sta.b dma_pending_mask,x               ; C0AB32 m0x0
     inx                                    ; C0AB34 m0x0
     inx                                    ; C0AB35 m0x0
     inx                                    ; C0AB36 m0x0
@@ -5542,29 +5542,29 @@ loc_C0AB60:
     adc.b $18                              ; C0AB63 m1x0
     sta.b $1A                              ; C0AB65 m1x0
     rep.b #$20                             ; C0AB67 m1x0
-    lda.b $4E                              ; C0AB69 m0x0
+    lda.b entity_screen_y                  ; C0AB69 m0x0
     clc                                    ; C0AB6B m0x0
     adc.w #$0008                           ; C0AB6C m0x0
-    sta.b $4E                              ; C0AB6F m0x0
+    sta.b entity_screen_y                  ; C0AB6F m0x0
     sep.b #$20                             ; C0AB71 m0x0
 
 loc_C0AB73:
     dec.b $1D                              ; C0AB73 m1x0
     bmi loc_C0ABCA                         ; C0AB75 m1x0
-    lda.b [$2A],y                          ; C0AB77 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AB77 m1x0
     eor.b #$FF                             ; C0AB79 m1x0
     rep.b #$20                             ; C0AB7B m1x0
     and.w #$00FF                           ; C0AB7D m0x0
     clc                                    ; C0AB80 m0x0
-    adc.b $4E                              ; C0AB81 m0x0
+    adc.b entity_screen_y                  ; C0AB81 m0x0
     cmp.w #$00F0                           ; C0AB83 m0x0
     bcs loc_C0ABC2                         ; C0AB86 m0x0
     sbc.w #$000F                           ; C0AB88 m0x0
     sta.b $01,x                            ; C0AB8B m0x0
-    lda.b [$26],y                          ; C0AB8D m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AB8D m0x0
     and.w #$00FF                           ; C0AB8F m0x0
     clc                                    ; C0AB92 m0x0
-    adc.b $4C                              ; C0AB93 m0x0
+    adc.b entity_screen_x                  ; C0AB93 m0x0
     bit.w #$0100                           ; C0AB95 m0x0
     sep.b #$20                             ; C0AB98 m0x0
     sta.b nmi_handler_ptr,x                ; C0AB9A m1x0
@@ -5579,16 +5579,16 @@ loc_C0AB73:
     lsr                                    ; C0ABA9 m0x0
     lsr                                    ; C0ABAA m0x0
     sep.b #$20                             ; C0ABAB m0x0
-    sta.b $54                              ; C0ABAD m1x0
+    sta.b oam_entry_ptr                    ; C0ABAD m1x0
     lda.w data_C0A6D7,x                    ; C0ABAF m1x0
-    ora.b ($54)                            ; C0ABB2 m1x0
-    sta.b ($54)                            ; C0ABB4 m1x0
+    ora.b (oam_entry_ptr)                  ; C0ABB2 m1x0
+    sta.b (oam_entry_ptr)                  ; C0ABB4 m1x0
     ldx.b $52                              ; C0ABB6 m1x0
 
 loc_C0ABB8:
     rep.b #$20                             ; C0ABB8 m1x0
     lda.b $1A                              ; C0ABBA m0x0
-    sta.b $02,x                            ; C0ABBC m0x0
+    sta.b dma_pending_mask,x               ; C0ABBC m0x0
     inx                                    ; C0ABBE m0x0
     inx                                    ; C0ABBF m0x0
     inx                                    ; C0ABC0 m0x0
@@ -5623,20 +5623,20 @@ loc_C0ABDD:
 loc_C0ABE4:
     dec.b $1F                              ; C0ABE4 m1x0
     bmi loc_C0AC3B                         ; C0ABE6 m1x0
-    lda.b [$2A],y                          ; C0ABE8 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0ABE8 m1x0
     eor.b #$FF                             ; C0ABEA m1x0
     rep.b #$20                             ; C0ABEC m1x0
     and.w #$00FF                           ; C0ABEE m0x0
     clc                                    ; C0ABF1 m0x0
-    adc.b $4E                              ; C0ABF2 m0x0
+    adc.b entity_screen_y                  ; C0ABF2 m0x0
     cmp.w #$00F0                           ; C0ABF4 m0x0
     bcs loc_C0AC33                         ; C0ABF7 m0x0
     sbc.w #$000F                           ; C0ABF9 m0x0
     sta.b $01,x                            ; C0ABFC m0x0
-    lda.b [$26],y                          ; C0ABFE m0x0
+    lda.b [sprite_frame_ptr],y             ; C0ABFE m0x0
     and.w #$00FF                           ; C0AC00 m0x0
     clc                                    ; C0AC03 m0x0
-    adc.b $4C                              ; C0AC04 m0x0
+    adc.b entity_screen_x                  ; C0AC04 m0x0
     bit.w #$0100                           ; C0AC06 m0x0
     sep.b #$20                             ; C0AC09 m0x0
     sta.b nmi_handler_ptr,x                ; C0AC0B m1x0
@@ -5651,16 +5651,16 @@ loc_C0ABE4:
     lsr                                    ; C0AC1A m0x0
     lsr                                    ; C0AC1B m0x0
     sep.b #$20                             ; C0AC1C m0x0
-    sta.b $54                              ; C0AC1E m1x0
+    sta.b oam_entry_ptr                    ; C0AC1E m1x0
     lda.w data_C0A6D7,x                    ; C0AC20 m1x0
-    ora.b ($54)                            ; C0AC23 m1x0
-    sta.b ($54)                            ; C0AC25 m1x0
+    ora.b (oam_entry_ptr)                  ; C0AC23 m1x0
+    sta.b (oam_entry_ptr)                  ; C0AC25 m1x0
     ldx.b $52                              ; C0AC27 m1x0
 
 loc_C0AC29:
     rep.b #$20                             ; C0AC29 m1x0
     lda.b $1A                              ; C0AC2B m0x0
-    sta.b $02,x                            ; C0AC2D m0x0
+    sta.b dma_pending_mask,x               ; C0AC2D m0x0
     inx                                    ; C0AC2F m0x0
     inx                                    ; C0AC30 m0x0
     inx                                    ; C0AC31 m0x0
@@ -5678,18 +5678,18 @@ loc_C0AC3B:
     stx.b oam_write_ptr                    ; C0AC3D m0x0
     rts                                    ; C0AC3F m0x0
 
-sub_C0AC40:
+oam_emit_frame_3row_flip:
     ldy.w #$0000                           ; C0AC40 m0x0
-    lda.b [$26],y                          ; C0AC43 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AC43 m0x0
     sta.b $1C                              ; C0AC45 m0x0
     ldy.w #$0002                           ; C0AC47 m0x0
-    lda.b [$26],y                          ; C0AC4A m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AC4A m0x0
     sta.b $1E                              ; C0AC4C m0x0
     ldy.w #$0004                           ; C0AC4E m0x0
-    lda.b [$26],y                          ; C0AC51 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AC51 m0x0
     sta.b $20                              ; C0AC53 m0x0
     ldy.w #$0006                           ; C0AC55 m0x0
-    lda.b [$26],y                          ; C0AC58 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AC58 m0x0
     sta.b $22                              ; C0AC5A m0x0
     ldy.w #$0008                           ; C0AC5C m0x0
     lda.b oam_write_ptr                    ; C0AC5F m0x0
@@ -5708,7 +5708,7 @@ loc_C0AC70:
     lsr                                    ; C0AC71 m1x0
     lsr                                    ; C0AC72 m1x0
     and.b #$1F                             ; C0AC73 m1x0
-    sta.b $54                              ; C0AC75 m1x0
+    sta.b oam_entry_ptr                    ; C0AC75 m1x0
     txa                                    ; C0AC77 m1x0
     and.b #$03                             ; C0AC78 m1x0
     tax                                    ; C0AC7A m1x0
@@ -5720,20 +5720,20 @@ loc_C0AC70:
 loc_C0AC83:
     dec.b $1C                              ; C0AC83 m1x0
     bmi loc_C0ACE6                         ; C0AC85 m1x0
-    lda.b [$2A],y                          ; C0AC87 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AC87 m1x0
     eor.b #$FF                             ; C0AC89 m1x0
     rep.b #$20                             ; C0AC8B m1x0
     and.w #$00FF                           ; C0AC8D m0x0
-    adc.b $4E                              ; C0AC90 m0x0
+    adc.b entity_screen_y                  ; C0AC90 m0x0
     cmp.w #$00F0                           ; C0AC92 m0x0
     bcs loc_C0ACD1                         ; C0AC95 m0x0
     sbc.w #$000F                           ; C0AC97 m0x0
     sta.b $01,x                            ; C0AC9A m0x0
-    lda.b [$26],y                          ; C0AC9C m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AC9C m0x0
     eor.w #$00FF                           ; C0AC9E m0x0
     and.w #$00FF                           ; C0ACA1 m0x0
     clc                                    ; C0ACA4 m0x0
-    adc.b $4C                              ; C0ACA5 m0x0
+    adc.b entity_screen_x                  ; C0ACA5 m0x0
     cmp.w #$0100                           ; C0ACA7 m0x0
     sep.b #$20                             ; C0ACAA m0x0
     sta.b nmi_handler_ptr,x                ; C0ACAC m1x0
@@ -5742,11 +5742,11 @@ loc_C0AC83:
     and.b #$AA                             ; C0ACB2 m1x0
 
 loc_C0ACB4:
-    ora.b ($54)                            ; C0ACB4 m1x0
-    sta.b ($54)                            ; C0ACB6 m1x0
+    ora.b (oam_entry_ptr)                  ; C0ACB4 m1x0
+    sta.b (oam_entry_ptr)                  ; C0ACB6 m1x0
     lda.b $24                              ; C0ACB8 m1x0
     bpl loc_C0ACC3                         ; C0ACBA m1x0
-    inc.b $54                              ; C0ACBC m1x0
+    inc.b oam_entry_ptr                    ; C0ACBC m1x0
     lda.b #$03                             ; C0ACBE m1x0
     clc                                    ; C0ACC0 m1x0
     bra loc_C0ACC5                         ; C0ACC1 m1x0
@@ -5759,7 +5759,7 @@ loc_C0ACC5:
     sta.b $24                              ; C0ACC5 m1x0
     rep.b #$20                             ; C0ACC7 m1x0
     lda.b $1A                              ; C0ACC9 m0x0
-    sta.b $02,x                            ; C0ACCB m0x0
+    sta.b dma_pending_mask,x               ; C0ACCB m0x0
     inx                                    ; C0ACCD m0x0
     inx                                    ; C0ACCE m0x0
     inx                                    ; C0ACCF m0x0
@@ -5800,34 +5800,34 @@ loc_C0ACF9:
     adc.b $18                              ; C0ACFC m1x0
     sta.b $1A                              ; C0ACFE m1x0
     rep.b #$20                             ; C0AD00 m1x0
-    lda.b $4C                              ; C0AD02 m0x0
+    lda.b entity_screen_x                  ; C0AD02 m0x0
     clc                                    ; C0AD04 m0x0
     adc.w #$0008                           ; C0AD05 m0x0
-    sta.b $4C                              ; C0AD08 m0x0
-    lda.b $4E                              ; C0AD0A m0x0
+    sta.b entity_screen_x                  ; C0AD08 m0x0
+    lda.b entity_screen_y                  ; C0AD0A m0x0
     clc                                    ; C0AD0C m0x0
     adc.w #$0008                           ; C0AD0D m0x0
-    sta.b $4E                              ; C0AD10 m0x0
+    sta.b entity_screen_y                  ; C0AD10 m0x0
     sep.b #$20                             ; C0AD12 m0x0
 
 loc_C0AD14:
     dec.b $1D                              ; C0AD14 m1x0
     bmi loc_C0AD6E                         ; C0AD16 m1x0
-    lda.b [$2A],y                          ; C0AD18 m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AD18 m1x0
     eor.b #$FF                             ; C0AD1A m1x0
     rep.b #$20                             ; C0AD1C m1x0
     and.w #$00FF                           ; C0AD1E m0x0
     clc                                    ; C0AD21 m0x0
-    adc.b $4E                              ; C0AD22 m0x0
+    adc.b entity_screen_y                  ; C0AD22 m0x0
     cmp.w #$00F0                           ; C0AD24 m0x0
     bcs loc_C0AD66                         ; C0AD27 m0x0
     sbc.w #$000F                           ; C0AD29 m0x0
     sta.b $01,x                            ; C0AD2C m0x0
-    lda.b [$26],y                          ; C0AD2E m0x0
+    lda.b [sprite_frame_ptr],y             ; C0AD2E m0x0
     eor.w #$00FF                           ; C0AD30 m0x0
     and.w #$00FF                           ; C0AD33 m0x0
     clc                                    ; C0AD36 m0x0
-    adc.b $4C                              ; C0AD37 m0x0
+    adc.b entity_screen_x                  ; C0AD37 m0x0
     bit.w #$0100                           ; C0AD39 m0x0
     sep.b #$20                             ; C0AD3C m0x0
     sta.b nmi_handler_ptr,x                ; C0AD3E m1x0
@@ -5842,16 +5842,16 @@ loc_C0AD14:
     lsr                                    ; C0AD4D m0x0
     lsr                                    ; C0AD4E m0x0
     sep.b #$20                             ; C0AD4F m0x0
-    sta.b $54                              ; C0AD51 m1x0
+    sta.b oam_entry_ptr                    ; C0AD51 m1x0
     lda.w data_C0A6D7,x                    ; C0AD53 m1x0
-    ora.b ($54)                            ; C0AD56 m1x0
-    sta.b ($54)                            ; C0AD58 m1x0
+    ora.b (oam_entry_ptr)                  ; C0AD56 m1x0
+    sta.b (oam_entry_ptr)                  ; C0AD58 m1x0
     ldx.b $52                              ; C0AD5A m1x0
 
 loc_C0AD5C:
     rep.b #$20                             ; C0AD5C m1x0
     lda.b $1A                              ; C0AD5E m0x0
-    sta.b $02,x                            ; C0AD60 m0x0
+    sta.b dma_pending_mask,x               ; C0AD60 m0x0
     inx                                    ; C0AD62 m0x0
     inx                                    ; C0AD63 m0x0
     inx                                    ; C0AD64 m0x0
@@ -5886,21 +5886,21 @@ loc_C0AD81:
 loc_C0AD88:
     dec.b $1F                              ; C0AD88 m1x0
     bmi loc_C0ADE2                         ; C0AD8A m1x0
-    lda.b [$2A],y                          ; C0AD8C m1x0
+    lda.b [sprite_frame_ptr2],y            ; C0AD8C m1x0
     eor.b #$FF                             ; C0AD8E m1x0
     rep.b #$20                             ; C0AD90 m1x0
     and.w #$00FF                           ; C0AD92 m0x0
     clc                                    ; C0AD95 m0x0
-    adc.b $4E                              ; C0AD96 m0x0
+    adc.b entity_screen_y                  ; C0AD96 m0x0
     cmp.w #$00F0                           ; C0AD98 m0x0
     bcs loc_C0ADDA                         ; C0AD9B m0x0
     sbc.w #$000F                           ; C0AD9D m0x0
     sta.b $01,x                            ; C0ADA0 m0x0
-    lda.b [$26],y                          ; C0ADA2 m0x0
+    lda.b [sprite_frame_ptr],y             ; C0ADA2 m0x0
     eor.w #$00FF                           ; C0ADA4 m0x0
     and.w #$00FF                           ; C0ADA7 m0x0
     clc                                    ; C0ADAA m0x0
-    adc.b $4C                              ; C0ADAB m0x0
+    adc.b entity_screen_x                  ; C0ADAB m0x0
     bit.w #$0100                           ; C0ADAD m0x0
     sep.b #$20                             ; C0ADB0 m0x0
     sta.b nmi_handler_ptr,x                ; C0ADB2 m1x0
@@ -5915,16 +5915,16 @@ loc_C0AD88:
     lsr                                    ; C0ADC1 m0x0
     lsr                                    ; C0ADC2 m0x0
     sep.b #$20                             ; C0ADC3 m0x0
-    sta.b $54                              ; C0ADC5 m1x0
+    sta.b oam_entry_ptr                    ; C0ADC5 m1x0
     lda.w data_C0A6D7,x                    ; C0ADC7 m1x0
-    ora.b ($54)                            ; C0ADCA m1x0
-    sta.b ($54)                            ; C0ADCC m1x0
+    ora.b (oam_entry_ptr)                  ; C0ADCA m1x0
+    sta.b (oam_entry_ptr)                  ; C0ADCC m1x0
     ldx.b $52                              ; C0ADCE m1x0
 
 loc_C0ADD0:
     rep.b #$20                             ; C0ADD0 m1x0
     lda.b $1A                              ; C0ADD2 m0x0
-    sta.b $02,x                            ; C0ADD4 m0x0
+    sta.b dma_pending_mask,x               ; C0ADD4 m0x0
     inx                                    ; C0ADD6 m0x0
     inx                                    ; C0ADD7 m0x0
     inx                                    ; C0ADD8 m0x0
@@ -5942,7 +5942,7 @@ loc_C0ADE2:
     stx.b oam_write_ptr                    ; C0ADE4 m0x0
     rts                                    ; C0ADE6 m0x0
 
-sub_C0ADE7:
+oam_hide_unused_sprites:
     ldx.b oam_write_ptr                    ; C0ADE7 m0x0
     cpx.w #$0400                           ; C0ADE9 m0x0
     beq loc_C0ADFC                         ; C0ADEC m0x0
@@ -5960,7 +5960,7 @@ loc_C0ADF1:
 loc_C0ADFC:
     rts                                    ; C0ADFC m0x0
 
-sub_C0ADFD:
+oam_dma_upload:
     lda.w #$0200                           ; C0ADFD m0x0
     sta.w A1TL0                            ; C0AE00 m0x0
     sta.w A2AL0                            ; C0AE03 m0x0
@@ -5972,28 +5972,28 @@ sub_C0ADFD:
     stz.w A1B0                             ; C0AE14 m1x0
     rep.b #$20                             ; C0AE17 m1x0
     lda.w #$0001                           ; C0AE19 m0x0
-    sta.b $02                              ; C0AE1C m0x0
+    sta.b dma_pending_mask                 ; C0AE1C m0x0
     rts                                    ; C0AE1E m0x0
 
-sub_C0AE1F:
-    lda.w $09A8                            ; C0AE1F m0x0
+entity_sort_draw_order:
+    lda.w entity_render_order              ; C0AE1F m0x0
     tay                                    ; C0AE22 m0x0
-    lda.w $0988,y                          ; C0AE23 m0x0
+    lda.w entity_depth_key,y               ; C0AE23 m0x0
     sta.b $52                              ; C0AE26 m0x0
     ldx.w #$09A6                           ; C0AE28 m0x0
 
 loc_C0AE2B:
     ldy.b ptr_04,x                         ; C0AE2B m0x0
-    lda.w $0988,y                          ; C0AE2D m0x0
+    lda.w entity_depth_key,y               ; C0AE2D m0x0
     cmp.b $52                              ; C0AE30 m0x0
     sta.b $52                              ; C0AE32 m0x0
     bcc loc_C0AE3E                         ; C0AE34 m0x0
     beq loc_C0AE5E                         ; C0AE36 m0x0
 
 loc_C0AE38:
-    lda.b $02,x                            ; C0AE38 m0x0
+    lda.b dma_pending_mask,x               ; C0AE38 m0x0
     sta.b ptr_04,x                         ; C0AE3A m0x0
-    sty.b $02,x                            ; C0AE3C m0x0
+    sty.b dma_pending_mask,x               ; C0AE3C m0x0
 
 loc_C0AE3E:
     inx                                    ; C0AE3E m0x0
@@ -6003,13 +6003,13 @@ loc_C0AE3E:
 
 loc_C0AE45:
     ldy.b nmi_handler_ptr,x                ; C0AE45 m0x0
-    lda.w $0988,y                          ; C0AE47 m0x0
+    lda.w entity_depth_key,y               ; C0AE47 m0x0
     cmp.b $52                              ; C0AE4A m0x0
     sta.b $52                              ; C0AE4C m0x0
     bcs loc_C0AE56                         ; C0AE4E m0x0
-    lda.b $02,x                            ; C0AE50 m0x0
+    lda.b dma_pending_mask,x               ; C0AE50 m0x0
     sta.b nmi_handler_ptr,x                ; C0AE52 m0x0
-    sty.b $02,x                            ; C0AE54 m0x0
+    sty.b dma_pending_mask,x               ; C0AE54 m0x0
 
 loc_C0AE56:
     dex                                    ; C0AE56 m0x0
@@ -6026,7 +6026,7 @@ loc_C0AE5E:
     bne loc_C0AE3E                         ; C0AE69 m0x0
 
 loc_C0AE6B:
-    ldy.b $02,x                            ; C0AE6B m0x0
+    ldy.b dma_pending_mask,x               ; C0AE6B m0x0
     lda.w $07A8,y                          ; C0AE6D m0x0
     ldy.b ptr_04,x                         ; C0AE70 m0x0
     cmp.w #$0004                           ; C0AE72 m0x0
@@ -6035,7 +6035,7 @@ loc_C0AE6B:
     beq loc_C0AE3E                         ; C0AE7A m0x0
     bra loc_C0AE38                         ; C0AE7C m0x0
 
-sub_C0AE7E:
+entity_upload_pending_tiles:
     lda.w #$1801                           ; C0AE7E m0x0
     sta.w DMAP0                            ; C0AE81 m0x0
     sep.b #$10                             ; C0AE84 m0x0
@@ -6066,12 +6066,12 @@ loc_C0AEB6:
     rep.b #$10                             ; C0AEB6 m0x1
     rts                                    ; C0AEB8 m0x0
 
-sub_C0AEB9:
+entity_render_order_reset:
     ldx.w #$0000                           ; C0AEB9 m0x0
 
 loc_C0AEBC:
     txa                                    ; C0AEBC m0x0
-    sta.w $09A8,x                          ; C0AEBD m0x0
+    sta.w entity_render_order,x            ; C0AEBD m0x0
     inx                                    ; C0AEC0 m0x0
     inx                                    ; C0AEC1 m0x0
     cpx.w #$0020                           ; C0AEC2 m0x0
@@ -6080,7 +6080,7 @@ loc_C0AEBC:
 
 anim_update:
     stz.b $52                              ; C0AEC8 m0x0
-    lda.w $09E8,x                          ; C0AECA m0x0
+    lda.w entity_anim_id,x                 ; C0AECA m0x0
     beq loc_C0AF04                         ; C0AECD m0x0
     cmp.w $0A48,x                          ; C0AECF m0x0
     beq loc_C0AF05                         ; C0AED2 m0x0
@@ -6107,7 +6107,7 @@ loc_C0AEF9:
     bra loc_C0AF30                         ; C0AEFF m0x0
 
 loc_C0AF01:
-    sta.w $07C8,x                          ; C0AF01 m0x0
+    sta.w entity_frame_id,x                ; C0AF01 m0x0
 
 loc_C0AF04:
     rtl                                    ; C0AF04 m0x0
@@ -6157,7 +6157,7 @@ loc_C0AF44:
     sbc.w #$FFFE                           ; C0AF53 m0x0
     bcs loc_C0AF5D                         ; C0AF56 m0x0
     lda.b [$A0],y                          ; C0AF58 m0x0
-    sta.w $07C8,x                          ; C0AF5A m0x0
+    sta.w entity_frame_id,x                ; C0AF5A m0x0
 
 loc_C0AF5D:
     dey                                    ; C0AF5D m0x0
@@ -6193,14 +6193,14 @@ loc_C0AF7C:
     iny                                    ; C0AF90 m0x0
     iny                                    ; C0AF91 m0x0
     lda.b [$A0],y                          ; C0AF92 m0x0
-    sta.w $09E8,x                          ; C0AF94 m0x0
+    sta.w entity_anim_id,x                 ; C0AF94 m0x0
     jmp.w anim_update                      ; C0AF97 m0x0
 
 loc_C0AF9A:
     rtl                                    ; C0AF9A m0x0
 
 loc_C0AF9B:
-    lda.w $0A68,x                          ; C0AF9B m0x0
+    lda.w entity_anim_rate,x               ; C0AF9B m0x0
     cmp.w #$0100                           ; C0AF9E m0x0
     bcc loc_C0AFA6                         ; C0AFA1 m0x0
     lda.w #$0100                           ; C0AFA3 m0x0
@@ -6260,7 +6260,7 @@ loc_C0AFF0:
     iny                                    ; C0B007 m0x0
     iny                                    ; C0B008 m0x0
     lda.b [$A0],y                          ; C0B009 m0x0
-    sta.w $09E8,x                          ; C0B00B m0x0
+    sta.w entity_anim_id,x                 ; C0B00B m0x0
     jmp.w anim_update                      ; C0B00E m0x0
 
 loc_C0B011:
@@ -6272,7 +6272,7 @@ loc_C0B01A:
     iny                                    ; C0B01A m0x0
     iny                                    ; C0B01B m0x0
     lda.b [$A0],y                          ; C0B01C m0x0
-    sta.w $07C8,x                          ; C0B01E m0x0
+    sta.w entity_frame_id,x                ; C0B01E m0x0
     rtl                                    ; C0B021 m0x0
 
 anim_callback_dispatch:
@@ -6282,7 +6282,7 @@ anim_cb_sfx_0704:
     lda.b game_mode                        ; C0B025 m0x0
     cmp.w #$0002                           ; C0B027 m0x0
     bne loc_C0B039                         ; C0B02A m0x0
-    lda.w $0828,x                          ; C0B02C m0x0
+    lda.w entity_x,x                       ; C0B02C m0x0
     cmp.w #$0748                           ; C0B02F m0x0
     bcc loc_C0B048                         ; C0B032 m0x0
     cmp.w #$07B0                           ; C0B034 m0x0
@@ -6291,7 +6291,7 @@ anim_cb_sfx_0704:
 loc_C0B039:
     and.w #$FFFF                           ; C0B039 m0x0
     bne loc_C0B048                         ; C0B03C m0x0
-    lda.w $0828,x                          ; C0B03E m0x0
+    lda.w entity_x,x                       ; C0B03E m0x0
     bmi loc_C0B04D                         ; C0B041 m0x0
     cmp.w #$0090                           ; C0B043 m0x0
     bcc loc_C0B04D                         ; C0B046 m0x0
@@ -6332,8 +6332,8 @@ anim_cb_sfx_0709:
     lda.w #$0709                           ; C0B070 m0x0
     bra play_sound_effect                  ; C0B073 m0x0
 
-sub_C0B075:
-    lda.b $72                              ; C0B075 m0x0
+play_footstep_sound:
+    lda.b walk_cycle_parity                ; C0B075 m0x0
     beq loc_C0B084                         ; C0B077 m0x0
     lda.w #$050A                           ; C0B079 m0x0
     jsr.w play_sound_effect                ; C0B07C m0x0
@@ -6350,7 +6350,7 @@ anim_cb_sfx_060E:
     lda.b game_mode                        ; C0B08F m0x0
     cmp.w #$0002                           ; C0B091 m0x0
     bne loc_C0B0A5                         ; C0B094 m0x0
-    lda.w $0828,x                          ; C0B096 m0x0
+    lda.w entity_x,x                       ; C0B096 m0x0
     cmp.w #$0748                           ; C0B099 m0x0
     bcc loc_C0B0B2                         ; C0B09C m0x0
     cmp.w #$07B0                           ; C0B09E m0x0
@@ -6360,7 +6360,7 @@ anim_cb_sfx_060E:
 loc_C0B0A5:
     and.w #$FFFF                           ; C0B0A5 m0x0
     bne loc_C0B0B2                         ; C0B0A8 m0x0
-    lda.w $0828,x                          ; C0B0AA m0x0
+    lda.w entity_x,x                       ; C0B0AA m0x0
     cmp.w #$0090                           ; C0B0AD m0x0
     bcc loc_C0B0B7                         ; C0B0B0 m0x0
 
@@ -6372,7 +6372,7 @@ loc_C0B0B7:
     lda.w #$060D                           ; C0B0B7 m0x0
     bra play_sound_effect                  ; C0B0BA m0x0
 
-sub_C0B0BC:
+play_zone_transition_sound:
     lda.w #$050F                           ; C0B0BC m0x0
     jsr.w play_sound_effect                ; C0B0BF m0x0
     lda.w #$0611                           ; C0B0C2 m0x0
@@ -6380,20 +6380,20 @@ sub_C0B0BC:
 play_sound_effect:
     phx                                    ; C0B0C5 m0x0
     phy                                    ; C0B0C6 m0x0
-    jsl.l $810000+(sub_C18415&$FFFF)       ; C0B0C7 m0x0
+    jsl.l $810000+(sfx_command_dispatch&$FFFF)   ; C0B0C7 m0x0
     ply                                    ; C0B0CB m0x0
     plx                                    ; C0B0CC m0x0
     rts                                    ; C0B0CD m0x0
 
 anim_cb_hit_player:
-    lda.w $0768                            ; C0B0CE m0x0
+    lda.w entity_hitstun_timer             ; C0B0CE m0x0
     bne loc_C0B0EC                         ; C0B0D1 m0x0
     ldy.w #$0000                           ; C0B0D3 m0x0
-    bit.w $0788,x                          ; C0B0D6 m0x0
+    bit.w entity_flags,x                   ; C0B0D6 m0x0
     bvc loc_C0B0ED                         ; C0B0D9 m0x0
-    lda.w $0828                            ; C0B0DB m0x0
+    lda.w entity_x                         ; C0B0DB m0x0
     sec                                    ; C0B0DE m0x0
-    sbc.w $0828,x                          ; C0B0DF m0x0
+    sbc.w entity_x,x                       ; C0B0DF m0x0
     bpl loc_C0B0EC                         ; C0B0E2 m0x0
     cmp.w #$FFC0                           ; C0B0E4 m0x0
     bcc loc_C0B0EC                         ; C0B0E7 m0x0
@@ -6403,9 +6403,9 @@ loc_C0B0EC:
     rts                                    ; C0B0EC m0x0
 
 loc_C0B0ED:
-    lda.w $0828                            ; C0B0ED m0x0
+    lda.w entity_x                         ; C0B0ED m0x0
     sec                                    ; C0B0F0 m0x0
-    sbc.w $0828,x                          ; C0B0F1 m0x0
+    sbc.w entity_x,x                       ; C0B0F1 m0x0
     bmi loc_C0B0EC                         ; C0B0F4 m0x0
     cmp.w #$0040                           ; C0B0F6 m0x0
     bcs loc_C0B0EC                         ; C0B0F9 m0x0
@@ -6416,22 +6416,22 @@ anim_cb_hit_enemies:
     jsr.w play_sound_effect                ; C0B101 m0x0
     ldy.w #$0004                           ; C0B104 m0x0
     stx.b ptr_04                           ; C0B107 m0x0
-    lda.w $0828,x                          ; C0B109 m0x0
+    lda.w entity_x,x                       ; C0B109 m0x0
     sta.b $06                              ; C0B10C m0x0
-    bit.w $0788,x                          ; C0B10E m0x0
+    bit.w entity_flags,x                   ; C0B10E m0x0
     bvc loc_C0B142                         ; C0B111 m0x0
 
 loc_C0B113:
     cpy.b ptr_04                           ; C0B113 m0x0
     beq loc_C0B13B                         ; C0B115 m0x0
-    lda.w $0768,x                          ; C0B117 m0x0
+    lda.w entity_hitstun_timer,x           ; C0B117 m0x0
     bne loc_C0B13B                         ; C0B11A m0x0
-    lda.w $0708,y                          ; C0B11C m0x0
+    lda.w entity_type,y                    ; C0B11C m0x0
     cmp.w #$000E                           ; C0B11F m0x0
     bcc loc_C0B13B                         ; C0B122 m0x0
     cmp.w #$0012                           ; C0B124 m0x0
     bcs loc_C0B13B                         ; C0B127 m0x0
-    lda.w $0828,y                          ; C0B129 m0x0
+    lda.w entity_x,y                       ; C0B129 m0x0
     sec                                    ; C0B12C m0x0
     sbc.b $06                              ; C0B12D m0x0
     bpl loc_C0B13B                         ; C0B12F m0x0
@@ -6451,14 +6451,14 @@ loc_C0B13B:
 loc_C0B142:
     cpy.b ptr_04                           ; C0B142 m0x0
     beq loc_C0B16A                         ; C0B144 m0x0
-    lda.w $0768,x                          ; C0B146 m0x0
+    lda.w entity_hitstun_timer,x           ; C0B146 m0x0
     bne loc_C0B16A                         ; C0B149 m0x0
-    lda.w $0708,y                          ; C0B14B m0x0
+    lda.w entity_type,y                    ; C0B14B m0x0
     cmp.w #$000E                           ; C0B14E m0x0
     bcc loc_C0B16A                         ; C0B151 m0x0
     cmp.w #$0012                           ; C0B153 m0x0
     bcs loc_C0B16A                         ; C0B156 m0x0
-    lda.w $0828,y                          ; C0B158 m0x0
+    lda.w entity_x,y                       ; C0B158 m0x0
     sec                                    ; C0B15B m0x0
     sbc.b $06                              ; C0B15C m0x0
     bmi loc_C0B16A                         ; C0B15E m0x0
@@ -6478,7 +6478,7 @@ loc_C0B16A:
 entity_hit_react:
     phx                                    ; C0B171 m0x0
     tyx                                    ; C0B172 m0x0
-    lda.w $0728,x                          ; C0B173 m0x0
+    lda.w entity_state,x                   ; C0B173 m0x0
     and.w #$FFFC                           ; C0B176 m0x0
     cmp.w #$0010                           ; C0B179 m0x0
     beq loc_C0B1AC                         ; C0B17C m0x0
@@ -6490,14 +6490,14 @@ entity_hit_react:
     bne loc_C0B19E                         ; C0B18C m0x0
     stz.w $0748,x                          ; C0B18E m0x0
     lda.w #$0014                           ; C0B191 m0x0
-    bit.w $0788,x                          ; C0B194 m0x0
+    bit.w entity_flags,x                   ; C0B194 m0x0
     bvs loc_C0B1A9                         ; C0B197 m0x0
     lda.w #$0016                           ; C0B199 m0x0
     bra loc_C0B1A9                         ; C0B19C m0x0
 
 loc_C0B19E:
     lda.w #$0010                           ; C0B19E m0x0
-    bit.w $0788,x                          ; C0B1A1 m0x0
+    bit.w entity_flags,x                   ; C0B1A1 m0x0
     bvs loc_C0B1A9                         ; C0B1A4 m0x0
     lda.w #$0012                           ; C0B1A6 m0x0
 
@@ -6513,9 +6513,9 @@ anim_cb_reset_state:
 
 set_entity_state:
     sta.b $18                              ; C0B1B1 m0x0
-    jsr.w sub_C09BDA                       ; C0B1B3 m0x0
+    jsr.w entity_ground_y_lookup           ; C0B1B3 m0x0
     txy                                    ; C0B1B6 m0x0
-    lda.w $0788,y                          ; C0B1B7 m0x0
+    lda.w entity_flags,y                   ; C0B1B7 m0x0
     cmp.w #$4000                           ; C0B1BA m0x0
     rol                                    ; C0B1BD m0x0
     asl                                    ; C0B1BE m0x0
@@ -6524,23 +6524,23 @@ set_entity_state:
     and.w #$000E                           ; C0B1C5 m0x0
     asl                                    ; C0B1C8 m0x0
     tax                                    ; C0B1C9 m0x0
-    lda.w $0788,y                          ; C0B1CA m0x0
+    lda.w entity_flags,y                   ; C0B1CA m0x0
     and.w #$BFFF                           ; C0B1CD m0x0
     ora.l $800000+(facing_flag_table&$FFFF),x   ; C0B1D0 m0x0
-    sta.w $0788,y                          ; C0B1D4 m0x0
+    sta.w entity_flags,y                   ; C0B1D4 m0x0
     lda.b $18                              ; C0B1D7 m0x0
     ora.l $800000+(facing_state_bits_table&$FFFF),x   ; C0B1D9 m0x0
-    sta.w $0728,y                          ; C0B1DD m0x0
+    sta.w entity_state,y                   ; C0B1DD m0x0
     tyx                                    ; C0B1E0 m0x0
     stz.w $0A08,x                          ; C0B1E1 m0x0
     stz.w $0A28,x                          ; C0B1E4 m0x0
-    ldx.w $0708,y                          ; C0B1E7 m0x0
-    lda.w $0728,y                          ; C0B1EA m0x0
+    ldx.w entity_type,y                    ; C0B1E7 m0x0
+    lda.w entity_state,y                   ; C0B1EA m0x0
     adc.w $0BAC                            ; C0B1ED m0x0
     adc.l $800000+(entity_state_anim_table&$FFFF),x   ; C0B1F0 m0x0
     tax                                    ; C0B1F4 m0x0
     lda.l $800000+(entity_state_anim_table&$FFFF),x   ; C0B1F5 m0x0
-    sta.w $09E8,y                          ; C0B1F9 m0x0
+    sta.w entity_anim_id,y                 ; C0B1F9 m0x0
     tyx                                    ; C0B1FC m0x0
     rts                                    ; C0B1FD m0x0
 
@@ -6768,7 +6768,7 @@ loc_C0BCC7:
     dey                                    ; C0BCD3 m0x0
     dey                                    ; C0BCD4 m0x0
     bne loc_C0BCC7                         ; C0BCD5 m0x0
-    jsr.w sub_C09234                       ; C0BCD7 m0x0
+    jsr.w vram_upload_shared_tileset_c5    ; C0BCD7 m0x0
     sep.b #$30                             ; C0BCDA m0x0
     lda.b #$80                             ; C0BCDC m1x1
     sta.w A1B1                             ; C0BCDE m1x1
@@ -6798,7 +6798,7 @@ loc_C0BCC7:
     lda.w #$BD20                           ; C0BD1A m0x1
     jmp.w loc_C0A4E9                       ; C0BD1D m0x1
 
-nmi_handler_BD20:
+nmi_handler_title_fade:
     rep.b #$10                             ; C0BD20 m0x0
     ldx.w #$01FF                           ; C0BD22 m0x0
     txs                                    ; C0BD25 m0x0
@@ -6818,7 +6818,7 @@ nmi_handler_BD20:
     lda.b #$02                             ; C0BD49 m1x1
     sta.w DASH2                            ; C0BD4B m1x1
     lda.b #$04                             ; C0BD4E m1x1
-    ora.b $02                              ; C0BD50 m1x1
+    ora.b dma_pending_mask                 ; C0BD50 m1x1
     sta.w MDMAEN                           ; C0BD52 m1x1
     lda.w $0B8A                            ; C0BD55 m1x1
     beq loc_C0BD67                         ; C0BD58 m1x1
@@ -6993,7 +6993,7 @@ loc_C0BE70:
 
 loc_C0BE91:
     rep.b #$30                             ; C0BE91 m1x1
-    jsr.w sub_C092F3                       ; C0BE93 m0x0
+    jsr.w mode1_reset_particles_and_oam    ; C0BE93 m0x0
     sep.b #$20                             ; C0BE96 m0x0
     jmp.w loc_C0C008                       ; C0BE98 m1x0
 
@@ -7010,7 +7010,7 @@ loc_C0BEA0:
     rep.b #$30                             ; C0BEAC m1x0
     stz.b $8C                              ; C0BEAE m0x0
     stz.b $90                              ; C0BEB0 m0x0
-    stz.b $02                              ; C0BEB2 m0x0
+    stz.b dma_pending_mask                 ; C0BEB2 m0x0
     jmp.w loc_C08042                       ; C0BEB4 m0x0
     incbin "../data/01.bin":$3EB7..$3EC0      ; 9 bytes
 

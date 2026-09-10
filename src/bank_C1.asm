@@ -109,7 +109,7 @@ upload_global_samples:
     lda.w #$3400                           ; C180D9 m0x0
     sta.l $00003A                          ; C180DC m0x0
     stz.w $003E                            ; C180E0 m0x0
-    jsr.w sub_C1815F                       ; C180E3 m0x0
+    jsr.w sample_uploader                  ; C180E3 m0x0
     lda.l $000036                          ; C180E6 m0x0
     sta.l $000038                          ; C180EA m0x0
     lda.l $00003A                          ; C180EE m0x0
@@ -162,7 +162,7 @@ upload_song_sound_effects:
     jsr.w upload_inline_spc_block          ; C1815B m0x0
     rts                                    ; C1815E m0x0
 
-sub_C1815F:
+sample_uploader:
     stz.w $003E                            ; C1815F m0x0
     ldx.w #$0000                           ; C18162 m0x0
     lda.l $00003E                          ; C18165 m0x0
@@ -416,7 +416,7 @@ upload_song_sample_set:
     sta.l $00003A                          ; C183BE m0x0
     lda.l $000040                          ; C183C2 m0x0
     sta.l $00003E                          ; C183C6 m0x0
-    jsr.w sub_C1815F                       ; C183CA m0x0
+    jsr.w sample_uploader                  ; C183CA m0x0
     rts                                    ; C183CD m0x0
 
 spc_command:
@@ -446,7 +446,7 @@ orphan_C183F1:
     rtl                                    ; C18402 m0x0
     incbin "../data/03.bin":$0403..$0415      ; 18 bytes
 
-sub_C18415:
+sfx_command_dispatch:
     tax                                    ; C18415 m0x0
     jsr.w write_spc_command                ; C18416 m0x0
     rtl                                    ; C18419 m0x0

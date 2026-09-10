@@ -95,3 +95,124 @@ data C1804C unused_spc_execute ; dead twin of execute_spc_sound_engine (present 
 ; ---- RAM adopted from Yoshifanatic1's DKC2 RAM map, justified by the shared clear_sprite_table ----
 ram 0200 oam_buffer            ; 128 x 4-byte sprite entries
 ram 0400 oam_buffer_upper      ; high OAM table
+
+; ---- from docs/naming_proposals.md (high + medium confidence; behaviour-derived) ----
+; ---- game-mode init (docs/naming_proposals.md section 1) ----
+C08292 mode0_level_init
+C0848C dma_setup_channel_step
+C084D7 mode1_level_init
+C08798 mode2_level_init
+C088AB title_screen_init
+C0A4A6 set_bg_scroll_prep
+C09234 vram_upload_shared_tileset_c5
+
+; ---- NMI handlers + per-mode scroll (section 2) ----
+C080F4 nmi_handler_gameplay
+C0BD20 nmi_handler_title_fade
+C08E9B nmi_scroll_mode0
+C08F47 nmi_scroll_mode1
+C09049 nmi_scroll_mode2
+C090FA nmi_scroll_title
+
+; ---- PPU/VRAM/OAM DMA helpers (section 3) ----
+C0A445 dma_fill_vram_zero
+C0A46A dma_upload_to_vram
+C0A483 dma_upload_to_cgram
+C09FB7 build_metatile_column_580
+C09E83 build_metatile_column_500
+C0A0F1 vram_upload_column_580
+C0A148 vram_upload_column_500
+C0A538 entity_build_oam_frame
+C09C16 vram_generate_particle_tile
+C09C28 vram_write_tile_row_planes
+C09C62 vram_stream_descriptor_dispatch
+C0A757 oam_emit_frame_1row
+C0A772 oam_emit_frame_2row
+C0A8F6 oam_emit_frame_1row_flip
+C0A911 oam_emit_frame_2row_flip
+C0AAAA oam_emit_frame_3row
+C0AC40 oam_emit_frame_3row_flip
+C0ADE7 oam_hide_unused_sprites
+C0ADFD oam_dma_upload
+C0AE7E entity_upload_pending_tiles
+C0AE1F entity_sort_draw_order
+C0AEB9 entity_render_order_reset
+C09D32 cgram_upload_queue_flush
+
+; ---- entity update / AI dispatch (section 4) ----
+C09AF6 entity_animate_only m0x0
+C09A61 entity_apply_hit_reaction m0x0
+C09AB8 entity_spawn_transform_a m0x0
+C09B00 entity_spawn_transform_b m0x0
+C09B89 entity_spawn_transform_c m0x0
+C099EF entity_ai_chase_player m0x0
+C09A5F entity_ai_none m0x0
+C098DA entity_update_tick
+C0A232 entity_accelerate_velocity_x
+C0A26F entity_apply_velocity_x
+C0A2B9 entity_apply_velocity_y
+C09BDA entity_ground_y_lookup
+C08E8E check_pending_player_attack
+C0A1B0 camera_follow_player
+C0A212 random_next
+C09D6A entity_init_from_table
+
+; ---- particle/weather subsystem (section 5) ----
+C09246 particle_table_clear
+C09253 particle_spawn_mode0_weather
+C092F3 mode1_reset_particles_and_oam
+C09331 particle_update_and_draw_mode0
+C09227 mode0_particle_draw_dispatch
+C094E4 sparkle_array_init
+C09521 sparkle_update_and_draw
+C0922A mode1_particle_dispatch
+C09230 mode2_particle_dispatch
+C09233 particle_dispatch_noop
+C095E3 particle_spawn_from_table
+C09781 particle_spawn_random
+C0B075 play_footstep_sound
+C0B0BC play_zone_transition_sound
+
+; ---- sound interface (section 6) ----
+C1815F sample_uploader
+C18415 sfx_command_dispatch
+
+; ---- RAM (section 7 entity fields + section 8 DP scratch) ----
+ram 0708 entity_type
+ram 0728 entity_state
+ram 0768 entity_hitstun_timer
+ram 0788 entity_flags
+ram 07C8 entity_frame_id
+ram 0828 entity_x
+ram 0848 entity_x_sub
+ram 0868 entity_vel_x
+ram 0888 entity_vel_x_target
+ram 08A8 entity_y
+ram 08C8 entity_y_sub
+ram 0948 entity_vel_y
+ram 0968 entity_parent_index
+ram 0988 entity_depth_key
+ram 09A8 entity_render_order
+ram 09E8 entity_anim_id
+ram 0A68 entity_anim_rate
+ram 0062 camera_x
+ram 0068 camera_y
+ram 0002 dma_pending_mask
+ram 0096 entity_render_index
+ram 004C entity_screen_x
+ram 004E entity_screen_y
+ram 0026 sprite_frame_ptr
+ram 0028 sprite_frame_bank
+ram 002A sprite_frame_ptr2
+ram 002C sprite_frame_bank2
+ram 0054 oam_entry_ptr
+ram 007A tilemap_a_addr
+ram 007C tilemap_a_bank
+ram 007E tilemap_b_addr
+ram 0080 metatile_data_bank
+ram 0086 level_width_mask
+ram 0088 level_height_mask
+ram 0098 layer_parallax_mode
+ram 009A camera_y_lookahead
+ram 0070 walk_cycle_timer
+ram 0072 walk_cycle_parity
