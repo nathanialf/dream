@@ -67,7 +67,14 @@ only 424 labels, so its output was discarded in favour of the tracer.
   `game_mode` 0 -> 1 -> 2 -> 3 -> 0 (in `nmi_handler_gameplay`), a leftover debug/attract
   mode cycle. It is how modes 1-3 are reached in `recomp/harness/inputs/`.
 - Coverage: the static trace is a strict superset of executed code; the input scripts
-  reach 110 of 123 routines, 8 of the remaining 13 are confirmed dead.
+  reach 111 of 123 routines; the rest is dead code or needs player 2 (below).
+- **B** is the attack button (`entity_apply_hit_reaction` forces `entity_state = $000C` on a
+  new press). `check_pending_player_attack` reads **player 2's** controller and applies the
+  same logic to enemies: a second pad drives enemy attacks, a debug/test feature of the
+  prototype and the only path to `anim_cb_hit_player` / `anim_cb_sfx_0602`.
+- The 1-row OAM emitters need sprite frame ids 1-3, which no animation script emits: dead.
+- `$8BDB` (formerly labelled `ppu_regs_default`) is the fall-through second half of
+  `mode0_camera_zone_update`, not a routine; `$8152`/`$814C` labels were stale-image artefacts.
 
 ## Data formats
 
