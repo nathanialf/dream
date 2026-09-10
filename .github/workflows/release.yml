@@ -97,7 +97,7 @@ jobs:
             toolchain:p
             cmake:p
             ninja:p
-            zip:p
+          install: zip
       - name: build
         shell: msys2 {0}
         run: |
