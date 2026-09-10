@@ -14,9 +14,9 @@
    * dashboard (nathanialf/ico, docs/index.html) — same near-black ground,
    * hairline borders, square corners, no shadows, dense mono micro-labels,
    * one serif for headings, contrast-audited text ramp. The one deliberate
-   * difference is the accent below: a warm banana/amber instead of ICO's
-   * sand, because this target is a mid-90s Rare SNES prototype rather than
-   * a PS2 title, and the ramp should say so at a glance.
+   * difference is the accent below: a green lifted from the game's own
+   * sprite palettes instead of ICO's sand, so the highlight is literally
+   * a colour the prototype puts on screen.
    *
    * FONTS: named FIRST so a local install is used when the visitor has
    * one, with a system stack behind it. Nothing is fetched either way —
@@ -25,14 +25,14 @@
    * COLOUR: the neutral ramp (near-black ground through near-white text)
    * is Tailwind-neutral #0a0a0a -> #f9fafb, the same ladder the ICO
    * dashboard uses, so the two read as one family of pages. The accent is
-   * new: #e8c15a, a warm banana/amber rather than a generic UI yellow —
-   * the hue Rare's SNES-era work (Donkey Kong Country's bananas, Diddy's
-   * Kong Quest UI) leaned on for exactly this kind of highlight, which
-   * reads as "this platform, this era" instead of "decomp dashboard, any
-   * era". Every text role sits at least one step up the ladder from the
+   * new: #00c552, which is SNES colour (r=0, g=24, b=10) from the green
+   * ramp of the main sprite palette block (data/palettes/palettes_main_block,
+   * decoded by tools/assetcodec.py) — one of the game's own greens, chosen
+   * from the candidates that clear 4.5:1 on the ground. Every text role
+   * sits at least one step up the ladder from the
    * portfolio-derived values ICO measured, so text clears WCAG 1.4.3
    * (4.5:1) and control outlines clear 1.4.11 (3:1). Measured ratios sit
-   * beside each token; --accent on --bg measures 11.5:1 (and, since
+   * beside each token; --accent on --bg measures 8.7:1 (and, since
    * contrast is symmetric, --on-accent on --accent measures the same
    * 11.5:1 the other way round).
    * ------------------------------------------------------------------ */
@@ -55,17 +55,17 @@
 
     /* -- accent + status -------------------------------------------------
        See the block comment above for why banana/amber rather than sand. */
-    --accent:#e8c15a;  /* 11.5:1 on --bg */
-    --on-accent:#0a0a0a;              /* 11.5:1 the other way round        */
+    --accent:#00c552;  /* 8.7:1 on --bg; SNES (0,24,10) from the sprite palettes */
+    --on-accent:#0a0a0a;              /* 8.7:1 the other way round         */
     /* Lighter tint of --accent, used ONLY as the "extracted" fill behind
        the "matched" fill in two-tone bars (see .bar i.ext below). It is
        fill colour inside an aria-hidden progress graphic that restates a
        number already in the text, exactly like the single-tone --accent
        fill below it, so it is exempt from 1.4.11 the same way that fill
        is, rather than failing it. */
-    --accent-dim:rgba(232,193,90,.32);
+    --accent-dim:rgba(0,197,82,.32);
     /* Focus is its OWN channel, not the accent: the selected control is
-       already an accent-coloured fill, and an amber ring on an amber fill
+       already an accent-coloured fill, and a green ring on a green fill
        is 1:1. #f9fafb is 18.9:1 on --bg, and the 2px outline-offset keeps
        --bg between the ring and any fill it sits on. */
     --focus:#f9fafb;
