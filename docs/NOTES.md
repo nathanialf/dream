@@ -72,6 +72,11 @@ only 424 labels, so its output was discarded in favour of the tracer.
   new press). `check_pending_player_attack` reads **player 2's** controller and applies the
   same logic to enemies: a second pad drives enemy attacks, a debug/test feature of the
   prototype and the only path to `anim_cb_hit_player` / `anim_cb_sfx_0602`.
+- The three unreferenced picture strips in bank `$C1` (`010000`, `012800`, `013300`) decode,
+  at tile base `$44`, to the captions STRIKE, OUT, PITCH and HIT B. Rare shipped *Ken Griffey
+  Jr.'s Winning Run* on SNES in 1996; these look like leftovers of a baseball project on the
+  same development cartridge (inference from the text alone, no code references them).
+- The empty song slots 3-7 cannot be started: `spc_command` with those numbers never returns.
 - The 1-row OAM emitters need sprite frame ids 1-3, which no animation script emits: dead.
 - `$8BDB` (formerly labelled `ppu_regs_default`) is the fall-through second half of
   `mode0_camera_zone_update`, not a routine; `$8152`/`$814C` labels were stale-image artefacts.

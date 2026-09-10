@@ -970,7 +970,9 @@ static void draw_music(Gallery* g, uint32_t* fb) {
     fb_textf(fb, 3, y, C_TEXT, "%s  %06X-%06X  %u bytes", asset_name(idx),
              kGalleryAssets[idx].start, kGalleryAssets[idx].end, asset_size(idx));
     y += LINE;
-    fb_text(fb, 3, y, "B: spc_command with A = song number", C_DIM);
+    fb_text(fb, 3, y, rd16(g, kGalleryAssets[idx].start + 2u) != 0
+                      ? "B: spc_command with A = song number"
+                      : "empty slot: nothing to upload, not playable", C_DIM);
   } else if(st->item < songs + n1) {
     int id = st->item - songs;
     uint16_t word = sfx_trigger_word(id);
@@ -978,13 +980,13 @@ static void draw_music(Gallery* g, uint32_t* fb) {
              0x2412 + 2 * id);
     y += LINE;
     if(word) fb_textf(fb, 3, y, C_DIM, "the game sends $%04X (channel %d)", word, word >> 8);
-    else fb_text(fb, 3, y, "no animation script or routine ever asks for it", C_MARK);
+    else fb_text(fb, 3, y, "no script or routine ever asks for it", C_MARK);
   } else {
     int id = SFX_BANK2_ID + (st->item - songs - n1);
     fb_textf(fb, 3, y, C_TEXT, "bank 2 entry %d of %d, pointer SPC $%04X",
              id - SFX_BANK2_ID, n2, 0x2E96 + 2 * (id - SFX_BANK2_ID));
     y += LINE;
-    fb_text(fb, 3, y, "no animation script or routine ever asks for it", C_MARK);
+    fb_text(fb, 3, y, "no script or routine ever asks for it", C_MARK);
   }
   y += LINE;
   fb_text(fb, 3, y, "cmd $FB (fade + start song) is never sent", C_DIM);
@@ -1050,7 +1052,7 @@ static void draw_samples(Gallery* g, uint32_t* fb) {
   if(st->item < 256 && !g->brrUsed[st->item])
     fb_text(fb, 3, y, "no song's sample list references this one", C_MARK);
   else
-    fb_text(fb, 3, y, "referenced by at least one song's sample list", C_DIM);
+    fb_text(fb, 3, y, "referenced by a song's sample list", C_DIM);
   draw_foot(fb, "d-pad sample   LR x10   B play   A back");
 }
 
@@ -1164,8 +1166,12 @@ static void apply(Gallery* g, uint16_t press) {
       int songs, n1, n2;
       music_counts(g, &songs, &n1, &n2);
       if(st->item < songs) {
-        g->reqKind = GALLERY_REQ_SONG;
-        g->reqArg = st->item;
+        /* an empty slot has nothing to upload and the ROM's own path never returns
+         * from one (see recomp/app/music.c), so it is listed but not playable */
+        if(rd16(g, kGalleryAssets[g->song[st->item]].start + 2u) != 0) {
+          g->reqKind = GALLERY_REQ_SONG;
+          g->reqArg = st->item;
+        }
       } else {
         int id = st->item < songs + n1 ? st->item - songs
                                        : SFX_BANK2_ID + (st->item - songs - n1);
