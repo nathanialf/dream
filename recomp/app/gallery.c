@@ -5,6 +5,15 @@
  * plus spill strip), the same BRR filter/shift rules. They read the user's ROM image and
  * nothing else; docs/data_formats.md is the reference for every offset that is named
  * here rather than taken from the manifest.
+ *
+ * Colour is not a picker any more. Every page that can be shown in the colours the
+ * game itself gives it is: a scene's CGRAM is rebuilt here by replaying the CGRAM
+ * DMAs its init issues (kGalleryPalUploads, generated from the mode-init bodies), a
+ * BG tileset is drawn through the CGRAM of the scene that uploads it, and a sprite
+ * frame is drawn with the OBJ palette the entity that plays it carries in its
+ * `entity_flags` init word. The picker is still there and still does what it did,
+ * but it is now an explicit override and says so. docs/data_formats.md's "Palette
+ * assignment" section is the derivation; everything below reads it out of the ROM.
  */
 #include "gallery.h"
 
@@ -65,6 +74,7 @@ typedef struct {
   uint8_t hdr[8];
   int n1, n2, tileOff, unk1, unk2, ntiles1, vramOff, flags, ntiles2;
   int nrec, ntiles, spill;
+  int altPal;         /* alternate format: the palette its OAM records carry */
   int cw, chh;        /* the assembled part */
   int w, h;           /* including the spill strip */
   bool truncated;
@@ -74,8 +84,10 @@ typedef struct {
 
 typedef struct { uint32_t off; int rows; const char* name; } PalBlock;
 
-/* Rows of 16 colours. The main block holds every palette the four scenes upload
- * (docs/data_formats.md 1a); the title palette is the 256-colour title-screen block. */
+/* Rows of 16 colours, for the override picker and for the pages that have nothing
+ * else: the main block every scene draws its CGRAM from (docs/data_formats.md 1a),
+ * the 256-colour title block, and the cycling ramp. Which of these rows a scene
+ * actually puts where is kGalleryPalUploads' job, not this list's. */
 static const PalBlock kMainPals[] = {
   { 0x046C48u, 64, "main" },
   { 0x06A36Bu, 16, "title" },
@@ -94,6 +106,19 @@ static const uint16_t kSfxTriggered[] = {
   0x0602, 0x0606, 0x060D, 0x060E, 0x0611,
   0x0703, 0x0704, 0x0705, 0x0709, 0x0710, 0x0712,
 };
+
+/* ---- the palettes the game actually gives a frame -------------------------------- */
+
+/* At most four distinct {scene, OBJ palette} pairs turn out to apply to any one
+ * frame in this ROM; six is the array so the walk can never overflow it. */
+#define GAL_MAX_FRAME_PAL 6
+
+typedef struct {
+  uint8_t  n;
+  uint8_t  mode[GAL_MAX_FRAME_PAL];   /* game_mode whose CGRAM holds the colours */
+  uint8_t  pal[GAL_MAX_FRAME_PAL];    /* OBJ palette 0-7 -> CGRAM $80 + 16*pal */
+  uint16_t types[GAL_MAX_FRAME_PAL];  /* bit (entity_type / 2) per type that plays it */
+} FramePal;
 
 typedef struct { int item, pal, page; } SecState;
 
@@ -125,6 +150,14 @@ struct Gallery {
 
   uint8_t* canvas;
   uint8_t* claimed;
+
+  /* The 256 colours each scene's init leaves in CGRAM, and which of them that
+   * init actually wrote (the rest are whatever the previous scene left). */
+  uint16_t cgram[GAL_MODE_COUNT][256];
+  uint8_t cgramSet[GAL_MODE_COUNT][256];
+
+  /* One row per manifest asset; only the sprite_frame rows are filled. */
+  FramePal* framePal;
 };
 
 /* ---- ROM access ----------------------------------------------------------------- */
@@ -226,11 +259,19 @@ static void tile_pixels(const Gallery* g, uint32_t off, int bpp, uint8_t* px) {
 }
 
 /* 15-bit BGR word -> RGB. */
-static uint32_t pal_colour(const Gallery* g, uint32_t palOff, int index) {
-  uint16_t w = rd16(g, palOff + (uint32_t) (2 * index));
+static uint32_t bgr15(uint16_t w) {
   unsigned r = w & 31u, gr = (w >> 5) & 31u, b = (w >> 10) & 31u;
   return RGB((r << 3) | (r >> 2), (gr << 3) | (gr >> 2), (b << 3) | (b >> 2));
 }
+
+/* `count` colours of a palette block in the ROM, resolved to RGB. */
+static void pal_from_rom(const Gallery* g, uint32_t palOff, int count, uint32_t* out) {
+  for(int i = 0; i < count; i++) out[i] = bgr15(rd16(g, palOff + (uint32_t) (2 * i)));
+}
+
+/* Defined with the input handling below; the page renderers need it for the
+ * palette cursor, which now wraps over "the game's palettes, then the picker". */
+static int wrap(int v, int n);
 
 static uint32_t checker(int x, int y) {
   return (((x >> 2) + (y >> 2)) & 1) ? C_CHECK_B : C_CHECK_A;
@@ -259,6 +300,18 @@ static uint32_t pal_pick(const PalBlock* set, int n, int idx, const char** name,
   *name = set[0].name;
   *row = 0;
   return set[0].off;
+}
+
+#define MAIN_PAL_N ((int) (sizeof(kMainPals) / sizeof(kMainPals[0])))
+
+/* The picker, now an override rather than the only way to colour a page: fills 16
+ * RGB entries and returns the line that says which row the user asked for. */
+static void pal_override(const Gallery* g, int idx, uint32_t* rgb, char* line, size_t cap) {
+  const char* name;
+  int row;
+  uint32_t off = pal_pick(kMainPals, MAIN_PAL_N, idx, &name, &row);
+  pal_from_rom(g, off, 16, rgb);
+  snprintf(line, cap, "OVERRIDE picker: %s row %d @ %06X", name, row, off);
 }
 
 /* ---- the manifest ---------------------------------------------------------------- */
@@ -297,6 +350,280 @@ static int* collect(unsigned kindMask, int* countOut, bool skipBankC1) {
   }
   *countOut = n;
   return out;
+}
+
+/* ---- palette assignment ----------------------------------------------------------
+ *
+ * docs/data_formats.md, "Palette assignment". The generated header carries the
+ * addresses and counts; the bytes at those addresses come from the user's ROM,
+ * here, at run time.
+ * -------------------------------------------------------------------------------- */
+
+/* kGalleryAssets is sorted by start, so an exact-start lookup is a binary search. */
+static int asset_by_start(uint32_t start) {
+  int lo = 0, hi = (int) kGalleryAssetCount - 1;
+  while(lo <= hi) {
+    int mid = (lo + hi) / 2;
+    if(kGalleryAssets[mid].start == start) return mid;
+    if(kGalleryAssets[mid].start < start) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+}
+
+/* Replay every CGRAM write a scene's init issues, in order, into a 256-entry
+ * table -- the same DMAs `dma_upload_to_cgram` performs, with the same overwrite
+ * order, so a later narrower upload wins exactly as it does in the game. */
+static void build_mode_cgram(Gallery* g) {
+  memset(g->cgram, 0, sizeof(g->cgram));
+  memset(g->cgramSet, 0, sizeof(g->cgramSet));
+  for(unsigned u = 0; u < kGalleryPalUploadCount; u++) {
+    const GalleryPalUpload* p = &kGalleryPalUploads[u];
+    if(p->mode >= GAL_MODE_COUNT) continue;
+    for(unsigned i = 0; i < p->colours; i++) {
+      unsigned e = p->cgadd + i;
+      if(e >= 256) break;
+      g->cgram[p->mode][e] = rd16(g, p->src + (uint32_t) (2 * i));
+      g->cgramSet[p->mode][e] = 1;
+    }
+  }
+}
+
+/* `count` entries of a scene's CGRAM, resolved to RGB. */
+static void pal_from_cgram(const Gallery* g, int mode, int first, int count, uint32_t* out) {
+  for(int i = 0; i < count; i++) {
+    int e = first + i;
+    out[i] = bgr15((mode >= 0 && mode < GAL_MODE_COUNT && e >= 0 && e < 256)
+                   ? g->cgram[mode][e] : 0);
+  }
+}
+
+/* ---- which frames the game plays, and with which OBJ palette ---------------------
+ *
+ * entity_build_oam_frame writes `entity_flags` into $1A before the emitter runs and
+ * the emitter only ever touches the low byte, so the OAM attribute byte of every
+ * sprite of the frame is the *high* byte of entity_flags -- palette in bits 3-1.
+ * entity_flags is set once, from byte +12 of the 18-byte init record, and no routine
+ * in the ROM writes bits 9-11 again (docs/data_formats.md). So an entity's palette is
+ * a constant of its init record, and a frame's palette is the palette of whichever
+ * entities can reach the animation that names it.
+ * -------------------------------------------------------------------------------- */
+
+#define ANIM_IDS  ((int) GX_ANIM_COUNT)
+
+/* The script index holds 96 distinct offsets; a script runs to whichever of them
+ * comes next, or to its own terminator record, whichever is first. */
+static uint32_t script_limit(const Gallery* g, uint16_t p) {
+  uint32_t best = (uint32_t) p + 0x800u;
+  for(int i = 0; i < ANIM_IDS; i++) {
+    uint16_t q = rd16(g, GX_ANIM_INDEX + (uint32_t) (2 * i));
+    if(q > p && (uint32_t) q < best) best = q;
+  }
+  return best > 0x10000u ? 0x10000u : best;
+}
+
+typedef struct {
+  uint16_t type, state, flags, parent;
+  uint8_t anims[174];      /* ANIM_IDS; anim id / 2 -> reachable */
+} EntitySlot;
+
+/* Every animation id the two-level table at data_C0B7AE gives this entity type,
+ * over the twelve even states the state machine can set. */
+static void row_anims(const Gallery* g, int type, int bac, uint8_t* set) {
+  if(type < 0 || type > 0x10) return;
+  uint16_t base = rd16(g, GX_STATE_ANIM + (uint32_t) type);
+  for(int st = 0; st < 0x18; st += 2) {
+    uint32_t idx = (uint32_t) base + (uint32_t) bac + (uint32_t) st;
+    if(GX_STATE_ANIM + idx + 1u >= GX_STATE_ANIM_END) continue;
+    uint16_t a = rd16(g, GX_STATE_ANIM + idx);
+    if(a != 0 && (a & 1) == 0 && a < (uint16_t) (ANIM_IDS * 2)) set[a / 2] = 1;
+  }
+}
+
+static void add_anim(uint8_t* set, int a) {
+  if(a > 0 && (a & 1) == 0 && a < ANIM_IDS * 2) set[a / 2] = 1;
+}
+
+/* frame id -> the file offset of the frame it names, through data_C40000. */
+static uint32_t frame_id_offset(const Gallery* g, uint16_t fid) {
+  if(fid == 0 || fid >= (uint16_t) (GX_FRAME_COUNT * 4) || (fid & 3) != 0) return 0;
+  uint32_t e = GX_FRAME_TABLE + fid;
+  return (uint32_t) (((rd8(g, e + 2u) & 0x3Fu) << 16) | rd16(g, e));
+}
+
+/* Record one {scene, palette, type} on the frame at `off`, merging into whatever
+ * an earlier entity already recorded for the same {scene, palette}. */
+static void frame_pal_add(Gallery* g, uint32_t off, int mode, int pal, int type) {
+  int idx = asset_by_start(off);
+  if(idx < 0 || kGalleryAssets[idx].kind != GK_SPRITE_FRAME) return;
+  FramePal* fp = &g->framePal[idx];
+  for(int i = 0; i < fp->n; i++)
+    if(fp->mode[i] == mode && fp->pal[i] == pal) {
+      fp->types[i] |= (uint16_t) (1u << (type / 2));
+      return;
+    }
+  if(fp->n >= GAL_MAX_FRAME_PAL) return;
+  fp->mode[fp->n] = (uint8_t) mode;
+  fp->pal[fp->n] = (uint8_t) pal;
+  fp->types[fp->n] = (uint16_t) (1u << (type / 2));
+  fp->n++;
+}
+
+/* Walk one animation script, recording its frames and following the one link a
+ * terminator can carry (duration $FFFF = switch to the animation id in `frame`). */
+static void walk_script(Gallery* g, int aid, uint8_t* seen, int mode, int pal, int type) {
+  if(aid <= 0 || (aid & 1) != 0 || aid >= ANIM_IDS * 2) return;
+  uint16_t p = rd16(g, GX_ANIM_INDEX + (uint32_t) aid);
+  uint32_t limit = GX_BANK_C4 + script_limit(g, p);
+  uint32_t o = GX_BANK_C4 + p;
+  for(int i = 0; i < 1024; i++) {
+    uint32_t q = o + (uint32_t) (8 * i);
+    if(q + 6u > limit) break;
+    uint16_t dur = rd16(g, q + 4u), fr = rd16(g, q + 6u);
+    if(dur == 0xFFFE) break;
+    if(dur == 0xFFFF) {
+      if(fr > 0 && (fr & 1) == 0 && fr < (uint16_t) (ANIM_IDS * 2) && !seen[fr / 2]) {
+        seen[fr / 2] = 1;
+        walk_script(g, fr, seen, mode, pal, type);
+      }
+      break;
+    }
+    uint32_t off = frame_id_offset(g, fr);
+    if(off != 0) frame_pal_add(g, off, mode, pal, type);
+  }
+}
+
+/* The whole derivation, once, at gallery_create: for each of the four scenes, the
+ * entity roster its init table spawns, the animations each entity can reach, and
+ * the frames those animations name. */
+static void build_frame_palettes(Gallery* g) {
+  EntitySlot slot[16];
+  for(int mode = 0; mode < 4; mode++) {
+    int bac = (int) kGalleryStateRowOffset[mode];
+    uint32_t x = rd16(g, GX_ENTITY_TABLE + (uint32_t) (2 * mode));
+    int n = 0;
+    while(n < 16) {
+      uint32_t rec = GX_ENTITY_TABLE + x;
+      uint16_t t = rd16(g, rec);
+      if((t & 0x8000u) != 0) break;
+      memset(&slot[n], 0, sizeof(slot[n]));
+      slot[n].type = t;
+      slot[n].state = rd16(g, rec + 2u);
+      slot[n].flags = rd16(g, rec + 12u);
+      slot[n].parent = rd16(g, rec + 14u);
+      n++;
+      x += GX_ENTITY_REC;
+    }
+
+    /* The animation an entity starts on. entity_init_from_table takes it from the
+     * record's own second word when the type is 0, and from the two-level table
+     * otherwise. */
+    for(int i = 0; i < n; i++) {
+      int a0 = 0;
+      if(slot[i].type == 0) {
+        a0 = slot[i].state;
+      } else if(slot[i].type <= 0x10) {
+        uint32_t idx = (uint32_t) rd16(g, GX_STATE_ANIM + slot[i].type)
+                     + (uint32_t) bac + slot[i].state;
+        if(GX_STATE_ANIM + idx + 1u < GX_STATE_ANIM_END) a0 = rd16(g, GX_STATE_ANIM + idx);
+      }
+      /* Types 4, 6 and $0A are the spawn transforms: their animation is the
+       * parent's, offset. Fill the others first, then them. */
+      if(slot[i].type == 4 || slot[i].type == 6 || slot[i].type == 0x0A) continue;
+      if(slot[i].type == 0) add_anim(slot[i].anims, a0);
+      else { row_anims(g, slot[i].type, bac, slot[i].anims); add_anim(slot[i].anims, a0); }
+    }
+    for(int i = 0; i < n; i++) {
+      int t = slot[i].type;
+      if(t != 4 && t != 6 && t != 0x0A) continue;
+      int p = slot[i].parent / 2;
+      const uint8_t* pa = (p >= 0 && p < n) ? slot[p].anims : NULL;
+      if(t == 6) {
+        /* entity_spawn_transform_b $C0:9B00: game_mode 1 forces anim $0158,
+         * game_mode 2 returns before touching the animation at all. */
+        if(mode == 1) { add_anim(slot[i].anims, 0x0158); continue; }
+        if(mode == 2) continue;
+      }
+      if(pa == NULL) continue;
+      for(int a = 2; a < ANIM_IDS * 2; a += 2) {
+        if(!pa[a / 2]) continue;
+        if(t == 4) add_anim(slot[i].anims, a + 2);            /* $9AE4 adc #$0002 */
+        else if(t == 6) add_anim(slot[i].anims, a + 4);        /* $9B3F adc #$0004 */
+        else {
+          /* $9BC0/$9BC3: parent + 4 + $0BB6, and $0BB6 cycles 2 -> 4 -> 0 at
+           * $C081DB; at 0 the entity is not drawn at all. */
+          add_anim(slot[i].anims, a + 6);
+          add_anim(slot[i].anims, a + 8);
+        }
+      }
+    }
+
+    for(int i = 0; i < n; i++) {
+      int pal = (slot[i].flags >> 9) & 7;
+      uint8_t seen[174];
+      memset(seen, 0, sizeof(seen));
+      for(int a = 2; a < ANIM_IDS * 2; a += 2) {
+        if(!slot[i].anims[a / 2] || seen[a / 2]) continue;
+        seen[a / 2] = 1;
+        walk_script(g, a, seen, mode, pal, slot[i].type);
+      }
+    }
+  }
+}
+
+/* ---- background palettes ---------------------------------------------------------
+ *
+ * A bare tileset page has no tilemap word to take a palette row from, so the row it
+ * is drawn with is the row most of its tiles are referenced with in the maps of the
+ * scene that uploads it. Returns -1 when nothing references the set.
+ * -------------------------------------------------------------------------------- */
+
+static const GalleryBgTileset* bg_tileset_of(uint32_t start) {
+  for(unsigned i = 0; i < kGalleryBgTilesetCount; i++)
+    if(kGalleryBgTilesets[i].tileset == start) return &kGalleryBgTilesets[i];
+  return NULL;
+}
+
+static const GalleryObjTileset* obj_tileset_of(uint32_t start) {
+  for(unsigned i = 0; i < kGalleryObjTilesetCount; i++)
+    if(kGalleryObjTilesets[i].tileset == start) return &kGalleryObjTilesets[i];
+  return NULL;
+}
+
+/* The scene rewrites some CGRAM entries after its init (an HDMA colour table, a
+ * palette-cycle ramp, a zone palette the streaming descriptors carry). If the row
+ * being shown overlaps one, say so rather than let the page imply the colours are
+ * fixed for the whole frame. */
+static const char* pal_animated_note(int mode, int first, int count) {
+  for(unsigned i = 0; i < kGalleryPalAnimatedCount; i++) {
+    const GalleryPalAnimated* a = &kGalleryPalAnimated[i];
+    if(a->mode != mode) continue;
+    if(first < a->first + a->count && a->first < first + count) return a->what;
+  }
+  return NULL;
+}
+
+static int bg_default_row(const Gallery* g, const GalleryBgTileset* bt, int ntiles,
+                          int* votesOut, int* totalOut) {
+  int hist[8];
+  memset(hist, 0, sizeof(hist));
+  int first = (bt->vram - bt->charBase) / 16;      /* 4bpp: 16 words per tile */
+  int total = 0;
+  for(int m = 0; m < bt->nmaps; m++) {
+    for(uint32_t o = bt->maps[m].start; o + 1u < bt->maps[m].end; o += 2) {
+      uint16_t w = rd16(g, o);
+      int idx = (int) (w & 0x3FFu) - first;
+      if(idx < 0 || idx >= ntiles) continue;
+      hist[(w >> 10) & 7]++;
+      total++;
+    }
+  }
+  if(total == 0) { if(votesOut) *votesOut = 0; if(totalOut) *totalOut = 0; return -1; }
+  int best = 0;
+  for(int i = 1; i < 8; i++) if(hist[i] > hist[best]) best = i;
+  if(votesOut) *votesOut = hist[best];
+  if(totalOut) *totalOut = total;
+  return best;
 }
 
 /* ---- which BRR samples the songs actually use ------------------------------------ */
@@ -510,14 +837,22 @@ static bool frame_build_alt(Gallery* g, int assetIdx, FrameInfo* fi) {
   for(int i = 0; i < 8; i++) fi->hdr[i] = rd8(g, s + (uint32_t) i);
 
   int n = 0;
+  int palVotes[8];
+  memset(palVotes, 0, sizeof(palVotes));
   while(n < 200) {
     uint32_t p = s + 8u + (uint32_t) (3 * n);
     if(p + 2u >= e) break;
     uint8_t attr = rd8(g, p + 2u);
     if(attr < 0x1C || attr > 0x22) break;
+    palVotes[(attr >> 1) & 7]++;
     n++;
   }
   fi->nrec = n;
+  /* The record's low OBJ attribute byte decodes as vhppp pN (docs/data_formats.md
+   * 1c), so bits 3-1 are the palette the frame's own data asks for -- the only
+   * palette evidence there is for a format the live game never reads. */
+  fi->altPal = 0;
+  for(int i = 1; i < 8; i++) if(palVotes[i] > palVotes[fi->altPal]) fi->altPal = i;
   uint32_t recEnd = s + 8u + (uint32_t) (3 * n);
   fi->ntiles = recEnd < e ? (int) ((e - recEnd) / 32u) : 0;
 
@@ -571,7 +906,7 @@ static bool frame_build_alt(Gallery* g, int assetIdx, FrameInfo* fi) {
 
 /* Blit the assembled canvas, centred in the box, colour 0 showing the checkerboard. */
 static void canvas_draw(const Gallery* g, uint32_t* fb, const FrameInfo* fi,
-                        uint32_t palOff, int bx, int by, int bw, int bh) {
+                        const uint32_t* rgb, int bx, int by, int bw, int bh) {
   int x0 = bx + (bw - fi->w) / 2;
   int y0 = by + (bh - fi->h) / 2;
   if(x0 < bx) x0 = bx;
@@ -583,7 +918,7 @@ static void canvas_draw(const Gallery* g, uint32_t* fb, const FrameInfo* fi,
       int dx = x0 + x;
       if(dx < bx || dx >= bx + bw) continue;
       uint8_t v = g->canvas[y * CANVAS_W + x];
-      fb_px(fb, dx, dy, v == 0 ? checker(dx, dy) : pal_colour(g, palOff, v));
+      fb_px(fb, dx, dy, v == 0 ? checker(dx, dy) : rgb[v]);
     }
   }
 }
@@ -591,8 +926,8 @@ static void canvas_draw(const Gallery* g, uint32_t* fb, const FrameInfo* fi,
 /* ---- tile grids and tilemaps ------------------------------------------------------ */
 
 static int draw_tile_grid(const Gallery* g, uint32_t* fb, uint32_t start, uint32_t end,
-                          int bpp, uint32_t palOff, int x0, int y0, int cols, int maxRows,
-                          int firstTile) {
+                          int bpp, const uint32_t* rgb, int x0, int y0, int cols,
+                          int maxRows, int firstTile) {
   int tsize = bpp * 8;
   int ntiles = (int) ((end - start) / (uint32_t) tsize);
   uint8_t px[64];
@@ -606,7 +941,7 @@ static int draw_tile_grid(const Gallery* g, uint32_t* fb, uint32_t start, uint32
         for(int x = 0; x < 8; x++) {
           int dx = x0 + c * 8 + x, dy = y0 + r * 8 + y;
           uint8_t v = px[y * 8 + x];
-          fb_px(fb, dx, dy, v == 0 ? checker(dx, dy) : pal_colour(g, palOff, v));
+          fb_px(fb, dx, dy, v == 0 ? checker(dx, dy) : rgb[v]);
         }
       drawn++;
     }
@@ -617,8 +952,8 @@ static int draw_tile_grid(const Gallery* g, uint32_t* fb, uint32_t start, uint32
  * numbers are VRAM-relative and start at $44 (their tilesets never reached VRAM, so the
  * base is read off the maps themselves -- see recomp/app/README.md). */
 static void draw_tilemap(const Gallery* g, uint32_t* fb, uint32_t mapOff, int words,
-                         uint32_t tilesOff, uint32_t tilesEnd, uint32_t palOff,
-                         int baseTile, int cols, int x0, int y0) {
+                         uint32_t tilesOff, uint32_t tilesEnd, const uint32_t* rgb,
+                         bool wordPal, int baseTile, int cols, int x0, int y0) {
   int ntiles = (int) ((tilesEnd - tilesOff) / 32u);
   uint8_t px[64];
   for(int i = 0; i < words; i++) {
@@ -632,10 +967,13 @@ static void draw_tilemap(const Gallery* g, uint32_t* fb, uint32_t mapOff, int wo
     }
     tile_pixels(g, tilesOff + (uint32_t) (idx * 32), 4, px);
     bool hflip = (w & 0x4000) != 0, vflip = (w & 0x8000) != 0;
+    /* wordPal: `rgb` is the whole 128-colour BG half of CGRAM and the word's own
+     * palette bits pick the row; otherwise `rgb` is already the one row to use. */
+    const uint32_t* row = wordPal ? rgb + 16 * ((w >> 10) & 7) : rgb;
     for(int y = 0; y < 8; y++)
       for(int x = 0; x < 8; x++) {
         uint8_t v = px[(vflip ? 7 - y : y) * 8 + (hflip ? 7 - x : x)];
-        fb_px(fb, cx + x, cy + y, v == 0 ? checker(cx + x, cy + y) : pal_colour(g, palOff, v));
+        fb_px(fb, cx + x, cy + y, v == 0 ? checker(cx + x, cy + y) : row[v]);
       }
   }
 }
@@ -658,12 +996,22 @@ static void draw_foot(uint32_t* fb, const char* s) {
   fb_text(fb, 3, FOOT_Y, s, C_DIM);
 }
 
-static void draw_palette_strip(const Gallery* g, uint32_t* fb, uint32_t palOff,
-                               int count, int x, int y) {
-  for(int i = 0; i < count; i++) fb_fill(fb, x + i * 5, y, 4, 5, pal_colour(g, palOff, i));
+static void draw_palette_strip(uint32_t* fb, const uint32_t* rgb, int count, int x, int y) {
+  for(int i = 0; i < count; i++) fb_fill(fb, x + i * 5, y, 4, 5, rgb[i]);
 }
 
 /* ---- sections -------------------------------------------------------------------- */
+
+/* The entity types a frame's {scene, palette} row belongs to, as "$02 $04". */
+static void types_str(uint16_t mask, char* out, size_t cap) {
+  size_t k = 0;
+  out[0] = 0;
+  for(int t = 0; t < 16 && k + 4 < cap; t++) {
+    if(!((mask >> t) & 1u)) continue;
+    k += (size_t) snprintf(out + k, cap - k, "%s$%02X", k ? " " : "", t * 2);
+  }
+  if(k == 0) snprintf(out, cap, "-");
+}
 
 static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
   SecState* st = &g->st[alt ? GALLERY_SEC_SPRITES_ALT : GALLERY_SEC_SPRITES];
@@ -680,16 +1028,46 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
     return;
   }
   int idx = list[st->item];
-  const char* palName;
-  int palRow;
-  uint32_t palOff = pal_pick(kMainPals, (int) (sizeof(kMainPals) / sizeof(kMainPals[0])),
-                             st->pal, &palName, &palRow);
 
   FrameInfo fi;
+  memset(&fi, 0, sizeof(fi));
   bool ok = alt ? frame_build_alt(g, idx, &fi) : frame_build_live(g, idx, &fi);
-  if(ok) canvas_draw(g, fb, &fi, palOff, 4, 12, 248, 150);
 
-  int y = 166;
+  /* The palettes the game gives this frame. A live frame gets them from the
+   * entities that can play it; an alternate-format frame is played by nothing, so
+   * the nearest evidence is the palette its own OAM records carry. */
+  const FramePal* fp = g->framePal != NULL ? &g->framePal[idx] : NULL;
+  int nauto = alt ? (ok && fi.nrec > 0 ? 1 : 0) : (fp != NULL ? fp->n : 0);
+  int total = nauto + pal_total(kMainPals, MAIN_PAL_N);
+  int sel = wrap(st->pal, total);
+
+  uint32_t rgb[16];
+  char palLine[64], whoLine[64];
+  whoLine[0] = 0;
+  if(sel < nauto) {
+    int mode = alt ? 0 : fp->mode[sel];
+    int pal  = alt ? fi.altPal : fp->pal[sel];
+    pal_from_cgram(g, mode, 0x80 + 16 * pal, 16, rgb);
+    snprintf(palLine, sizeof(palLine), "OBJ pal %d = CGRAM $%02X, %s", pal, 0x80 + 16 * pal,
+             kGalleryModeName[mode]);
+    if(alt) {
+      snprintf(whoLine, sizeof(whoLine), "no live frame table entry: palette off its own attr");
+    } else {
+      char t[32];
+      types_str(fp->types[sel], t, sizeof(t));
+      snprintf(whoLine, sizeof(whoLine), "entity types %s   alternative %d/%d", t,
+               sel + 1, nauto);
+    }
+  } else {
+    pal_override(g, sel - nauto, rgb, palLine, sizeof(palLine));
+    snprintf(whoLine, sizeof(whoLine), "%s",
+             nauto ? "not the palette the game uses"
+                   : "no entity in modes 0-3 plays this frame");
+  }
+  if(ok) canvas_draw(g, fb, &fi, rgb, 4, 12, 248, 136);
+
+  draw_palette_strip(fb, rgb, 16, 3, 150);
+  int y = 158;
   fb_textf(fb, 3, y, C_TEXT, "%s %06X-%06X %u bytes", asset_name(idx),
            kGalleryAssets[idx].start, kGalleryAssets[idx].end, asset_size(idx));
   y += LINE;
@@ -712,9 +1090,11 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
              fi.nrec, fi.ntiles, fi.spill, fi.cw, fi.chh);
   }
   y += LINE;
-  fb_textf(fb, 3, y, C_DIM, "palette %s row %d @ %06X", palName, palRow, palOff);
-  draw_palette_strip(g, fb, palOff, 16, 174, y);
-  draw_foot(fb, "d-pad frame + palette   LR x25   A back");
+  fb_text(fb, 3, y, palLine, sel < nauto ? C_TEXT : C_MARK);
+  y += LINE;
+  fb_text(fb, 3, y, whoLine, C_DIM);
+  draw_foot(fb, nauto > 1 ? "d-pad frame + palette   LR x25   A back"
+                          : "d-pad frame   up/down override   A back");
 }
 
 static void draw_backgrounds(Gallery* g, uint32_t* fb) {
@@ -730,32 +1110,81 @@ static void draw_backgrounds(Gallery* g, uint32_t* fb) {
     return;
   }
   int idx = g->bg[st->item];
+  uint32_t start = kGalleryAssets[idx].start;
   int bpp = kGalleryAssets[idx].kind == GK_TILESET_2BPP ? 2
           : kGalleryAssets[idx].kind == GK_TILESET_8BPP ? 8 : 4;
-  const char* palName;
-  int palRow;
-  uint32_t palOff = pal_pick(kMainPals, (int) (sizeof(kMainPals) / sizeof(kMainPals[0])),
-                             st->pal, &palName, &palRow);
+  int ntiles = (int) (asset_size(idx) / (uint32_t) (bpp * 8));
+
+  const GalleryBgTileset* bt = bg_tileset_of(start);
+  const GalleryObjTileset* ot = obj_tileset_of(start);
+
+  /* 256 entries for the 8bpp title page, 16 for everything else. */
+  uint32_t rgb[256];
+  char palLine[64], srcLine[64];
+  srcLine[0] = 0;
+  int nauto = (bt != NULL || ot != NULL) ? 1 : 0;
+  int total = nauto + pal_total(kMainPals, MAIN_PAL_N);
+  int sel = wrap(st->pal, total);
+  int row = -1, votes = 0, refs = 0;
+  const char* animNote = NULL;
+
+  if(sel < nauto && bt != NULL && bpp == 8) {
+    /* BGMODE 3 BG1: the 8-bit pixel value is the CGRAM index, so the whole
+     * 256-colour title palette applies and the tilemap's palette field does not. */
+    pal_from_cgram(g, bt->mode, 0, 256, rgb);
+    snprintf(palLine, sizeof(palLine), "%s CGRAM $00-$FF, 8bpp direct",
+             kGalleryModeName[bt->mode]);
+    snprintf(srcLine, sizeof(srcLine), "BG%d, VRAM $%04X; pixel value = CGRAM index",
+             bt->bg, bt->vram);
+    animNote = pal_animated_note(bt->mode, 0, 256);
+  } else if(sel < nauto && bt != NULL) {
+    row = bg_default_row(g, bt, ntiles, &votes, &refs);
+    if(row < 0) row = 0;
+    pal_from_cgram(g, bt->mode, 16 * row, 16, rgb);
+    snprintf(palLine, sizeof(palLine), "%s BG%d, CGRAM row %d ($%02X)",
+             kGalleryModeName[bt->mode], bt->bg, row, 16 * row);
+    snprintf(srcLine, sizeof(srcLine), "%d of %d words in %s%s use row %d",
+             votes, refs, bt->nmaps ? bt->maps[0].name : "-",
+             bt->nmaps > 1 ? " +" : "", row);
+    animNote = pal_animated_note(bt->mode, 16 * row, 16);
+  } else if(sel < nauto && ot != NULL) {
+    pal_from_cgram(g, ot->mode, 0x80 + 16 * ot->pal, 16, rgb);
+    snprintf(palLine, sizeof(palLine), "%s OBJ pal %d = CGRAM $%02X",
+             kGalleryModeName[ot->mode], ot->pal, 0x80 + 16 * ot->pal);
+    snprintf(srcLine, sizeof(srcLine), "sprite tiles, VRAM $1600; not a BG set");
+    animNote = pal_animated_note(ot->mode, 0x80 + 16 * ot->pal, 16);
+  } else {
+    pal_override(g, sel - nauto, rgb, palLine, sizeof(palLine));
+    snprintf(srcLine, sizeof(srcLine), "%s",
+             nauto ? "not the palette the game uses"
+                   : "no scene uploads this set: no CGRAM to take");
+  }
 
   int cols = 32, rows = 18;
-  int ntiles = (int) (asset_size(idx) / (uint32_t) (bpp * 8));
   int perPage = cols * rows;
   int pages = (ntiles + perPage - 1) / perPage;
   if(pages < 1) pages = 1;
   if(st->page >= pages) st->page = 0;
-  draw_tile_grid(g, fb, kGalleryAssets[idx].start, kGalleryAssets[idx].end, bpp, palOff,
+  draw_tile_grid(g, fb, start, kGalleryAssets[idx].end, bpp, rgb,
                  0, 12, cols, rows, st->page * perPage);
+  draw_palette_strip(fb, rgb, bpp == 8 ? 32 : 16, 3, 158);
 
   int y = 166;
-  fb_textf(fb, 3, y, C_TEXT, "%.22s %06X %u bytes", asset_name(idx),
-           kGalleryAssets[idx].start, asset_size(idx));
+  fb_textf(fb, 3, y, C_TEXT, "%.22s %06X %u bytes", asset_name(idx), start, asset_size(idx));
   y += LINE;
   fb_textf(fb, 3, y, C_TEXT, "%s  %d tiles  page %d/%d",
            kGalleryKindName[kGalleryAssets[idx].kind], ntiles, st->page + 1, pages);
   y += LINE;
-  fb_textf(fb, 3, y, C_DIM, "palette %s row %d @ %06X", palName, palRow, palOff);
-  draw_palette_strip(g, fb, palOff, 16, 174, y);
-  draw_foot(fb, "d-pad set + palette   LR page   A back");
+  fb_text(fb, 3, y, palLine, sel < nauto ? C_TEXT : C_MARK);
+  y += LINE;
+  fb_text(fb, 3, y, srcLine, C_DIM);
+  if(animNote != NULL) {
+    y += LINE;
+    char note[48];
+    snprintf(note, sizeof(note), "%.42s", animNote);
+    fb_text(fb, 3, y, note, C_MARK);
+  }
+  draw_foot(fb, "d-pad set   up/down override   LR page   A back");
 }
 
 static void draw_fonts(Gallery* g, uint32_t* fb) {
@@ -764,10 +1193,13 @@ static void draw_fonts(Gallery* g, uint32_t* fb) {
   char right[32];
   snprintf(right, sizeof(right), "unused  %d/4", item + 1);
   draw_frame_chrome(fb, "FONTS AND PICTURE STRIPS", right);
-  const char* palName;
-  int palRow;
-  uint32_t palOff = pal_pick(kMainPals, (int) (sizeof(kMainPals) / sizeof(kMainPals[0])),
-                             st->pal, &palName, &palRow);
+
+  /* Nothing in the ROM uploads the font or the three strips, so no scene's CGRAM
+   * covers them and there is no palette to derive: the picker is all there is,
+   * and the page says so. */
+  uint32_t rgb[16];
+  char palLine[64];
+  pal_override(g, st->pal, rgb, palLine, sizeof(palLine));
 
   if(item == 0) {
     /* the ROM's own font: 96 2bpp glyphs, plane 1 empty, ASCII $20-$7F */
@@ -779,8 +1211,7 @@ static void draw_fonts(Gallery* g, uint32_t* fb) {
       for(int y = 0; y < 8; y++)
         for(int x = 0; x < 8; x++) {
           uint8_t v = px[y * 8 + x];
-          fb_px(fb, cx + x, cy + y, v == 0 ? checker(cx + x, cy + y)
-                                           : pal_colour(g, palOff, v));
+          fb_px(fb, cx + x, cy + y, v == 0 ? checker(cx + x, cy + y) : rgb[v]);
         }
     }
     fb_text(fb, 3, y0 + 56, "rendered as text:", C_DIM);
@@ -794,37 +1225,44 @@ static void draw_fonts(Gallery* g, uint32_t* fb) {
     y += LINE;
     fb_text(fb, 3, y, "96 glyphs, ASCII $20-$7F; the only font", C_TEXT);
     y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "palette %s row %d @ %06X", palName, palRow, palOff);
-    draw_palette_strip(g, fb, palOff, 4, 174, y);
+    fb_text(fb, 3, y, palLine, C_MARK);
+    y += LINE;
+    fb_text(fb, 3, y, "no code uploads it: no CGRAM to take", C_DIM);
+    draw_palette_strip(fb, rgb, 4, 3, 158);
   } else {
-    const int s = item - 1;
-    int mapIdx = asset_at(kStrips[s].map), tilesIdx = asset_at(kStrips[s].tiles);
+    const int sIdx = item - 1;
+    int mapIdx = asset_at(kStrips[sIdx].map), tilesIdx = asset_at(kStrips[sIdx].tiles);
     if(mapIdx < 0 || tilesIdx < 0) {
       fb_text(fb, 3, 20, "strip missing from the manifest", C_MARK);
       return;
     }
     int words = (int) (asset_size(mapIdx) / 2u);
+    /* The strip maps do carry palette bits, but with no upload there is no CGRAM
+     * row for them to select, so the picked row is used for every word. */
     draw_tilemap(g, fb, kGalleryAssets[mapIdx].start, words,
                  kGalleryAssets[tilesIdx].start, kGalleryAssets[tilesIdx].end,
-                 palOff, STRIP_TILE_BASE, 32, 0, 12);
+                 rgb, false, STRIP_TILE_BASE, 32, 0, 12);
     int mapH = ((words + 31) / 32) * 8;
     fb_text(fb, 3, 12 + mapH + 4, "tileset:", C_DIM);
-    int rows = (166 - (12 + mapH + 14)) / 8;
+    int rows = (156 - (12 + mapH + 14)) / 8;
     if(rows > 0)
       draw_tile_grid(g, fb, kGalleryAssets[tilesIdx].start, kGalleryAssets[tilesIdx].end,
-                     4, palOff, 0, 12 + mapH + 14, 32, rows, st->page * 32 * rows);
+                     4, rgb, 0, 12 + mapH + 14, 32, rows, st->page * 32 * rows);
     int y = 166;
-    fb_textf(fb, 3, y, C_TEXT, "strip %d  map %06X  %d words  base $%02X", s + 1,
+    fb_textf(fb, 3, y, C_TEXT, "strip %d  map %06X  %d words  base $%02X", sIdx + 1,
              kGalleryAssets[mapIdx].start, words, STRIP_TILE_BASE);
     y += LINE;
     fb_textf(fb, 3, y, C_TEXT, "tiles %06X  %u bytes  %u tiles",
              kGalleryAssets[tilesIdx].start, asset_size(tilesIdx),
              asset_size(tilesIdx) / 32u);
     y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "palette %s row %d @ %06X", palName, palRow, palOff);
-    draw_palette_strip(g, fb, palOff, 16, 174, y);
+    fb_text(fb, 3, y, palLine, C_MARK);
+    draw_palette_strip(fb, rgb, 16, 3, 158);
+    y += LINE;
+    fb_textf(fb, 3, y, C_DIM, "words say palette %d, but nothing uploads one",
+             (rd16(g, kGalleryAssets[mapIdx].start) >> 10) & 7);
   }
-  draw_foot(fb, "d-pad item + palette   LR page   A back");
+  draw_foot(fb, "d-pad item + override   LR page   A back");
 }
 
 static void draw_prev_build(Gallery* g, uint32_t* fb) {
@@ -834,9 +1272,14 @@ static void draw_prev_build(Gallery* g, uint32_t* fb) {
   char right[40];
   snprintf(right, sizeof(right), "unused  %s %d/3", kViews[view], view + 1);
   draw_frame_chrome(fb, "PREVIOUS BUILD", right);
+
+  /* The previous build's own palette block, and only that: this code is not in the
+   * live program, so no scene's CGRAM has anything to do with it. */
   const char* palName;
   int palRow;
   uint32_t palOff = pal_pick(kPrevPals, 1, st->pal, &palName, &palRow);
+  uint32_t rgb[16];
+  pal_from_rom(g, palOff, 16, rgb);
 
   int idx;
   int y = 166;
@@ -848,15 +1291,15 @@ static void draw_prev_build(Gallery* g, uint32_t* fb) {
     int pages = (ntiles + perPage - 1) / perPage;
     if(pages < 1) pages = 1;
     if(st->page >= pages) st->page = 0;
-    draw_tile_grid(g, fb, kGalleryAssets[idx].start, kGalleryAssets[idx].end, 4, palOff,
+    draw_tile_grid(g, fb, kGalleryAssets[idx].start, kGalleryAssets[idx].end, 4, rgb,
                    0, 12, cols, rows, st->page * perPage);
     fb_textf(fb, 3, y, C_TEXT, "%s %06X %u bytes", asset_name(idx),
              kGalleryAssets[idx].start, asset_size(idx));
     y += LINE;
     fb_textf(fb, 3, y, C_TEXT, "%d tiles  page %d/%d", ntiles, st->page + 1, pages);
     y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "palette %s row %d @ %06X", palName, palRow, palOff);
-    draw_palette_strip(g, fb, palOff, 16, 174, y);
+    fb_textf(fb, 3, y, C_DIM, "picker: %s row %d @ %06X", palName, palRow, palOff);
+    draw_palette_strip(fb, rgb, 16, 3, 158);
   } else if(view == 1) {
     idx = asset_at(PREV_PAL_OFF);
     if(idx < 0) return;
@@ -866,7 +1309,7 @@ static void draw_prev_build(Gallery* g, uint32_t* fb) {
       fb_textf(fb, 2, 14 + r * 8, C_DIM, "%02X", r * 16);
       for(int c = 0; c < 16 && r * 16 + c < colours; c++)
         fb_fill(fb, 18 + c * 12, 13 + r * 8, 11, 7,
-                pal_colour(g, kGalleryAssets[idx].start, r * 16 + c));
+                bgr15(rd16(g, kGalleryAssets[idx].start + (uint32_t) (2 * (r * 16 + c)))));
     }
     fb_textf(fb, 3, y, C_TEXT, "%s %06X", asset_name(idx), kGalleryAssets[idx].start);
     y += LINE;
@@ -1106,9 +1549,10 @@ static void draw_stale(Gallery* g, uint32_t* fb) {
 
 #define BIT(b) ((uint16_t) (1u << (b)))
 
+/* The palette cursor is allowed to go negative: every page wraps it itself, over
+ * "the palettes the game gives this item, then the override picker". */
 static void clamp_state(Gallery* g) {
   for(int s = 0; s < GALLERY_SECTION_COUNT; s++) {
-    if(g->st[s].pal < 0) g->st[s].pal = 0;
     if(g->st[s].page < 0) g->st[s].page = 0;
     if(g->st[s].item < 0) g->st[s].item = 0;
   }
@@ -1139,6 +1583,11 @@ static void move_item(Gallery* g, int d) {
   if(g->section == GALLERY_SEC_BACKGROUNDS || g->section == GALLERY_SEC_FONTS ||
      g->section == GALLERY_SEC_PREV_BUILD)
     st->page = 0;
+  /* A new item gets the palette the game gives it, not the previous item's
+   * override -- the override is a deliberate act, not a mode. */
+  if(g->section == GALLERY_SEC_SPRITES || g->section == GALLERY_SEC_SPRITES_ALT ||
+     g->section == GALLERY_SEC_BACKGROUNDS)
+    st->pal = 0;
   if(g->section == GALLERY_SEC_SAMPLES && g->brrCount > 0) brr_decode(g, g->brr[st->item]);
 }
 
@@ -1274,8 +1723,14 @@ Gallery* gallery_create(const uint8_t* rom, size_t romLen) {
   g->brr = collect(1u << GK_BRR, &g->brrCount, false);
   g->stale = collect(1u << GK_STALE, &g->staleCount, false);
   g->song = collect(1u << GK_SONG, &g->songCount, false);
-  if(g->canvas == NULL || g->claimed == NULL) { gallery_destroy(g); return NULL; }
+  g->framePal = calloc((size_t) kGalleryAssetCount, sizeof(FramePal));
+  if(g->canvas == NULL || g->claimed == NULL || g->framePal == NULL) {
+    gallery_destroy(g);
+    return NULL;
+  }
   brr_scan_usage(g);
+  build_mode_cgram(g);
+  build_frame_palettes(g);
   return g;
 }
 
@@ -1290,6 +1745,7 @@ void gallery_destroy(Gallery* g) {
   free(g->pcm);
   free(g->canvas);
   free(g->claimed);
+  free(g->framePal);
   free(g);
 }
 

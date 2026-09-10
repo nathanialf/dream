@@ -188,6 +188,278 @@ a specific live-format character cannot be established without in-game character
 labels, neither of which exist in this disassembly; what can be said is that the two corpora are
 stylistically and structurally the same kind of asset.
 
+### 1d. Palette assignment
+
+Which palette bytes end up in which CGRAM entries, and which of those entries any given
+tileset or sprite frame is actually drawn with. Everything here is read off the mode-init
+bodies (`recomp/src/mode_init.c`, `recomp/src/top_level.c`, both transliterations of
+`out/dream.asm`) and the tables section 1 already names; the numbers at the end are
+measured against the running game with `dream_harness --dump-cgram/--dump-oam`.
+
+#### CGRAM: what each scene uploads
+
+`dma_upload_to_cgram` (`sub_C0A483`) takes `A` = source address in bank `$C4`, `X` =
+byte count / 8 and `Y` = `CGADD`, so one call writes `X * 4` colours starting at CGRAM
+entry `Y`. Each scene issues four of them, in a fixed order, and a later narrower call
+overwrites part of an earlier wide one — which is the whole mechanism by which two scenes
+give the same sprite two different palettes.
+
+| scene | order | CGADD | colours | source | call site |
+|---|---|---|---|---|---|
+| `game_mode` 0 | 1 | `$00` | 128 | `046DA8` | `C08386` |
+| | 2 | `$80` | 128 | `046C48` | `C08392` |
+| | 3 | `$E0` | 16 | `046D68` | `C0839E` |
+| | 4 | `$F0` | 16 | `046D48` | `C083AA` |
+| `game_mode` 1 | 1 | `$80` | 128 | `046C48` | `C0873A` |
+| | 2 | `$A0` | 16 | `046D08` | `C08746` |
+| | 3 | `$00` | 128 | `046EA8` | `C08752` |
+| | 4 | `$B0` | 16 | `046D88` | `C08776` |
+| | 5 | `$E1` | 1 | `008791` (two `sta CGDATA`, not a DMA) | `C0877D` |
+| `game_mode` 2 | 1 | `$80` | 128 | `046C48` | `C0886A` |
+| | 2 | `$C0` | 64 | `046C48` | `C08876` |
+| | 3 | `$E0` | 16 | `046CC8` | `C08882` |
+| | 4 | `$00` | 128 | `046FE3` | `C0888E` |
+| `game_mode` 3 | 1 | `$80` | 128 | `046C48` | `C08992` |
+| | 2 | `$C0` | 64 | `046C48` | `C0899E` |
+| | 3 | `$A0` | 16 | `047443` | `C089AA` |
+| | 4 | `$00` | 128 | `047343` | `C089B6` |
+| title (`loc_C0BB81`) | 1 | `$00` | 256 | `06A36B` | `C0BC2A` (a `sta CGDATA` loop, 512 bytes) |
+
+Replaying those in order gives the CGRAM each scene runs with:
+
+| scene | CGRAM `$00-$7F` (BG rows 0-7) | CGRAM `$80-$FF` (OBJ rows 0-7) |
+|---|---|---|
+| 0 | `046DA8` | `$80-$DF` `046C48`; `$E0-$EF` `046D68`; `$F0-$FF` `046D48` |
+| 1 | `046EA8` | `$80-$9F` `046C48`; `$A0-$AF` `046D08`; `$B0-$BF` `046D88`; `$C0-$FF` `046C48` + `$40` colours (= `046CC8`), except `$E1` from `008791` |
+| 2 | `046FE3` | `$80-$BF` `046C48`; then `$C0-$FF` `046C48` again, so rows 4-7 repeat rows 0-3; then `$E0-$EF` `046CC8` on top |
+| 3 | `047343` | `$80-$BF` `046C48`; then `$C0-$FF` `046C48` again (rows 4-7 repeat rows 0-3); then `$A0-$AF` `047443` on top |
+| title | `06A36B`, all 256 entries; BGMODE 3's BG1 is 8bpp, so the pixel byte *is* the CGRAM index and the tilemap's palette field does not apply | — (no OBJ on the title's `TM $01`) |
+
+Per OBJ palette that is:
+
+| OBJ palette | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| CGRAM | `$80` | `$90` | `$A0` | `$B0` | `$C0` | `$D0` | `$E0` | `$F0` |
+| mode 0 | `046C48` | `046C68` | `046C88` | `046CA8` | `046CC8` | `046CE8` | `046D68` | `046D48` |
+| mode 1 | `046C48` | `046C68` | `046D08` | `046D88` | `046CC8` | `046CE8` | `046D08` | `046D28` |
+| mode 2 | `046C48` | `046C68` | `046C88` | `046CA8` | `046C48` | `046C68` | `046CC8` | `046CA8` |
+| mode 3 | `046C48` | `046C68` | `047443` | `046CA8` | `046C48` | `046C68` | `046C88` | `046CA8` |
+
+Modes 2 and 3 alias palettes 4-7 back onto 0-3, which is why the same character frame
+drawn with palette 0 in mode 0 and palette 4 in mode 2 comes out in the same colours.
+
+#### CGRAM after the init
+
+Four things rewrite CGRAM once the scene is running, so a capture of the live game need
+not agree with the table above everywhere:
+
+- mode 1's HDMA channel 1 (`DMAP1 $03`, `BBAD1 $21` = `CGADD`/`CGDATA`, armed at
+  `C08669`) runs the 59-byte table at `046FA8`: one 4-byte set held for 96 scanlines,
+  then 13 sets one line each, writing entries `$00,$01,$02,$03,$05,$06,$07,$09,$0A,$0B,$0D,$0E,$0F`.
+  At the end of a frame eleven of those (`$01 $02 $05 $06 $07 $09 $0A $0B $0D $0E $0F`)
+  hold the table's values rather than `046EA8`'s; `$00` and `$03` happen to coincide.
+- the colour ramp at `046B88` (96 greys) drives CGRAM entry `$12` through `sub_C08D6B`;
+  no script under `recomp/harness/inputs/` reaches it and the captures never show `$12`
+  moving.
+- `cgram_palette_ramp_step` (`$C091BB`) queues a 64-byte block for CGRAM `$80` that
+  `cgram_upload_queue_flush` performs; likewise unreached by the scripts.
+- the streaming descriptors at `00B208` re-upload a 32-byte palette to CGRAM `$70`.
+  There are two runs, both selected by `sub_C09C62` for the only caller it has,
+  `mode0_weather_zone_update`, so both belong to `game_mode` 0: the first ends with
+  `046E88`, which is `046DA8` + `$70` colours — the sixteen colours the init already put
+  there, so it restores rather than changes — and the second with `0470E3`, sixteen
+  colours that are genuinely different. No script under `recomp/harness/inputs/` reaches
+  the second zone; in every mode-0 capture CGRAM `$70-$7F` holds the init's values.
+
+Everything else is constant for the life of a scene: over frames 220-255, 340-375,
+460-495 and 580-615 of `mode_cycle.txt` (settled mode 0/1/2/3) and 300-499 of
+`level_walk_jump.txt`, not one CGRAM entry changes value.
+
+#### BG layers: which tileset is drawn through which palette rows
+
+`BG12NBA`/`BG34NBA` and `BGnSC` are written once per scene as 16-bit stores, so the low
+byte is `BG12NBA`/`BG1SC` and the high byte `BG34NBA`/`BG2SC`:
+
+| scene | BGMODE | BG12NBA | BG34NBA | BG1SC | BG2SC | BG3SC |
+|---|---|---|---|---|---|---|
+| 0 | 1 | `$25` (BG1 chars `$5000`, BG2 `$2000`) | `$05` | `$69` -> map `$6800`, 64x32 | `$79` -> map `$7800` | `$1C` -> map `$1C00` |
+| 1 | 1 | `$52` (BG1 `$2000`, BG2 `$5000`) | `$05` | `$79` -> `$7800` | `$70` -> `$7000` | `$74` -> `$7400` |
+| 2 | 1 | `$26` (BG1 `$6000`, BG2 `$2000`) | `$06` | `$5A` -> `$5800` | `$79` -> `$7800` | `$74` -> `$7400` |
+| 3 | 9 | `$26` (BG1 `$6000`, BG2 `$2000`) | `$06` | `$58` -> `$5800` | `$79` -> `$7800` | `$5C` -> `$5C00` |
+| title | 3 | `$00` (BG1 chars `$0000`) | — | `$60` -> `$6000` | — | — |
+
+In every scene the metatile blitter (`build_metatile_column_580`/`_500` and their
+`vram_upload_column_*` partners) writes its columns and rows to VRAM `$7800`, which the
+table above makes BG2's map in modes 0, 2 and 3 and BG1's map in mode 1. The other layer
+gets a static tilemap DMA'd in by the init.
+
+That fixes the pairing of tileset to map, and the maps' own contents confirm each pairing
+independently: the largest tile index a map uses is exactly one less than the tile count
+of the set it is paired with.
+
+| scene | BG | char base | tileset asset | tiles | map that carries its palette bits | max tile index | palette row most of its words use |
+|---|---|---|---|---|---|---|---|
+| 0 | BG2 | `$2000` | `090000` (`bg1_tiles_mode0.bin`) | 726 | `09DCE0` metatiles_mode0 | 725 | **1** (1370 of 4176 words) |
+| 0 | BG1 | `$5000` | `098AC0` (`bg2_tiles_mode0.bin`) | 341 | `0AF38E` (`$6800`) + `0AEB8E` (`$7000`, streamed) | 340 | **0** (1710 of 2048) |
+| 1 | BG1 | `$2000` | `086AC0` | 758 | `0A26A0` metatiles_mode1 + `0B0000` | 757 | **1** (856 of 3200) |
+| 1 | BG2 | `$5000` | `08C980` | 433 | `0CAB02` (`$7000`) | 432 | **1** (768 of 896) |
+| 2 | BG2 | `$2000` | `070342` (`bg1_tiles_mode2.bin`) | 894 | `09B560` metatiles_mode2 | 893 | **2** (2341 of 5056) |
+| 2 | BG1 | `$6000` | `07DF82` (`bg2_tiles_mode2.bin`) | 207 | `0B1000` (`$5800`) | 206 | **0** (686 of 1024) |
+| 3 | BG2 | `$2000` | `080000` (`bg1_tiles_mode3.bin`) | 854 | `0A37A0` metatiles_mode3 | 853 | **3** (761 of 2144) |
+| 3 | BG1 | `$6000` | `095AC0` (`bg2_tiles_mode3.bin`) | 384 | `0B3800` (`$5800`) | 383 | **0** (717 of 1024) |
+| title | BG1 | `$0000` (`stz BG12NBA`) | `06002B` 8bpp, DMA'd to VRAM `$0600` | 627 | — (8bpp: no palette field) | — | — |
+
+The title's tiles land at VRAM `$0600` with a character base of `$0000`; 8bpp tiles are
+32 words each, so the first of them is tile index `$0600 / $20` = 48 — which is exactly
+the `+$0030` the init adds to every word of its four tilemaps at `$BC66` onward.
+
+Two notes on the names. The manifest's `bg1_`/`bg2_` file names were assigned from the
+upload order, not from the registers, so in modes 0, 2 and 3 they are the other way round
+from the PPU's BG numbers; the table above uses the registers. And mode 1's `050000`
+(32 2bpp tiles, DMA'd to VRAM `$1E00`) cannot be BG3 chars under `BG34NBA $05` — `$1E00`
+is below that base and inside the OBJ tile area the sprite-frame DMAs use — so the
+manifest's "game_mode 1 BG3" note on it is not supported by the registers; left open.
+
+A bare tileset page has no tilemap word to take a row from, so "the row most of its tiles
+are referenced with" (last column) is the best available default, and the count is quoted
+with it so the reader can see how strong it is. Where a tilemap page *is* shown, the
+word's own bits 12-10 pick the row and nothing is guessed.
+
+#### Sprites: which OBJ palette a frame is drawn with
+
+`entity_build_oam_frame` loads `entity_flags` (`$0788,Y`) into `$18` and `$1A` at
+`$C0A5BE` as a 16-bit store. The six emitters then work on `$1A` in 8-bit mode only —
+`lda $1E ; adc $18 ; sta $1A` builds the tile number — and write the pair back to OAM
+with a 16-bit `sta $02,X`. So the high half, `$1B`, is untouched from `$C0A5BE` onward
+and **every sprite of the frame carries `entity_flags >> 8` as its OAM attribute byte**.
+That byte is the standard OBJ low-attribute layout section 1c decodes — bit 7 v-flip,
+bit 6 h-flip, bits 5-4 priority, bits 3-1 palette, bit 0 tile-index bit 8 — so the OBJ
+palette is `(entity_flags >> 9) & 7`.
+
+`entity_flags` is written by `entity_init_from_table` (`$C09D6A`) from byte +12 of the
+18-byte init record, and after that by exactly six sites, none of which can change bits
+9-11:
+
+| site | operation | bits it can change |
+|---|---|---|
+| `$C0996A` | `and #$BFFF ; ora facing_flag_table,Y` | 14 (h-flip) — the table holds only `$0000`/`$4000` |
+| `$C0B1CD` | the same pair, from `sub_C0B1B1` | 14 |
+| `$C09AD5` | `eor`/`and #$7000`/`eor` (copy from parent) | 12-14 |
+| `$C09BA6` | the same, `#$7000` | 12-14 |
+| `$C09B2D` | the same, `#$4000`, then `ora #$8000` | 14, 15 |
+| `$C09B6E` | the same, `#$C000` | 14-15 |
+
+`entity_type` is likewise written only by `entity_init_from_table`. So an entity's OBJ
+palette is a constant of the scene's init table:
+
+| scene | slot | `entity_type` | `entity_flags` | OAM attr | OBJ palette | priority |
+|---|---|---|---|---|---|---|
+| 0 | 0 | `$02` | `6000` | `60` | 0 | 2 |
+| 0 | 1 | `$04` | `2240` | `22` | 1 | 2 |
+| 0 | 2 | `$06` | `0480` | `04` | 2 | 0 |
+| 0 | 3 | `$0A` | `22C0` | `22` | 1 | 2 |
+| 0 | 4 | `$0E` | `6900` | `69` | 4 | 2 |
+| 1 | 0-5 | `$02 $04 $06 $0A $0E $06` | `6000 2240 0480 22C0 2900 0480` | | 0, 1, 2, 1, 4, 2 | |
+| 1 | 6, 7 | `$00`, `$00` | `1D40`, `5D40` | `1D`, `5D` | 6, 6 | 1 |
+| 2 | 0-5 | `$02 $04 $06 $0A $0C $0E` | `6800 2A40 0480 2AC0 2F00 2D40` | | 4, 5, 2, 5, 7, 6 | |
+| 3 | 0-3 | `$02 $04 $06 $0A` | `2800 2A40 0C80 2AC0` | | 4, 5, 6, 5 | |
+
+(The `entity_flags` column is the record's; a running entity's h-flip bit will differ.)
+
+From entity to frames: `entity_anim_id` comes from the two-level table at `data_C0B7AE`,
+indexed `B7AE + entity_state + $0BAC + word[B7AE + entity_type]`, with `$0BAC` = `$0018`
+in `game_mode` 1 and 0 elsewhere (`$C084D7` against `$C08292`/`$C08798`/`$C088AE`). The
+state machine can put an entity in any of the twelve even states `$00`-`$16`
+(`sub_C0B171` sets `$10`-`$16`, `anim_cb_reset_state` sets 0, and the facing update only
+ever ORs `$0002`/`$0012` into the low bits), so a type's reachable animations are that
+whole row. Three types take theirs from another entity instead:
+
+- `$00` — `entity_init_from_table`'s own special case: `entity_anim_id` is the record's
+  second word verbatim, not a table lookup;
+- `$04` (`entity_spawn_transform_a`) — parent's animation + 2 (`$C09AE4`);
+- `$06` (`entity_spawn_transform_b`) — parent's + 4 (`$C09B3F`), except that `game_mode` 1
+  forces `$0158` (`$C09B77`) and `game_mode` 2 returns before touching the animation at
+  all (`$C09B0B`), which is why mode 2's slot 2 never shows a frame;
+- `$0A` (`entity_spawn_transform_c`) — parent's + 4 + `$0BB6` (`$C09BC0`/`$C09BC3`), and
+  `$0BB6` cycles 2 -> 4 -> 0 at `$C081DB`; at 0 the entity is not drawn, so the reachable
+  set is parent + 6 and parent + 8.
+
+From animation to frames: each id indexes `data_C41858` (174 words, 96 distinct scripts);
+a script is 8-byte `{callback, mode, duration, frame}` records running to whichever comes
+first — a `duration` of `$FFFE` (loop), a `duration` of `$FFFF` (switch to the animation
+id in `frame`, followed here as a link), or the next script's offset. Every `frame` field
+is a byte index into the frame table at `040000`, whose entry gives the frame's bank and
+pointer.
+
+Doing that for all four scenes gives, for each of the 1555 live frame assets, the set of
+`{scene, OBJ palette}` pairs the game can draw it with:
+
+| distinct `{scene, palette}` pairs | frames |
+|---|---:|
+| 0 (no entity in modes 0-3 plays an animation that names it) | 492 |
+| 1 | 159 |
+| 2 | 218 |
+| 3 | 686 |
+| 4 | 0 |
+
+and per palette (a frame can count in more than one row):
+
+| OBJ palette | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| frames | 238 | 496 | 38 | 0 | 644 | 928 | 219 | 90 |
+
+The 492 with none are not unreferenced data: 1539 of the 1555 are named by *some* script
+in the index, but only 50 of the 174 animation ids are reachable from the entity roster
+the four scenes actually spawn. For those frames the honest answer is "no evidence from
+the live game", and the gallery says so rather than picking a palette.
+
+The 114 alternate-format frames (section 1c) have no frame-table entry at all, so no
+animation can name them; their nearest evidence is internal. Their 3-byte `{x, y, attr}`
+records carry an OBJ attribute byte of their own, and across all of them only `$1E`
+(priority 1, palette 6) and `$20` (priority 2, palette 0) occur, so each frame's own
+records give it a palette index — read off the frame, not inferred from anything else.
+
+The one OBJ tileset the game uploads as tiles rather than as a frame, `0502C0` (96 tiles
+to VRAM `$1600` in mode 0), is the particle set: `mode1_reset_particles_and_oam` builds
+its attribute word as `(rng & $3000) | $0E00` at `$C0931E`, i.e. OBJ palette 7 with a
+random priority.
+
+#### Checked against the running game
+
+`dream_harness --dump-cgram --dump-oam` writes the reference machine's CGRAM and OAM
+after every frame, out of the same snapshot the frame line hashes.
+
+CGRAM. The table built from the uploads above equals the capture on **all 256 entries the
+init writes** for the title (`mode_cycle.txt` frame 100 — the fade-in finishes at frame 76
+and it matches from there to the end of the title), `game_mode` 0 (`level_walk_jump.txt`
+frame 400 and `mode_cycle.txt` frame 250), `game_mode` 2 (frame 490) and `game_mode` 3
+(frame 610). `game_mode` 1 (frame 370) differs on **11 of 256**, and they are exactly the
+eleven entries the `046FA8` HDMA table leaves changed at the end of a frame:
+`$01 $02 $05 $06 $07 $09 $0A $0B $0D $0E $0F`. Over all six captures that is 11 of 1536
+entries compared, all of them accounted for. Within a settled scene nothing moves at all:
+over frames 220-255, 340-375, 460-495 and 580-615 of `mode_cycle.txt` and 300-499 of
+`level_walk_jump.txt`, not one CGRAM entry changes value.
+
+OAM. The palette bits of every drawn entity are checked against the set this derivation
+gives the frame that entity is showing, over `level_walk_jump.txt` frames 190-499
+(`game_mode` 0) and `mode_cycle.txt` frames 190-255, 305-375, 424-495 and 544-615
+(`game_mode` 0, 1, 2, 3): **3096 entity-frame observations, 22 distinct entities, 3096
+matches and no conflicts**, with no observation landing on a frame the derivation does not
+cover. In 2421 of the 3096 the entity's `entity_flags >> 8` is one of the attribute bytes
+actually present in the captured OAM that frame (the rest were culled off-screen by
+`entity_build_oam_frame`, which never reaches the emitter). A single frame's attribute
+bytes read, for example: mode 0 frame 400 `$20` x14, `$22` x11, `$84` x10, `$3F` x6
+(particles); mode 1 frame 370 `$1D` x17, `$62` x11, `$57` x8, `$2F` x7, `$60` x6, `$44` x5,
+`$17` x2; mode 2 frame 490 `$6A` x14, `$2F` x12, `$68` x10, `$29` x2; mode 3 frame 610
+`$2A` x14, `$28` x13, `$8C` x9.
+
+One thing the sampling has to respect: `game_mode` (`$A4`) changes about 46 frames before
+`entity_init_from_table` repopulates the entity arrays, because the Select mode-advance
+sets the mode and then fades out before the re-init runs. In `mode_cycle.txt` the mode
+changes at frames 257, 377, 497 and 617 and the roster matches the new mode's init records
+from frames 304, 423, 543 and 684. Sampling inside that gap compares the *old* scene's
+entities against the *new* scene's number and looks like a contradiction; it is not one.
+
 ## 2. Sample tile renders (ASCII, 4bpp/8bpp pixel value -> ` .:-=+*#%@ABCDEF`, 2bpp -> ` .:#`)
 
 Sprite tiles of frame `0A6360` (header `0e 04 2c 0b 3c 47 00 00`: 14+4 sprites, 71 tiles), first 8 tiles at `0A638C`:

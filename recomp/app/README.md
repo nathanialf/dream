@@ -278,12 +278,42 @@ that are unreferenced by construction (`stale`, `filler`, `unknown`, `sprite_fra
 from notes that say so, and from bank `$C1`'s font and picture strips, which
 [docs/data_formats.md](../../docs/data_formats.md) lists as referenced by nothing.
 
+### Colour
+
+Pages are drawn in the colours the game gives them, not in a colour the viewer guesses
+at. [docs/data_formats.md](../../docs/data_formats.md)'s "Palette assignment" section is
+the derivation; the generated table carries its addresses and counts (which palette bytes
+each scene's init DMAs to which CGRAM entries, which tileset the PPU registers make which
+BG of which scene, and where the entity/animation/frame tables live) and the app reads the
+bytes at those addresses out of your ROM:
+
+- a **background** page rebuilds the whole 256-entry CGRAM its scene's init would produce
+  — the same DMAs in the same order, so a later narrow upload overwrites an earlier wide
+  one exactly as it does in the game — and draws the tileset through it. A bare tileset
+  page has no tilemap word to take a row from, so it defaults to the row most of its tiles
+  are referenced with in that scene's metatiles and tilemaps, and prints the row and the
+  count it won by. The title's tiles are 8bpp in BGMODE 3, where the pixel byte *is* the
+  CGRAM index, so all 256 title colours apply at once and no row is involved.
+- a **sprite frame** page draws the frame with the OBJ palette the entities that can play
+  it carry in `entity_flags`, out of the CGRAM of the scene they live in — which matters,
+  because modes 2 and 3 alias OBJ palettes 4-7 back onto 0-3. Where several
+  `{scene, palette}` pairs apply (686 of the 1555 live frames have three), up and down
+  cycle them and the page names the entity types each belongs to. 492 live frames are
+  named by no animation any of the four scenes' entities can reach; those say so instead
+  of pretending. An alternate-format frame is played by nothing at all, so it falls back
+  to the palette its own `{x, y, attr}` records carry.
+- the **picker is still there**, on up/down past the end of the derived list, and every
+  page labels it `OVERRIDE picker` and says it is not the palette the game uses. It is
+  the only colour source on the pages that have no other: the unreferenced font and
+  picture strips, the previous build's tiles, and the tile blobs no scene uploads.
+
 ### Controls on a page
 
 The fixed mapping and nothing else: **d-pad or left stick** moves (left/right walks
-the list, up/down works the palette picker where a page has one), **L/R** pages or
-jumps, **B** activates (plays a sample, a song, a sound effect), **A** closes the
-page. `Escape`, the bar's **Back** item and **Gallery > Close gallery** do the same
+the list, up/down walks the palettes a page's current item can be drawn with and then
+the override picker), **L/R** pages or jumps, **B** activates (plays a sample, a song,
+a sound effect), **A** closes the page. Moving to a new item returns to that item's own
+palette: the override is a deliberate act, not a mode. `Escape`, the bar's **Back** item and **Gallery > Close gallery** do the same
 as `A`. Every page prints its own line of controls along the bottom.
 
 ### The pages
@@ -291,16 +321,17 @@ as `A`. Every page prints its own line of controls along the bottom.
 - **Sprite frames (live)** — all 1555 frames the frame table at `040000` points at,
   assembled the way `sub_C0A538` reads them: 16x16 sprites at their OAM positions,
   the tiles that cannot be placed uniquely spilled into a strip below, header fields
-  shown as text, and a palette row picked from the main palette block at `046C48`
-  (the title block and the cycling ramp are on the same picker).
+  shown as text, and the OBJ palette the game draws it with (see **Colour** above).
 - **Sprite frames (alternate)** — the 113 frames plus the ROM's truncated tail frame
   in the second format nothing in the ROM reads, with their 8-byte header as hex and
-  their `{x, y, attr}` records counted. The layout is the documented guess
+  their `{x, y, attr}` records counted, drawn with the palette those records' own
+  attribute bytes ask for. The layout is the documented guess
   (docs/data_formats.md 1c): one tile per record, in order, the rest spilled — which
   is why most of a frame ends up in the spill strip.
-- **Backgrounds** — every tileset asset, drawn as a tile grid with the palette picker
-  and paged with L/R. This is where the four scenes' BG1/BG2 tilesets live, and also
-  the unreferenced tile blobs the classifier could only call "tile-like".
+- **Backgrounds** — every tileset asset, drawn as a tile grid through its scene's real
+  CGRAM and paged with L/R. This is where the four scenes' BG1/BG2 tilesets live, and
+  also the unreferenced tile blobs the classifier could only call "tile-like", which
+  have no scene and so only have the override picker.
 - **Fonts and picture strips** — the 2bpp font at `014FE0`, all 96 glyphs of ASCII
   `$20-$7F`, which no code ever uploads; the page also renders a line of text with it
   to show that it is a font. Then the three bank `$C1` picture strips, each drawn

@@ -49,6 +49,8 @@ configure_file(${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h.in
 set(ASSETS_TXT ${CMAKE_CURRENT_SOURCE_DIR}/../../config/assets.txt)
 set(GALLERY_TABLE ${CMAKE_CURRENT_BINARY_DIR}/gallery_table.h)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ASSETS_TXT})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_CURRENT_SOURCE_DIR}/gen_gallery_table.py)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 execute_process(

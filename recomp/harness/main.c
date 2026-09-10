@@ -640,6 +640,8 @@ static void usage(void) {
     "  --input FILE       input script: lines 'frame Button+Button...'\n"
     "  --trace FILE       write the executed-PC coverage set (sorted C0XXXX)\n"
     "  --dump-wram DIR    write DIR/wram_NNNNNN.bin after every frame\n"
+    "  --dump-cgram DIR   write DIR/cgram_NNNNNN.bin after every frame\n"
+    "  --dump-oam DIR     write DIR/oam_NNNNNN.bin after every frame (512+32 bytes)\n"
     "  --hooks on|off     install the recomp 65816 routines (default off)\n"
     "  --spc-hooks on|off install the recomp SPC700 routines (default off)\n"
     "  --hook-table all|demo|empty  which table to install (default all)\n"
@@ -2201,6 +2203,8 @@ int main(int argc, char** argv) {
   const char* inputPath = NULL;
   const char* tracePath = NULL;
   const char* dumpDir = NULL;
+  const char* dumpCgramDir = NULL;
+  const char* dumpOamDir = NULL;
   const char* profilePath = NULL;
   const char* cyclesPath = NULL;
   const char* onlyList = NULL;
@@ -2225,6 +2229,8 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--input") == 0 && hasNext) inputPath = argv[++i];
     else if(strcmp(a, "--trace") == 0 && hasNext) tracePath = argv[++i];
     else if(strcmp(a, "--dump-wram") == 0 && hasNext) dumpDir = argv[++i];
+    else if(strcmp(a, "--dump-cgram") == 0 && hasNext) dumpCgramDir = argv[++i];
+    else if(strcmp(a, "--dump-oam") == 0 && hasNext) dumpOamDir = argv[++i];
     else if(strcmp(a, "--hooks") == 0 && hasNext) {
       const char* v = argv[++i];
       if(strcmp(v, "on") == 0) hooksOn = true;
@@ -2450,18 +2456,30 @@ int main(int argc, char** argv) {
 
     if(!quiet) print_frame_line(frame, &ref, rr);
 
-    if(dumpDir != NULL) {
-      char path[1024];
-      snprintf(path, sizeof(path), "%s/wram_%06d.bin", dumpDir, frame);
-      FILE* wf = fopen(path, "wb");
-      if(wf == NULL) {
-        fprintf(stderr, "dream_harness: cannot write %s: %s\n", path, strerror(errno));
-        status = 2;
-        ranFrames = frame + 1;
-        break;
+    /* The three --dump-* sinks share one writer: same frame, same reference
+     * machine, different region. CGRAM and OAM come from the snapshot
+     * machine_snapshot already took, so they are the same bytes the frame line
+     * hashes and the lockstep comparison uses. */
+    {
+      static const char* const kStem[3] = { "wram", "cgram", "oam" };
+      const char* dirs[3] = { dumpDir, dumpCgramDir, dumpOamDir };
+      const uint8_t* datas[3] = { ref.snes->ram, ref.cgram, ref.oam };
+      const size_t lens[3] = { WRAM_SIZE, CGRAM_BYTES, OAM_BYTES };
+      bool wrote = true;
+      for(int d = 0; d < 3 && wrote; d++) {
+        if(dirs[d] == NULL) continue;
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s_%06d.bin", dirs[d], kStem[d], frame);
+        FILE* wf = fopen(path, "wb");
+        if(wf == NULL) {
+          fprintf(stderr, "dream_harness: cannot write %s: %s\n", path, strerror(errno));
+          wrote = false;
+          break;
+        }
+        fwrite(datas[d], 1, lens[d], wf);
+        fclose(wf);
       }
-      fwrite(ref.snes->ram, 1, WRAM_SIZE, wf);
-      fclose(wf);
+      if(!wrote) { status = 2; ranFrames = frame + 1; break; }
     }
 
     ranFrames = frame + 1;
