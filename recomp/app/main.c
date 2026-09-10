@@ -4,14 +4,22 @@
  * routine the recomp has registered (recomp/src), and runs the reference core
  * at the SNES's own 60.0988 Hz with picture, sound and a modern controller.
  *
- * There is no launcher, no menu and no settings screen: docs/RECOMP.md fixes the
- * mapping, and this file is where that mapping lives. Escape quits; nothing else
- * in the program is UI.
+ * There is no launcher and no settings file: docs/RECOMP.md fixes the controller
+ * mapping and this file is where that mapping lives. The one piece of app UI is
+ * the menu bar across the top of the window (menubar.c) — File, View and Gallery —
+ * and the gallery pages it opens (gallery.c), which pause the game and draw into
+ * the same 256x224 framebuffer. Neither ever writes emulator state.
  *
- * The two hidden flags (--frames, --input) exist so that this binary can be
- * checked against dream_harness: same ROM, same script, same hook table, and the
- * frame line printed at the end is byte-identical to the harness's. They are not
- * features, they are the proof that the platform layer changed nothing.
+ * The hidden flags exist so that this binary can be checked against dream_harness:
+ * same ROM, same script, same hook table, and the frame line printed at the end is
+ * byte-identical to the harness's. They are not features, they are the proof that
+ * the platform layer changed nothing:
+ *
+ *   --frames N --input FILE     run a harness script and print the frame line
+ *   --screenshot FILE           dump the 256x224 framebuffer as a binary PPM
+ *   --gallery SEC[:NAV]         open a gallery page (for the screenshot)
+ *   --gallery-toggle N,ITERS    open the gallery mid-run and close it again, so a
+ *                               run with the toggle can be diffed against one without
  */
 #define _POSIX_C_SOURCE 200809L
 
@@ -34,6 +42,9 @@
 #include "xxh64.h"
 #include "sha1.h"
 #include "dream_cycles.h"   /* generated from config/recomp_cycles.txt by CMake */
+#include "gallery.h"
+#include "menubar.h"
+#include "music.h"
 
 #define ROM_SIZE    0x200000u
 #define WRAM_SIZE   0x20000u
@@ -460,18 +471,120 @@ static const char* find_rom(const char* fromArgv, char* buf, size_t bufLen) {
   return "baserom/DREAM.sfc";
 }
 
+/* ---- presentation: where the picture goes, under the menu bar ----------- */
+
+/* View state. Nothing is persisted: the window's current size is the only memory the
+ * app keeps (docs/RECOMP.md). None of it can touch emulation. */
+typedef struct {
+  int scaleMode;   /* 0 = integer fit to window, 1..4 = fixed multiple */
+  int aspect;      /* 0 = 8:7 square pixels, 1 = 4:3 */
+  bool fullscreen;
+} View;
+
+static SDL_FRect view_rect(const View* v, int outW, int outH, int barH) {
+  float aw = (float) outW, ah = (float) (outH - barH);
+  if(ah < 1.0f) ah = 1.0f;
+  float w, h;
+  if(v->scaleMode > 0) {
+    h = (float) (FB_H * v->scaleMode);
+    w = (v->aspect == 1) ? h * 4.0f / 3.0f : (float) (FB_W * v->scaleMode);
+  } else if(v->aspect == 1) {
+    h = ah;
+    w = h * 4.0f / 3.0f;
+    if(w > aw) { w = aw; h = w * 3.0f / 4.0f; }
+  } else {
+    int s = (int) (aw / (float) FB_W);
+    int sy = (int) (ah / (float) FB_H);
+    if(sy < s) s = sy;
+    if(s < 1) s = 1;
+    w = (float) (FB_W * s);
+    h = (float) (FB_H * s);
+  }
+  SDL_FRect r = { (aw - w) / 2.0f, (float) barH + (ah - h) / 2.0f, w, h };
+  return r;
+}
+
+/* 512x480 down to the signal's own 256x224: the core doubles every dot and every
+ * line, and row y of the picture sits at 2y+16. */
+static void downsample(const uint8_t* src, uint32_t* fb) {
+  for(int y = 0; y < FB_H; y++) {
+    const uint32_t* row = (const uint32_t*) (src + (size_t) (y * 2 + 16) * SRC_W * 4);
+    for(int x = 0; x < FB_W; x++) fb[y * FB_W + x] = row[x * 2];
+  }
+}
+
+/* --screenshot: the framebuffer as it stands, as a binary PPM. A test aid, not a
+ * feature: on a machine with no display it is the only way to look at a page. */
+static bool write_ppm(const char* path, const uint32_t* fb) {
+  FILE* f = fopen(path, "wb");
+  if(f == NULL) {
+    fprintf(stderr, "dream: cannot write %s: %s\n", path, strerror(errno));
+    return false;
+  }
+  fprintf(f, "P6\n%d %d\n255\n", FB_W, FB_H);
+  for(int i = 0; i < FB_W * FB_H; i++) {
+    uint32_t p = fb[i];
+    fputc((int) ((p >> 24) & 0xFF), f);
+    fputc((int) ((p >> 16) & 0xFF), f);
+    fputc((int) ((p >> 8) & 0xFF), f);
+  }
+  fclose(f);
+  return true;
+}
+
+/* --gallery SEC:NAV — one gallery press per character. */
+static void gallery_nav(Gallery* gal, const char* moves) {
+  for(const char* p = moves; *p != 0; p++) {
+    switch(*p) {
+      case 'u': gallery_press(gal, 1u << GALLERY_BTN_UP); break;
+      case 'd': gallery_press(gal, 1u << GALLERY_BTN_DOWN); break;
+      case 'l': gallery_press(gal, 1u << GALLERY_BTN_LEFT); break;
+      case 'r': gallery_press(gal, 1u << GALLERY_BTN_RIGHT); break;
+      case 'p': gallery_press(gal, 1u << GALLERY_BTN_L); break;
+      case 'n': gallery_press(gal, 1u << GALLERY_BTN_R); break;
+      case 'b': gallery_press(gal, 1u << GALLERY_BTN_B); break;
+      case 'a': gallery_press(gal, 1u << GALLERY_BTN_A); break;
+      default: break;
+    }
+  }
+}
+
+/* A decoded BRR sample, into the same stream the DSP feeds: mono 32000 Hz doubled to
+ * stereo. The stream is declared at 32093 Hz, so a sample plays 0.3% sharp — far below
+ * hearing, and it keeps the app to one audio path. */
+static void play_pcm(SDL_AudioStream* audio, const int16_t* pcm, int count) {
+  if(audio == NULL || count <= 0) return;
+  int16_t* buf = malloc((size_t) count * 2 * sizeof(int16_t));
+  if(buf == NULL) return;
+  for(int i = 0; i < count; i++) { buf[i * 2] = pcm[i]; buf[i * 2 + 1] = pcm[i]; }
+  SDL_ClearAudioStream(audio);
+  SDL_PutAudioStreamData(audio, buf, count * 2 * (int) sizeof(int16_t));
+  free(buf);
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(int argc, char** argv) {
   const char* romArg = NULL;
   const char* inputPath = NULL;
+  const char* shotPath = NULL;
+  const char* gallerySpec = NULL;
   int frames = 0;                 /* 0 = run until the user quits */
+  int toggleFrame = -1, toggleIters = 0;
 
   for(int i = 1; i < argc; i++) {
     const char* a = argv[i];
     bool hasNext = i + 1 < argc;
     if(strcmp(a, "--frames") == 0 && hasNext) frames = atoi(argv[++i]);
     else if(strcmp(a, "--input") == 0 && hasNext) inputPath = argv[++i];
+    else if(strcmp(a, "--screenshot") == 0 && hasNext) shotPath = argv[++i];
+    else if(strcmp(a, "--gallery") == 0 && hasNext) gallerySpec = argv[++i];
+    else if(strcmp(a, "--gallery-toggle") == 0 && hasNext) {
+      if(sscanf(argv[++i], "%d,%d", &toggleFrame, &toggleIters) != 2) {
+        fprintf(stderr, "dream: --gallery-toggle wants FRAME,ITERATIONS\n");
+        return 2;
+      }
+    }
     else if(a[0] == '-' && a[1] != 0) {
       fprintf(stderr, "dream: unknown option %s\n", a);
       return 2;
@@ -525,17 +638,17 @@ int main(int argc, char** argv) {
   uint8_t* srcPixels = NULL;
   int16_t* audioBuf = NULL;
 
-  if(!SDL_CreateWindowAndRenderer("Dream: Land of Giants", FB_W * 3, FB_H * 3,
+  if(!SDL_CreateWindowAndRenderer("Dream: Land of Giants", FB_W * 3,
+                                  FB_H * 3 + menubar_height(FB_W * 3),
                                   SDL_WINDOW_RESIZABLE, &window, &renderer)) {
     fprintf(stderr, "dream: cannot create a window: %s\n", SDL_GetError());
     SDL_Quit();
     free(rom);
     return 2;
   }
-  /* Largest whole multiple of 256x224 that fits, centred; nearest-neighbour, so a
-   * pixel stays a pixel. */
-  SDL_SetRenderLogicalPresentation(renderer, FB_W, FB_H,
-                                   SDL_LOGICAL_PRESENTATION_INTEGER_SCALE);
+  /* No logical presentation: the menu bar is drawn at the window's own resolution
+   * and the picture goes into a rect computed under it (view_rect), which keeps the
+   * default 8:7 view on whole-numbered pixels exactly as before. */
   texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBX8888,
                               SDL_TEXTUREACCESS_STREAMING, FB_W, FB_H);
   if(texture == NULL) {
@@ -562,7 +675,7 @@ int main(int argc, char** argv) {
   m.hooks = build_table(&m.hookCount);
   m.spcHooks = build_spc_table(&m.spcHookCount);
   if(!machine_load_rom(&m, rom, romLen)) { free(rom); return 2; }
-  free(rom);
+  /* The ROM image stays mapped for the gallery, which decodes it at run time. */
   snes_setPixelFormat(m.snes, pixelFormatRGBX);
   m.snes->cpu->hook = app_hook;
   m.snes->cpu->hookCtx = &m;
@@ -575,19 +688,65 @@ int main(int argc, char** argv) {
   SDL_Gamepad* pad2 = NULL;
   open_gamepads(&pad, &pad2);
 
+  /* The app's own UI: a menu bar and the gallery pages it opens. The gallery reads
+   * the ROM image and the framebuffer and nothing else — no path from here reaches
+   * the machine above. */
+  uint32_t* fb = calloc((size_t) FB_W * FB_H, sizeof(uint32_t));
+  Gallery* gal = gallery_create(rom, romLen);
+  Menubar* bar = menubar_create(renderer);
+  MusicPlayer* music = NULL;
+  View view = { 0, 0, false };
+
   bool running = true;
   int frame = 0;
+  int toggleLeft = 0;
   uint64_t nextFrame = SDL_GetTicksNS();
 
   while(running) {
+    MenuModel model = { view.scaleMode, view.aspect, view.fullscreen,
+                        gallery_is_open(gal), gallery_section(gal) };
     SDL_Event ev;
     while(SDL_PollEvent(&ev)) {
+      MenuAction act;
+      if(menubar_event(bar, renderer, &ev, &model, &act)) {
+        switch(act.kind) {
+          case MENU_ACT_QUIT: running = false; break;
+          case MENU_ACT_SCALE:
+          case MENU_ACT_FIT: {
+            view.scaleMode = act.kind == MENU_ACT_FIT ? 0 : act.arg;
+            if(view.scaleMode > 0 && !view.fullscreen) {
+              int w = view.aspect == 1 ? (FB_H * view.scaleMode * 4) / 3
+                                       : FB_W * view.scaleMode;
+              SDL_SetWindowSize(window, w, FB_H * view.scaleMode + menubar_height(w));
+            }
+            break;
+          }
+          case MENU_ACT_ASPECT: view.aspect = act.arg; break;
+          case MENU_ACT_FULLSCREEN:
+            view.fullscreen = !view.fullscreen;
+            SDL_SetWindowFullscreen(window, view.fullscreen);
+            break;
+          case MENU_ACT_GALLERY:
+            gallery_open(gal, act.arg);
+            if(audio != NULL) SDL_ClearAudioStream(audio);   /* the game falls silent */
+            break;
+          case MENU_ACT_GALLERY_CLOSE:
+            gallery_close(gal);
+            break;
+          default: break;
+        }
+        continue;
+      }
       switch(ev.type) {
         case SDL_EVENT_QUIT:
           running = false;
           break;
         case SDL_EVENT_KEY_DOWN:
-          if(ev.key.scancode == SDL_SCANCODE_ESCAPE) running = false;
+          /* Escape closes the page if one is open, and quits otherwise. */
+          if(ev.key.scancode == SDL_SCANCODE_ESCAPE) {
+            if(gallery_is_open(gal)) gallery_close(gal);
+            else running = false;
+          }
           break;
         case SDL_EVENT_GAMEPAD_ADDED:
           if(pad == NULL) pad = SDL_OpenGamepad(ev.gdevice.which);
@@ -607,45 +766,95 @@ int main(int argc, char** argv) {
     }
     if(!running) break;
 
-    uint16_t state, state2;
-    if(inputPath != NULL) {
-      input_state_at(&script, frame, &state, &state2);
-    } else {
-      state = (uint16_t) (read_gamepad(pad) | read_keyboard());
-      state2 = read_gamepad(pad2);
-    }
-    machine_set_input(&m, state, state2);
-
-    snes_runFrame(m.snes);
-
-    /* Nudge the sample count by ~1% when the queue drifts a frame off its
-     * target: dsp_getSamples() resamples to whatever is asked for, so this costs
-     * a pitch shift far below hearing and keeps latency bounded when the display
-     * clock and 60.0988 Hz disagree. */
-    if(audio != NULL) {
-      int queued = SDL_GetAudioStreamQueued(audio) / 4;
-      int want = AUDIO_SAMPLES_PER_FRAME;
-      if(queued > AUDIO_QUEUE_TARGET + AUDIO_SAMPLES_PER_FRAME) want -= 6;
-      else if(queued < AUDIO_QUEUE_TARGET - AUDIO_SAMPLES_PER_FRAME) want += 6;
-      snes_setSamples(m.snes, audioBuf, want);
-      SDL_PutAudioStreamData(audio, audioBuf, want * 4);
+    /* The hidden toggle test: open the gallery mid-run, walk every section, close
+     * it again. Nothing below runs the machine while it is open, which is the whole
+     * point — the frame line at the end has to be the one an untoggled run prints. */
+    if(toggleFrame >= 0 && frame == toggleFrame && toggleIters > 0) {
+      gallery_open(gal, 0);
+      toggleLeft = toggleIters;
+      toggleFrame = -1;                 /* once: a paused iteration is not a frame */
     }
 
-    snes_setPixels(m.snes, srcPixels);
-    void* dst = NULL;
-    int pitch = 0;
-    if(SDL_LockTexture(texture, NULL, &dst, &pitch)) {
-      /* 512x480 down to the signal's own 256x224: the core doubles every dot and
-       * every line, and row y of the picture sits at 2y+16. */
-      for(int y = 0; y < FB_H; y++) {
-        const uint32_t* row = (const uint32_t*) (srcPixels + (size_t) (y * 2 + 16) * SRC_W * 4);
-        uint32_t* d = (uint32_t*) ((uint8_t*) dst + (size_t) y * (size_t) pitch);
-        for(int x = 0; x < FB_W; x++) d[x] = row[x * 2];
+    bool paused = gallery_is_open(gal);
+
+    if(paused) {
+      /* The gallery's own UI step. The machine is not stepped, not written to and
+       * not even handed an input state: it stands exactly as it was. */
+      if(toggleLeft > 0) {
+        if(--toggleLeft == 0) gallery_close(gal);
+        else if(toggleLeft % 4 == 0)
+          gallery_open(gal, (gallery_section(gal) + 1) % GALLERY_SECTION_COUNT);
+        else gallery_press(gal, 1u << GALLERY_BTN_RIGHT);
+      } else {
+        uint16_t held = 0;
+        if(inputPath == NULL && !menubar_focused(bar))
+          held = (uint16_t) (read_gamepad(pad) | read_keyboard());
+        gallery_input(gal, held);
       }
-      SDL_UnlockTexture(texture);
+
+      /* The Music page gets a machine of its own, booted on first use and thrown
+       * away when the page closes; its DSP output is what plays. */
+      bool wantMusic = gallery_section(gal) == GALLERY_SEC_MUSIC;
+      if(wantMusic && music == NULL) music = music_create(rom, romLen);
+      if(!wantMusic && music != NULL) { music_destroy(music); music = NULL; }
+      int reqKind = 0, reqArg = 0;
+      if(gallery_take_request(gal, &reqKind, &reqArg) && music != NULL) {
+        if(reqKind == GALLERY_REQ_SONG) music_play_song(music, reqArg);
+        else if(reqKind == GALLERY_REQ_SFX) music_play_sfx(music, (uint16_t) reqArg);
+      }
+      if(music != NULL && audio != NULL) {
+        music_frame(music, audioBuf, AUDIO_SAMPLES_PER_FRAME);
+        SDL_PutAudioStreamData(audio, audioBuf, AUDIO_SAMPLES_PER_FRAME * 4);
+      }
+      const int16_t* pcm = NULL;
+      int pcmCount = 0;
+      if(gallery_take_pcm(gal, &pcm, &pcmCount)) play_pcm(audio, pcm, pcmCount);
+
+      gallery_render(gal, fb);
+    } else {
+      if(music != NULL) { music_destroy(music); music = NULL; }
+      uint16_t state, state2;
+      if(inputPath != NULL) {
+        input_state_at(&script, frame, &state, &state2);
+      } else if(menubar_focused(bar)) {
+        state = 0;
+        state2 = read_gamepad(pad2);
+      } else {
+        state = (uint16_t) (read_gamepad(pad) | read_keyboard());
+        state2 = read_gamepad(pad2);
+      }
+      machine_set_input(&m, state, state2);
+
+      snes_runFrame(m.snes);
+
+      /* Nudge the sample count by ~1% when the queue drifts a frame off its
+       * target: dsp_getSamples() resamples to whatever is asked for, so this costs
+       * a pitch shift far below hearing and keeps latency bounded when the display
+       * clock and 60.0988 Hz disagree. */
+      if(audio != NULL) {
+        int queued = SDL_GetAudioStreamQueued(audio) / 4;
+        int want = AUDIO_SAMPLES_PER_FRAME;
+        if(queued > AUDIO_QUEUE_TARGET + AUDIO_SAMPLES_PER_FRAME) want -= 6;
+        else if(queued < AUDIO_QUEUE_TARGET - AUDIO_SAMPLES_PER_FRAME) want += 6;
+        snes_setSamples(m.snes, audioBuf, want);
+        SDL_PutAudioStreamData(audio, audioBuf, want * 4);
+      }
+
+      snes_setPixels(m.snes, srcPixels);
+      downsample(srcPixels, fb);
     }
+
+    SDL_UpdateTexture(texture, NULL, fb, FB_W * (int) sizeof(uint32_t));
+    int outW = 0, outH = 0;
+    SDL_GetRenderOutputSize(renderer, &outW, &outH);
+    int barH = menubar_height(outW);
+    SDL_FRect dst = view_rect(&view, outW, outH, barH);
+    SDL_SetRenderDrawColor(renderer, 0x0A, 0x0C, 0x10, 255);
     SDL_RenderClear(renderer);
-    SDL_RenderTexture(renderer, texture, NULL, NULL);
+    SDL_RenderTexture(renderer, texture, NULL, &dst);
+    model.galleryOpen = gallery_is_open(gal);
+    model.gallerySection = gallery_section(gal);
+    menubar_draw(bar, renderer, outW, &model);
     SDL_RenderPresent(renderer);
 
     /* Paced off the clock rather than the display: the game's rate is 60.0988 Hz
@@ -658,6 +867,7 @@ int main(int argc, char** argv) {
       else if(now - nextFrame > FRAME_NS * 8) nextFrame = now;   /* gave up catching up */
     }
 
+    if(paused) continue;      /* a paused iteration is not a frame of the game */
     frame++;
     if(timed && frame >= frames) break;
   }
@@ -667,6 +877,29 @@ int main(int argc, char** argv) {
     print_frame_line(frame - 1, &m);
   }
 
+  /* --gallery / --screenshot: open the page the test asked for, drive it with the
+   * given moves and dump whatever the framebuffer then holds. */
+  if(gallerySpec != NULL) {
+    char spec[128];
+    snprintf(spec, sizeof(spec), "%s", gallerySpec);
+    char* colon = strchr(spec, ':');
+    if(colon != NULL) *colon = 0;
+    int sec = gallery_section_by_name(spec);
+    if(sec < 0) {
+      fprintf(stderr, "dream: unknown gallery section '%s'\n", spec);
+    } else {
+      gallery_open(gal, sec);
+      if(colon != NULL) gallery_nav(gal, colon + 1);
+      gallery_render(gal, fb);
+    }
+  }
+  if(shotPath != NULL) write_ppm(shotPath, fb);
+
+  if(music != NULL) music_destroy(music);
+  menubar_destroy(bar);
+  gallery_destroy(gal);
+  free(fb);
+  free(rom);
   if(pad != NULL) SDL_CloseGamepad(pad);
   if(pad2 != NULL) SDL_CloseGamepad(pad2);
   if(audio != NULL) SDL_DestroyAudioStream(audio);

@@ -560,192 +560,38 @@ the flags make the branch taken.
 
 It exits 0 on pass, 1 on fail.
 
-### The first batch
+### The SPC700 driver in C
 
-`recomp/spc/` converts the loader, the driver's entry and command set, and
-`dsp_init` — twenty-two routines, every one of them modelling its own instruction
-stream:
+`recomp/spc/` holds the whole driver, 82 routines, every one modelling its own
+instruction stream:
 
-* `loader.c` — `spc_loader`, `loader_reset_dsp`, `loader_block_loop`,
-  `loader_jump`. The IPL-uploaded block at `$04D8` that stays resident for the
-  whole run, and the handshake the 65816's `spc_send_words` busy-waits against.
-  The block loop patches the upload destination into the operand bytes of its own
-  two `mov $0000+y,a` instructions and then leaves through `jmp ($0539+x)`, so the
-  ROM writes its own jump target into its own code; the C body does exactly that,
-  storing through the timed path and reading the vector back out of ARAM one byte
-  at a time where the SPC700's operand fetch reads it.
+* `loader.c` — `spc_loader`, `loader_reset_dsp`, `loader_block_loop`, `loader_jump`:
+  the IPL-uploaded block at `$04D8` and the handshake the 65816's `upload_spc_block`
+  busy-waits against. The block loop patches the upload destination into the operand
+  bytes of its own two `mov $0000+y,a` instructions and leaves through `jmp ($0539+x)`;
+  the C body stores through the timed path and reads the vector back out of ARAM
+  exactly where the SPC700's operand fetch reads it.
 * `driver_cmd.c` — `driver_entry`, `driver_init`, `main_loop`, `cmd_receive`,
-  `cmd_dispatch`, the eight `cmd_table` handlers, `start_song`, `play_sfx` and
-  `dsp_step_toward_zero`. `scale_volume` and `sfx_start` are not converted yet and
-  run through `sps_run_callee`; `tick_wait` (`$0781`) is not either, and every
-  handler hands the pc back to it, which is what the ROM's own `jmp tick_wait`
-  does.
-* `dsp_init.c` — `dsp_init` and `dsp_flg_20`: the DSP reset, the per-voice
-  defaults and the sixteen per-slot arrays read out of the song header.
+  `cmd_dispatch`, the eight `cmd_table` handlers, `start_song`, `play_sfx`,
+  `dsp_step_toward_zero`.
+* `dsp_init.c` — `dsp_init`, `dsp_flg_20`.
+* `sequencer.c` — `tick_wait`, `channel_loop`, `seq_step`, `seq_fetch`, `seq_note`,
+  `seq_note_length`, `channel_update`, `seq_end`, `seq_pop_x`, `seq_retrigger`,
+  `sfx_start`. The opcode dispatch `jmp (seq_cmd_table+x)` reads its vector from ARAM
+  and hands the pc to the registry so each handler's hook fires.
+* `seq_ops_a.c`, `seq_ops_b.c` — the sequence-opcode handlers `$00-$32`, including the
+  four stale table slots nothing emits.
 
-Fourteen of the twenty-two are entered by the gate's scripts and credited; the
-call counts summed across all seven, with the tables installed on both
-processors, are
+Every route between routines goes through the registry (pc hand-off or a real pushed
+frame plus `sps_run_callee`), never a direct C call, so each routine is entered at its
+own address and credited by the gate.
 
-    main_loop 18947   loader_block_loop 1531   cmd_receive 571   play_sfx 527
-    dsp_flg_20 73     dsp_init 51              cmd_dispatch 44   driver_entry 29
-    driver_init 29    loader_reset_dsp 29      loader_jump 29    cmd6_play 22
-    cmd7_stop_to_loader 22                     spc_loader 7
-
-and every script ends `+0 master cycles and +0 APU cycles` from the reference.
-The other eight are command handlers no live 65816 code sends. Only three places
-write the command port (`src/bank_C1.asm`): `spc_command` sends `$FF` with a
-parameter (`cmd7_stop_to_loader`) and then `$FE` (`cmd6_play`);
-`sfx_command_dispatch` sends the byte in X, which is the sound-effect path below
-`$80` (`play_sfx`); and `orphan_C183F1`, which sends `$F9` (`cmd1_set_E7`), has
-no caller. That leaves `cmd0_set_E8`, `cmd1_set_E7`, `cmd2_set_mono`,
-`cmd4_pitch_offset` and `cmd5_voice5_volume` with no sender at all, and
-`cmd3_fade_and_song` sent only by the eighteen stale bytes at `$C1:8403` — which
-also makes `start_song` and `dsp_step_toward_zero`, reachable only through
-`cmd3`, unreachable. They are converted because they are `cmd_table` entries and
-the dispatch is not honest without them, and the gate lists them as unverified
-rather than crediting them.
-
-## Lockstep protocol
-
-`--lockstep` creates two independent emulator instances from the same ROM image:
-
-* **reference** — no hook table installed; the ROM's own code runs.
-* **candidate** — the routine table installed; hooked routines run as C.
-
-Both are driven with the same input script, one frame at a time. After every frame
-seven regions are compared byte for byte: the four the PPU and the 65816 own —
-WRAM (128 KB), VRAM (64 KB), CGRAM (512 B), OAM (544 B) — and the three the APU
-owns, ARAM (the SPC700's 64 KB), `dspreg` (the DSP's 128 registers, read out of
-the emulated DSP's own register file) and `spcreg` (A, X, Y, SP, PSW, the pc and
-the `$F2` DSP-address latch, eight bytes). The first difference is printed as
-
-    MISMATCH frame 188 region wram offset 0x00408 expected 00 got 01
-
-("expected" is the reference, "got" the candidate) and the run stops with exit
-status 1. If every frame matches, the run prints `lockstep: N frames, no mismatches`
-and exits 0. Per-hook call counts are printed at the end — `hook` lines for the
-65816 table and `spchook` lines for the SPC700 one — so a table that never fired
-cannot be mistaken for a table that passed.
-
-`--hooks` and `--spc-hooks` are both honoured in lockstep mode, but only on the
-candidate: the reference never runs a hook of either kind, because the point of
-the mode is precisely the off-versus-on comparison. `--hook-table empty` still
-works, and trivially passes, and `--only NAME` narrows *both* tables to the named
-routines, which is how a mismatch gets bisected down to one body on either
-processor. The summary line reports how far the candidate has drifted from the
-reference on both clocks:
-
-    lockstep: 900 frames, no mismatches (candidate ended +0 master cycles
-              and +0 APU cycles from the reference)
-
-The master-cycle figure separates a 65816 timing problem from a behavioural one
-at a glance. The APU-cycle figure is weaker on its own, because the SPC does not
-free-run: `snes_catchupApu()` hands `apu_runCycles()` a budget and it runs whole
-opcodes until the budget is spent, so the total spent per frame is set by the
-budget rather than by what the SPC did. A timing error inside a sound-driver body
-shows up instead as a *pc* difference in `spcreg` — the SPC is a few cycles ahead
-or behind and is therefore on a different instruction when the frame ends — and
-the APU figure then reports the size of it. Removing one internal cycle from
-`main_loop` is caught that way at frame 82 of `title_start_right.txt`:
-
-    MISMATCH frame 82 region spcreg offset 0x00005 expected C7 got CA
-             (candidate is +0 master cycles, -3 APU cycles)
-
-## The worked example
-
-`src/oam.c` reimplements `clear_sprite_table` (`$C0:A500`, called once per
-main-loop iteration from `$C08235` and once from `$C09324`): sixteen 16-bit `stz`
-into `$0400..$041F`, then `$94 = $0200`, `$96 = 0`, then `rts`. It is also what
-`--hook-table demo` installs, through the declining wrapper in `harness/hooks.c`
-that checks the CPU mode first.
-
-Like every other routine in `src/`, the body writes the values through the timed
-accessors and models the instruction stream (three fetches then two writes per
-`stz abs`, and so on), so the routine costs the emulator the same master cycles it
-did before: `--profile` reports `rom 703 [658-754] hook 703 [658-754]`, the same
-interval, and therefore a charge of zero.
-
-## The gate
-
-    make recomp-check          # build the harness, then tools/recomp_verify.py
-
-`tools/recomp_verify.py` runs `--lockstep --hooks on --spc-hooks on` over every
-script in `harness/inputs/`, 900 frames each unless the script carries a
-`# frames N` header, and prints per-script pass/fail plus the hook call counts
-summed across the scripts. Both processors are gated in the same run and by the
-same rule: a routine counts as verified only when every script passed *and* it was
-entered at least once. The two tables are reported separately (`65816 routine call
-counts`, `spc700 routine call counts`), and `--update` rewrites
-`config/recomp.txt` (which `tools/progress.py` credits to the `recomp` badge) with
-both, under `; --- 65816 ---` and `; --- SPC700 sound driver ---` headings, listing
-the never-entered ones separately as unverified rather than crediting them. The
-names are the labels `progress.py` looks routines up by: `out/symbols.txt` for the
-65816 side, `spc/driver.asm` for the SPC700 side.
-
-`--spc-hooks off` runs the 65816 side alone, which is how a change to one half is
-checked against the other. It refuses `--update`, because every SPC routine would
-then be written out as unverified.
-
-`tools/hooks/pre-commit` runs the gate after `make check` when a commit touches
-`recomp/` or `config/recomp*`.
-
-Three of the thirty converted routines are listed as unverified rather than
-credited, because no script *enters* them:
-
-* `anim_rate_1_2` (`$99D3`) has no table word pointing at it anywhere in the ROM
-  (`docs/handler_tables.md` section 1 lists it as unreferenced). The only way the
-  ROM reaches it is by falling through from `$99D2`, which `anim_rate_1_4`'s hook
-  already covers, so its entry address can never fire. It is converted because it
-  is one step of that fall-through chain.
-* `anim_rate_3_8` (`$99BA`) is the same story one table entry along: it is
-  reachable in principle (entity type `$0E`), but `anim_rate_3_16` at `$99B9`
-  falls into it, so whenever the shape is used it is `$99B9` that gets entered.
-* `anim_rate_3_16` (`$99B9`) does fire, 115 times, but only past frame 900:
-  `level_walk_jump.txt` run to its full 3700 frames enters it and still matches.
-  The gate's default length is 900 frames, so it does not count yet. A
-  `# frames 3700` header on that script would make it count.
-
-## Coverage scripts
-
-`harness/inputs/` holds a small set of scripts built to maximize the union of static
-routines exercised, for the recomp lockstep gate: `title_start_right.txt` (the
-worked example above), `title_attract_then_start.txt`, `mode_cycle.txt`,
-`level_walk_jump.txt` and `level_long_traverse.txt`. Together they take
-`compare_coverage.py`'s count from 74/123 (the single `title_start_right.txt` run)
-to 110/123, and reach all four `game_mode` values -- 0, 1 and 2 (the level scenes)
-and 3 (title) -- not just mode 0. The key to modes 1/2/3 is a debug/attract feature
-found during the search: pressing **Select** while no screen fade is in progress
-advances `game_mode` by one (wrapping 3 back to 0), which is otherwise not
-documented anywhere in the ROM. `harness/explore.py` is the search tool that found
-these scripts (it runs candidate button scripts, traces coverage, and greedily
-keeps whatever adds previously-uncovered routines); `harness/inputs/README.md` has
-the full per-script/union coverage table and, for the 13 routines still cold,
-which are dead code versus which would need a specific entity encounter not yet
-located.
-
-## Reproducing the reported runs
-
-    make harness
-    make recomp-check                       # the gate: every script, every routine
-    ./build/recomp/dream_harness --test-nesting      # the nested-hook snapshot test
-    ./build/recomp/dream_harness --test-spc-timing   # SPC700 per-opcode cycle counts
-    ./build/recomp/dream_harness --frames 600
-    ./build/recomp/dream_harness --frames 600 --input recomp/harness/inputs/title_start_right.txt
-    ./build/recomp/dream_harness --lockstep --hooks on --frames 900 --quiet \
-        --input recomp/harness/inputs/title_start_right.txt
-    ./build/recomp/dream_harness --lockstep --hooks on --spc-hooks on --frames 900 \
-        --quiet --input recomp/harness/inputs/title_start_right.txt
-    ./build/recomp/dream_harness --frames 600 --quiet --trace /tmp/trace.txt \
-        --input recomp/harness/inputs/title_start_right.txt
-    python3 recomp/harness/compare_coverage.py /tmp/trace.txt
-
-To bisect a mismatch, install one routine at a time:
-
-    ./build/recomp/dream_harness --lockstep --frames 900 --quiet \
-        --only entity_sort_draw_order --input recomp/harness/inputs/mode_cycle.txt
-
-and to see whether a body is cycle-exact, compare the two intervals `--profile`
-reports for it:
-
-    make recomp-profile && cat config/recomp_cycles.txt
+57 of the 82 are entered by the gate's scripts; every script ends `+0 master cycles
+and +0 APU cycles` from the reference. The 25 never entered fall into three groups:
+the command handlers no live 65816 code sends (only `spc_command` sends `$FF`/`$FE` and
+`sfx_command_dispatch` sends sound-effect ids; the dead `orphan_C183F1` would send
+`$F9`), the sequence opcodes none of the three songs or the sound-effect banks use
+(`seq_instr_full`, `seq_volume_preset`, `seq_master_percent`, `seq_volume_presets`,
+`seq_set_length`, `seq_clear_length`, `seq_tempo_add`, `seq_vibrato`, `seq_set_note_E0`,
+`seq_set_note_E1`, `seq_transpose_add`, the noise trio), and the four stale table
+slots. They are converted for completeness and listed as unverified.

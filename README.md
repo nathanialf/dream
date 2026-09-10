@@ -1,7 +1,7 @@
 # dream
 
 <!-- progress:begin -->
-![recomp progress](https://img.shields.io/badge/recomp-82.76%20%25-green.svg)
+![recomp progress](https://img.shields.io/badge/recomp-93.32%20%25-green.svg)
 ![code progress](https://img.shields.io/badge/code-90.95%20%25-green.svg)
 ![sound_iface progress](https://img.shields.io/badge/sound%20iface-96.57%20%25-green.svg)
 ![spc700 progress](https://img.shields.io/badge/spc700-82.93%20%25-green.svg)

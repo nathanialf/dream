@@ -130,6 +130,8 @@ vram_write_tile_row_planes
 write_spc_command
 
 ; --- SPC700 sound driver ---
+channel_loop
+channel_update
 cmd6_play
 cmd7_stop_to_loader
 cmd_dispatch
@@ -142,8 +144,49 @@ loader_block_loop
 loader_jump
 loader_reset_dsp
 main_loop
+orphan_gate_off
+orphan_gate_on
 play_sfx
+scale_volume
+seq_adsr
+seq_advance5
+seq_call
+seq_call_once
+seq_echo_delay
+seq_echo_off
+seq_echo_on
+seq_echo_setup
+seq_end
+seq_fetch
+seq_finetune
+seq_fir
+seq_instrument
+seq_jump
+seq_load_srcn
+seq_master_volume
+seq_note
+seq_note_length
+seq_pop_x
+seq_push_return
+seq_read_adsr
+seq_read_vibrato
+seq_read_volume
+seq_retrigger
+seq_return
+seq_slide_down
+seq_slide_off
+seq_slide_up
+seq_step
+seq_tempo
+seq_transpose
+seq_vibrato_delay
+seq_vibrato_off
+seq_volume
+seq_volume_mono
+sfx_start
 spc_loader
+sub_0BCC
+tick_wait
 
 ; Registered in recomp/src but never entered by any input script, so not
 ; credited here. They need a script that reaches them before they can count:
@@ -164,4 +207,21 @@ spc_loader
 ;   cmd4_pitch_offset
 ;   cmd5_voice5_volume
 ;   dsp_step_toward_zero
+;   orphan_slide_down2
+;   orphan_slide_up2
+;   orphan_volume_preset2
+;   seq_clear_length
+;   seq_instr_full
+;   seq_master_percent
+;   seq_noise_clock
+;   seq_noise_off
+;   seq_noise_on
+;   seq_set_length
+;   seq_set_note_E0
+;   seq_set_note_E1
+;   seq_tempo_add
+;   seq_transpose_add
+;   seq_vibrato
+;   seq_volume_preset
+;   seq_volume_presets
 ;   start_song

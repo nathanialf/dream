@@ -150,6 +150,16 @@ static inline void s_cmp(SpcState* sp, uint8_t reg, uint8_t mem) {
   sps_set_zn(sp, (uint8_t) result);
 }
 
+/* cmp mem,#imm (spc_cmpm): read, compare, then an internal cycle before the
+ * Z/N pair -- the one compare form in this driver that costs more than its
+ * fetches and a read (seq_fir's `cmp !DSPADDR,#$8F`). It writes nothing back. */
+static inline void s_cmpm(SpcState* sp, uint16_t dst, uint8_t value) {
+  int result = sps_read8(sp, dst) + (uint8_t) (value ^ 0xff) + 1;
+  sps_set_c(sp, result > 0xff);
+  sps_idle(sp);
+  sps_set_zn(sp, (uint8_t) result);
+}
+
 /* and a,mem (spc_and) */
 static inline uint8_t s_and(SpcState* sp, uint8_t a, uint8_t mem) {
   uint8_t r = (uint8_t) (a & mem);
@@ -177,6 +187,151 @@ static inline void s_adcm(SpcState* sp, uint16_t dst, uint8_t value) {
   sps_set_c(sp, result > 0xff);
   sps_write8(sp, dst, (uint8_t) result);
   sps_set_zn(sp, (uint8_t) result);
+}
+
+/* adc a,mem (spc_adc), V/H exactly as the core computes them */
+static inline uint8_t s_adc(SpcState* sp, uint8_t a, uint8_t value) {
+  int result = a + value + (sps_c(sp) ? 1 : 0);
+  sps_set_v(sp, (a & 0x80) == (value & 0x80) && (value & 0x80) != (result & 0x80));
+  sps_set_h(sp, ((a & 0xf) + (value & 0xf) + (sps_c(sp) ? 1 : 0)) > 0xf);
+  sps_set_c(sp, result > 0xff);
+  sps_set_zn(sp, (uint8_t) result);
+  return (uint8_t) result;
+}
+
+/* or a,mem (spc_or) */
+static inline uint8_t s_or(SpcState* sp, uint8_t a, uint8_t mem) {
+  uint8_t r = (uint8_t) (a | mem);
+  sps_set_zn(sp, r);
+  return r;
+}
+
+/* eor a,mem (spc_eor) */
+static inline uint8_t s_eor(SpcState* sp, uint8_t a, uint8_t mem) {
+  uint8_t r = (uint8_t) (a ^ mem);
+  sps_set_zn(sp, r);
+  return r;
+}
+
+/* dec mem (spc_dec): read, -1, write, Z/N */
+static inline uint8_t s_dec_mem(SpcState* sp, uint16_t adr) {
+  uint8_t v = (uint8_t) (sps_read8(sp, adr) - 1);
+  sps_write8(sp, adr, v);
+  sps_set_zn(sp, v);
+  return v;
+}
+
+/* lsr mem (spc_lsr) */
+static inline uint8_t s_lsr_mem(SpcState* sp, uint16_t adr) {
+  uint8_t v = sps_read8(sp, adr);
+  sps_set_c(sp, (v & 1) != 0);
+  v = (uint8_t) (v >> 1);
+  sps_write8(sp, adr, v);
+  sps_set_zn(sp, v);
+  return v;
+}
+
+/* ror mem (spc_ror): the old carry becomes bit 7, bit 0 becomes the carry */
+static inline uint8_t s_ror_mem(SpcState* sp, uint16_t adr) {
+  uint8_t v = sps_read8(sp, adr);
+  bool newC = (v & 1) != 0;
+  v = (uint8_t) ((v >> 1) | (sps_c(sp) ? 0x80 : 0x00));
+  sps_set_c(sp, newC);
+  sps_write8(sp, adr, v);
+  sps_set_zn(sp, v);
+  return v;
+}
+
+/* lsr a (case 0x5c) */
+static inline uint8_t s_lsr_a(SpcState* sp, uint8_t a) {
+  s_imp(sp);
+  sps_set_c(sp, (a & 1) != 0);
+  a = (uint8_t) (a >> 1);
+  sps_set_zn(sp, a);
+  return a;
+}
+
+/* ror a (case 0x7c) */
+static inline uint8_t s_ror_a(SpcState* sp, uint8_t a) {
+  s_imp(sp);
+  bool newC = (a & 1) != 0;
+  a = (uint8_t) ((a >> 1) | (sps_c(sp) ? 0x80 : 0x00));
+  sps_set_c(sp, newC);
+  sps_set_zn(sp, a);
+  return a;
+}
+
+/* rol a (case 0x3c): bit 7 becomes the carry, the old carry becomes bit 0 */
+static inline uint8_t s_rol_a(SpcState* sp, uint8_t a) {
+  s_imp(sp);
+  bool newC = (a & 0x80) != 0;
+  a = (uint8_t) ((a << 1) | (sps_c(sp) ? 0x01 : 0x00));
+  sps_set_c(sp, newC);
+  sps_set_zn(sp, a);
+  return a;
+}
+
+/* xcn a (case 0x9f): the nibble swap, three internal cycles after the dummy
+ * read at pc */
+static inline uint8_t s_xcn(SpcState* sp, uint8_t a) {
+  s_imp(sp);
+  sps_idle(sp);
+  sps_idle(sp);
+  sps_idle(sp);
+  a = (uint8_t) ((a >> 4) | (a << 4));
+  sps_set_zn(sp, a);
+  return a;
+}
+
+/* mul ya (case 0xcf): seven internal cycles, Y:A = Y * A, Z/N on the high byte.
+ * Returns the product as one 16-bit Y:A value. */
+static inline uint16_t s_mul(SpcState* sp, uint8_t a, uint8_t y) {
+  s_imp(sp);
+  for(int i = 0; i < 7; i++) sps_idle(sp);
+  uint16_t result = (uint16_t) (a * y);
+  sps_set_zn(sp, (uint8_t) (result >> 8));
+  return result;
+}
+
+/* div ya,x (case 0x9e): ten internal cycles after the dummy read at pc, then the
+ * nine-step division the core performs bit by bit, H from the low nibbles and V
+ * from the overflow bit. Returns quotient and remainder as one 16-bit Y:A value
+ * (A the quotient, Y the remainder), like s_mul above. */
+static inline uint16_t s_div(SpcState* sp, uint8_t a, uint8_t x, uint8_t y) {
+  s_imp(sp);
+  for(int i = 0; i < 10; i++) sps_idle(sp);
+  sps_set_h(sp, (x & 0xf) <= (y & 0xf));
+  int yva = (y << 8) | a;
+  int xs = x << 9;
+  for(int i = 0; i < 9; i++) {
+    yva <<= 1;
+    yva |= (yva & 0x20000) ? 1 : 0;
+    yva &= 0x1ffff;
+    if(yva >= xs) yva ^= 1;
+    if(yva & 1) yva -= xs;
+    yva &= 0x1ffff;
+  }
+  sps_set_v(sp, (yva & 0x100) != 0);
+  sps_set_zn(sp, (uint8_t) (yva & 0xff));
+  return (uint16_t) ((yva & 0xff) | ((yva >> 9) << 8));
+}
+
+/* dp+X addressing (spc_adrDpx): the operand byte is part of the step's fetch,
+ * the index is added inside the page, and the internal cycle follows. */
+static inline uint16_t s_adr_dpx(SpcState* sp, uint8_t off, uint8_t x) {
+  uint16_t adr = sps_dp(sp, (uint8_t) (off + x));
+  sps_idle(sp);
+  return adr;
+}
+
+/* The dp,dp forms -- mov dp,dp (case 0xfa) and adc dp,dp (case 0x89).
+ * spc_adrDpDp reads the *source* operand byte, then the source value, then the
+ * destination operand byte, so the step covers the opcode and the source
+ * operand only and this supplies the read and the second fetch. */
+static inline uint8_t s_dpdp_src(SpcState* sp, uint8_t src) {
+  uint8_t v = sps_read8(sp, sps_dp(sp, src));
+  sps_fetch(sp, 1);
+  return v;
 }
 
 /* ---- the word forms, all on a direct-page pair ------------------------- */
@@ -213,6 +368,20 @@ static inline uint16_t s_addw(SpcState* sp, uint8_t off, uint16_t ya) {
   int result = ya + value;
   sps_set_v(sp, (ya & 0x8000) == (value & 0x8000) && (value & 0x8000) != (result & 0x8000));
   sps_set_h(sp, ((ya & 0xfff) + (value & 0xfff)) > 0xfff);
+  sps_set_c(sp, result > 0xffff);
+  sps_set_zn16(sp, (uint16_t) result);
+  return (uint16_t) result;
+}
+
+/* subw ya,dp (case 0x9a): read low, idle, read high, then the 16-bit subtract,
+ * which the core performs as an add of the complement plus one. */
+static inline uint16_t s_subw(SpcState* sp, uint8_t off, uint16_t ya) {
+  uint8_t lo = sps_read8(sp, s_dpw_lo(sp, off));
+  sps_idle(sp);
+  uint16_t value = (uint16_t) ((lo | (sps_read8(sp, s_dpw_hi(sp, off)) << 8)) ^ 0xffff);
+  int result = ya + value + 1;
+  sps_set_v(sp, (ya & 0x8000) == (value & 0x8000) && (value & 0x8000) != (result & 0x8000));
+  sps_set_h(sp, ((ya & 0xfff) + (value & 0xfff) + 1) > 0xfff);
   sps_set_c(sp, result > 0xffff);
   sps_set_zn16(sp, (uint16_t) result);
   return (uint16_t) result;

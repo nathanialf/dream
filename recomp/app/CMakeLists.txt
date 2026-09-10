@@ -42,12 +42,36 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h.in
 configure_file(${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h COPYONLY)
 
+# The gallery's table of what the ROM holds, generated from the committed manifest
+# config/assets.txt at configure time. It carries offsets, kinds, paths and notes --
+# never ROM bytes (docs/LEGAL.md) -- and CONFIGURE_DEPENDS re-runs cmake when the
+# manifest changes.
+set(ASSETS_TXT ${CMAKE_CURRENT_SOURCE_DIR}/../../config/assets.txt)
+set(GALLERY_TABLE ${CMAKE_CURRENT_BINARY_DIR}/gallery_table.h)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ASSETS_TXT})
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_gallery_table.py
+          ${ASSETS_TXT} ${GALLERY_TABLE}
+  RESULT_VARIABLE GALLERY_TABLE_RESULT
+  OUTPUT_VARIABLE GALLERY_TABLE_OUT
+  ERROR_VARIABLE GALLERY_TABLE_ERR)
+if(NOT GALLERY_TABLE_RESULT EQUAL 0)
+  message(FATAL_ERROR "gen_gallery_table.py failed: ${GALLERY_TABLE_ERR}${GALLERY_TABLE_OUT}")
+endif()
+
 # snes_state.c / hooks.c / xxh64.c are the harness's, unchanged: the app installs
 # the same routines through the same accessors and prints the same frame line, so
 # `dream --frames N --input S` can be diffed against `dream_harness --hooks on`.
 add_executable(dream
   main.c
   sha1.c
+  font5x7.c
+  gallery.c
+  menubar.c
+  music.c
+  ${GALLERY_TABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/snes_state.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/spc_state.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/hooks.c

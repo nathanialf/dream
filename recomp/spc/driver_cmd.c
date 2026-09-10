@@ -6,8 +6,9 @@
  * parameter from port2, echoes the counter and dispatches. A command below $80
  * is a sound effect; $80 and up selects one of the eight cmd_table handlers by
  * `cmd & 7`. Every handler ends by jumping into tick_wait ($0781), the timer-0
- * wait that drives the sequencer, which is not converted -- so the handlers hand
- * the pc back there and the driver's own code carries on.
+ * wait that drives the sequencer -- the handlers hand the pc back there, so
+ * tick_wait's own hook (sequencer.c) picks the driver up exactly as the ROM's
+ * `jmp tick_wait` would have.
  *
  * spc_map.txt has the protocol; recomp/src/sound_iface.c is the 65816 side of
  * it (write_spc_command, spc_send_words), and the two busy-wait against each
@@ -20,10 +21,10 @@
 #include "spc_time.h"
 
 #define CMD_PARAM   0x055D   /* port2's byte, parked in the loader's tail bytes */
-#define TICK_WAIT   0x0781   /* the handler tail, still the ROM's own code */
+#define TICK_WAIT   0x0781   /* the handler tail; sequencer.c owns it */
 #define DSP_INIT    0x103E
-#define SCALE_VOL   0x0C59   /* not converted yet: reached through sps_run_callee */
-#define SFX_START   0x112A   /* likewise */
+#define SCALE_VOL   0x0C59   /* seq_ops_a.c, reached through sps_run_callee */
+#define SFX_START   0x112A   /* sequencer.c, likewise */
 
 /* ---------------------------------------------------------------------------
  * start_song — $0660
@@ -264,7 +265,7 @@ static void cmd0_set_E8(SpcState* sp)   { cmd_param_to_dp(sp, 0x070A, 0xE8); }
  *
  * Rescale voice 5's two DSP volume registers by the parameter, as a percentage,
  * with the old master percentage saved on the stack around it. scale_volume
- * ($0C59) is not converted, so it runs on the emulator.
+ * ($0C59) is reached through sps_run_callee, so its own hook fires.
  * ------------------------------------------------------------------------- */
 static void cmd5_voice5_volume(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -346,7 +347,8 @@ static void cmd4_pitch_offset(SpcState* sp) {
  * play_sfx — $0773
  *
  * A command below $80: the command byte is the sound-effect id (already in A),
- * the parameter is the channel. sfx_start ($112A) is not converted yet.
+ * the parameter is the channel. sfx_start ($112A) is reached through
+ * sps_run_callee, so its own hook fires.
  * ------------------------------------------------------------------------- */
 static void play_sfx(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
