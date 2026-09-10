@@ -31,6 +31,23 @@ takes shape.
 - Rendering reproduces the PPU output of the reference; enhancements (integer scaling,
   widescreen) come only after lockstep parity and never change simulation state.
 
+## Gallery viewer
+
+The app boots straight into the game, but a **gallery** can be opened from the running game
+(hold Select+Start for half a second, or F1 on the keyboard; the same closes it). It is a
+viewer, not a settings screen: no options, nothing persisted, the game is paused underneath
+and resumes on close. It shows the ROM's content that the game itself never displays:
+
+- the 113 alternate-format sprite frames and the 1555 live frames, with their palettes;
+- the unreferenced font and the three picture strips in bank `$C1`;
+- the previous build's tileset, palette block and animation-script table in the first 32 KB;
+- every BRR sample (playable), with the four the songs never use marked;
+- the stale duplicate regions, listed with what live data they shadow.
+
+Everything is decoded from the user's ROM in C at runtime using the same formats the
+Python codecs in `tools/assetcodec.py` implement; the list of what to show comes from the
+committed manifest `config/assets.txt`. Nothing from the ROM is shipped.
+
 ## Out of scope
 
 - Emulator-style features (save states, rewind, cheats, shader menus).
