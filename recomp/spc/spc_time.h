@@ -7,8 +7,8 @@
  * emulator nothing and all of that would move, so every converted routine models
  * the instruction stream.
  *
- * Each helper here reproduces one instruction's access sequence -- reads, writes
- * and idles in the order the core performs them -- written against LakeSnes'
+ * Each helper here reproduces one instruction's access sequence (reads, writes
+ * and idles in the order the core performs them), written against LakeSnes'
  * own opcode implementations in third_party/lakesnes/snes/spc.c (spc_adrDp,
  * spc_adrDpWord, spc_movs, spc_inc, spc_cmp, spc_doBranch and friends), because
  * one APU cycle is spent by exactly one read, write or idle (apu_spcRead /
@@ -51,7 +51,7 @@
  *
  * `bytes` is the instruction's full encoded length whenever the core fetches all
  * of it before doing anything else, which is every form this driver uses except
- * dbnz dp,rel (the displacement is read after the read-modify-write) -- see
+ * dbnz dp,rel (the displacement is read after the read-modify-write). See
  * s_dbnz_dp below. */
 static inline bool s_step(SpcState* sp, uint16_t addr, int bytes,
                           uint8_t a, uint8_t x, uint8_t y) {
@@ -80,7 +80,7 @@ static inline bool s_yield(SpcState* sp, uint16_t addr) {
  * ending on sps_ret(), and before handing the routine on to another address. */
 #define S_PUB()      do { sps_set_a(sp, a); sps_set_x(sp, x); sps_set_y(sp, y); } while(0)
 /* Leave through a tail jmp, or fall through into the next routine, at `addr`.
- * The routine that owns `addr` runs next -- its own hook if it has one. */
+ * The routine that owns `addr` runs next: its own hook if it has one. */
 #define S_GOTO(addr) do { S_PUB(); sps_set_pc(sp, (uint16_t) (addr)); return; } while(0)
 
 /* ---- the cycles an instruction spends after its fetches ----------------- */
@@ -151,7 +151,7 @@ static inline void s_cmp(SpcState* sp, uint8_t reg, uint8_t mem) {
 }
 
 /* cmp mem,#imm (spc_cmpm): read, compare, then an internal cycle before the
- * Z/N pair -- the one compare form in this driver that costs more than its
+ * Z/N pair, the one compare form in this driver that costs more than its
  * fetches and a read (seq_fir's `cmp !DSPADDR,#$8F`). It writes nothing back. */
 static inline void s_cmpm(SpcState* sp, uint16_t dst, uint8_t value) {
   int result = sps_read8(sp, dst) + (uint8_t) (value ^ 0xff) + 1;
@@ -324,7 +324,7 @@ static inline uint16_t s_adr_dpx(SpcState* sp, uint8_t off, uint8_t x) {
   return adr;
 }
 
-/* The dp,dp forms -- mov dp,dp (case 0xfa) and adc dp,dp (case 0x89).
+/* The dp,dp forms: mov dp,dp (case 0xfa) and adc dp,dp (case 0x89).
  * spc_adrDpDp reads the *source* operand byte, then the source value, then the
  * destination operand byte, so the step covers the opcode and the source
  * operand only and this supplies the read and the second fetch. */
@@ -336,7 +336,7 @@ static inline uint8_t s_dpdp_src(SpcState* sp, uint8_t src) {
 
 /* ---- the word forms, all on a direct-page pair ------------------------- */
 /* spc_adrDpWord: the low byte is the dp operand, the high byte is (dp+1) wrapped
- * inside the page -- which is why these take the raw operand byte, not an
+ * inside the page, so these take the raw operand byte rather than an
  * address. */
 static inline uint16_t s_dpw_lo(SpcState* sp, uint8_t off) { return sps_dp(sp, off); }
 static inline uint16_t s_dpw_hi(SpcState* sp, uint8_t off) {

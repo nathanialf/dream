@@ -47,7 +47,7 @@ harness:
 # recomp routines the harness verifies. Built into build/recomp/dream.
 #
 # A system SDL3 is used when there is one. Otherwise SDL3 is built from source
-# into build/sdl3 first -- static, no system headers required: SDL's own configure
+# into build/sdl3 first (static, no system headers required): SDL's own configure
 # turns off whatever it cannot find, and the dummy video/audio drivers are enough
 # for the headless check in recomp/app/README.md.
 SDL3_PREFIX := $(CURDIR)/build/sdl3
@@ -77,7 +77,7 @@ build/sdl3/lib/cmake/SDL3/SDL3Config.cmake:
 
 # --- Windows, cross-built here with mingw-w64 --------------------------------
 # The same two executables for Windows x86_64, from this Linux box: there is no
-# Wine here, so they can be built and linked but not run -- .github/workflows/ci.yml
+# Wine here, so they can be built and linked but not run; .github/workflows/ci.yml
 # runs them on a real Windows runner (dream_harness --test-coro exercises the
 # fiber backend of recomp/harness/coro.h there).
 #

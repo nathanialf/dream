@@ -1,9 +1,9 @@
 /* Sequence command handlers, the second half: SPC $0E45-$0FC1 (spc/driver.asm).
  *
  * A sequence event byte below $80 is a command, and seq_fetch ($0850) dispatches
- * it with `push x ; asl a ; mov x,a ; jmp (seq_cmd_table+x)` -- no return
- * address, just the channel slot pushed under the handler. So every handler here
- * starts by recovering that slot, either with its own `pop x` or through
+ * it with `push x ; asl a ; mov x,a ; jmp (seq_cmd_table+x)`: no return
+ * address, only the channel slot pushed under the handler. So every handler
+ * here starts by recovering that slot, either with its own `pop x` or through
  * seq_pop_x ($0B64), and ends by jumping into one of the shared tails that add
  * the event's length to the channel's sequence pointer:
  *
@@ -15,13 +15,13 @@
  * registers and points the pc at it (S_GOTO): the routine that owns the address
  * runs next, its own hook if it has one and the driver's own code otherwise.
  *
- * This half is the DSP-facing set -- ADSR, master volume, echo, the FIR filter,
- * the noise clock -- plus the transpose/finetune/stored-note commands and the
+ * This half is the DSP-facing set (ADSR, master volume, echo, the FIR filter,
+ * the noise clock) plus the transpose/finetune/stored-note commands and the
  * four orphan handlers behind the stale table entries $26, $27, $2B and $2C,
  * which no sequence in the ROM emits ($26 and $27 chain through loc_0F86 and
  * fall into seq_advance5, which is live: seq_vibrato_delay jumps to it).
  * spc_map.txt has the opcode table and the per-command operand counts; the
- * counts are what the tail's tmp0 encodes.
+ * tail's tmp0 encodes those counts.
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -51,7 +51,7 @@
 /* `call abs` (case 0x3f) to a callee the emulator runs: the five cycles the
  * opcode spends after its three fetches, then the callee itself, stopping when
  * the catch-up slice ends underneath it. Any hook the callee hits still fires.
- * Returns true when the body must return -- the address pushed is the routine's
+ * Returns true when the body must return: the address pushed is the routine's
  * real return address, so the driver finishes what is left. */
 static bool call_sub(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
   sps_idle(sp);
@@ -69,7 +69,7 @@ static bool call_sub(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
  *
  * It is the one callee here the emulator cannot be handed whole. seq_pop_x
  * reaches that index by pulling the return address off the stack first, so for
- * three instructions the stack pointer is *above* the frame the `call` built --
+ * three instructions the stack pointer is *above* the frame the `call` built,
  * and that threshold is sps_run_callee's only stopping condition, so it would
  * end the callee at its second instruction. The five stack instructions are
  * modelled here at their own addresses instead; by $0B69 the stack is back
@@ -101,7 +101,7 @@ static bool call_seq_pop_x(SpcState* sp, uint16_t at,
 }
 
 /* ---------------------------------------------------------------------------
- * seq_adsr — $0E45   seq cmd $10: ADSR1, ADSR2
+ * seq_adsr: $0E45   seq cmd $10: ADSR1, ADSR2
  * ------------------------------------------------------------------------- */
 static void seq_adsr(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -115,7 +115,7 @@ static void seq_adsr(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_read_adsr — $0E4E
+ * seq_read_adsr: $0E4E
  *
  * Two operand bytes into the channel's ADSR1/ADSR2 slots. seq_instr_full ($0BAD)
  * calls it too, so this hook fires from both.
@@ -134,12 +134,12 @@ static void seq_read_adsr(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_master_volume — $0E5A   seq cmd $11: MVOLL, MVOLR
+ * seq_master_volume: $0E5A   seq cmd $11: MVOLL, MVOLR
  *
  * The one sequence command Dream added over the driver it inherited: the DKC2
  * driver's table stops at $24 with no master-volume opcode of its own. The mono
- * flag ($1D) decides what the second DSP register gets -- the two operand bytes
- * averaged with `clrc ; adc ; ror`, or the right byte as written -- and $0230 /
+ * flag ($1D) decides what the second DSP register gets (the two operand bytes
+ * averaged with `clrc ; adc ; ror`, or the right byte as written), and $0230 /
  * $0231 keep the pair for the fade in cmd3 and for seq_master_percent.
  * ------------------------------------------------------------------------- */
 static void seq_master_volume(SpcState* sp) {
@@ -177,7 +177,7 @@ static void seq_master_volume(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_set_note_E0 — $0E8D   seq cmd $1C: the note event $E0 plays
+ * seq_set_note_E0: $0E8D   seq cmd $1C: the note event $E0 plays
  *
  * Leaves through seq_set_note_E1's tail at loc_0E9E, which retriggers the
  * channel and takes the two-byte tail.
@@ -194,7 +194,7 @@ static void seq_set_note_E0(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_set_note_E1 — $0E97   seq cmd $1D: the note event $E1 plays
+ * seq_set_note_E1: $0E97   seq cmd $1D: the note event $E1 plays
  * ------------------------------------------------------------------------- */
 /* Entered in its middle as well: loc_0E9E. --no-cpu resolves every pc
  * through the registry, so an address the driver jumps into needs a body that
@@ -219,7 +219,7 @@ static void seq_set_note_E1(SpcState* sp) { seq_set_note_E1_at(sp, 0x0E97); }
 static void loc_0E9E(SpcState* sp) { seq_set_note_E1_at(sp, 0x0E9E); }
 
 /* ---------------------------------------------------------------------------
- * seq_finetune — $0EA4   seq cmd $12: finetune[x], signed 1/256-semitone steps
+ * seq_finetune: $0EA4   seq cmd $12: finetune[x], signed 1/256-semitone steps
  * ------------------------------------------------------------------------- */
 static void seq_finetune(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -232,7 +232,7 @@ static void seq_finetune(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_transpose — $0EAE   seq cmd $13
+ * seq_transpose: $0EAE   seq cmd $13
  *
  * The `mov $24+x,a` writes the zero seq_retrigger left in A, so the gate is
  * cleared a second time; the operand byte is the new transpose.
@@ -250,7 +250,7 @@ static void seq_transpose(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_transpose_add — $0EBB   seq cmd $14
+ * seq_transpose_add: $0EBB   seq cmd $14
  * ------------------------------------------------------------------------- */
 static void seq_transpose_add(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -267,11 +267,11 @@ static void seq_transpose_add(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_echo_setup — $0ECA   seq cmd $15: EFB, EVOLL, EVOLR, and FLG = 0
+ * seq_echo_setup: $0ECA   seq cmd $15: EFB, EVOLL, EVOLR, and FLG = 0
  *
  * Three operand bytes into the echo registers, the two volumes mirrored into
  * $0232/$0233 for the fade, and then the echo-off flag ($04B5) cleared and
- * written through FLG -- which is what actually switches the echo unit on.
+ * written through FLG, which switches the echo unit on.
  * ------------------------------------------------------------------------- */
 static void seq_echo_setup(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -300,7 +300,7 @@ static void seq_echo_setup(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_echo_on — $0EF7   seq cmd $16: EON |= the channel's voice bit
+ * seq_echo_on: $0EF7   seq cmd $16: EON |= the channel's voice bit
  *
  * loc_0F09, the one-byte tail four other handlers jump to, is the last two
  * instructions of this routine.
@@ -332,9 +332,9 @@ static void seq_echo_on(SpcState* sp) { seq_echo_on_at(sp, 0x0EF7); }
 static void loc_0F09(SpcState* sp) { seq_echo_on_at(sp, 0x0F09); }
 
 /* ---------------------------------------------------------------------------
- * seq_echo_off — $0F0F   seq cmd $17 (and the stale entries $30 and $32)
+ * seq_echo_off: $0F0F   seq cmd $17 (and the stale entries $30 and $32)
  *
- * Clears the voice's EON bit and its echo flag, and -- unlike seq_echo_on --
+ * Clears the voice's EON bit and its echo flag, and, unlike seq_echo_on,
  * retriggers the channel by hand rather than through seq_retrigger.
  * ------------------------------------------------------------------------- */
 static void seq_echo_off(SpcState* sp) {
@@ -359,11 +359,11 @@ static void seq_echo_off(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_fir — $0F29   seq cmd $18: the eight FIR coefficients
+ * seq_fir: $0F29   seq cmd $18: the eight FIR coefficients
  *
  * The loop walks $F2 itself: FIR0 is DSP register $0F and the eight taps are
- * $10 apart, so `adc !DSPADDR,#$10` is the index and `cmp !DSPADDR,#$8F` -- one
- * step past FIR7 at $7F -- is the exit test. Nine bytes of event, eight of them
+ * $10 apart, so `adc !DSPADDR,#$10` is the index and `cmp !DSPADDR,#$8F` (one
+ * step past FIR7 at $7F) is the exit test. Nine bytes of event, eight of them
  * operands.
  * ------------------------------------------------------------------------- */
 static void seq_fir(SpcState* sp) {
@@ -390,7 +390,7 @@ static void seq_fir(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_noise_clock — $0F43   seq cmd $19: the FLG noise-rate field
+ * seq_noise_clock: $0F43   seq cmd $19: the FLG noise-rate field
  *
  * FLG carries the noise clock in its low five bits and the echo-write disable
  * in bit 5, so the operand is kept in $04B4 and or-ed with the echo-off flag
@@ -411,7 +411,7 @@ static void seq_noise_clock(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_noise_on — $0F56   seq cmd $1A: NON |= the channel's voice bit
+ * seq_noise_on: $0F56   seq cmd $1A: NON |= the channel's voice bit
  *
  * loc_0F61, its two-instruction tail, is where seq_noise_off comes back in.
  * ------------------------------------------------------------------------- */
@@ -441,7 +441,7 @@ static void seq_noise_on(SpcState* sp) { seq_noise_on_at(sp, 0x0F56); }
 static void loc_0F61(SpcState* sp) { seq_noise_on_at(sp, 0x0F61); }
 
 /* ---------------------------------------------------------------------------
- * seq_noise_off — $0F67   seq cmd $1B
+ * seq_noise_off: $0F67   seq cmd $1B
  * ------------------------------------------------------------------------- */
 static void seq_noise_off(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -459,7 +459,7 @@ static void seq_noise_off(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * orphan_slide_up2 — $0F77   stale seq_cmd_table entry $26
+ * orphan_slide_up2: $0F77   stale seq_cmd_table entry $26
  *
  * A second pair of slide handlers, five operand bytes like seq_slide_up/_down
  * but reading them from Y = 4 downward instead of upward. Nothing in the ROM
@@ -479,7 +479,7 @@ static void orphan_slide_up2(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * orphan_slide_down2 — $0F81   stale seq_cmd_table entry $27
+ * orphan_slide_down2: $0F81   stale seq_cmd_table entry $27
  *
  * Falls through into seq_advance5.
  * ------------------------------------------------------------------------- */
@@ -525,7 +525,7 @@ static void orphan_slide_down2(SpcState* sp) { orphan_slide_down2_at(sp, 0x0F81)
 static void loc_0F86(SpcState* sp) { orphan_slide_down2_at(sp, 0x0F86); }
 
 /* ---------------------------------------------------------------------------
- * seq_advance5 — $0FA9   the five-byte tail
+ * seq_advance5: $0FA9   the five-byte tail
  *
  * seq_vibrato_delay ($0E22) jumps here, and orphan_slide_down2 falls in.
  * ------------------------------------------------------------------------- */
@@ -538,7 +538,7 @@ static void seq_advance5(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * orphan_gate_on — $0FAF   stale seq_cmd_table entry $2B
+ * orphan_gate_on: $0FAF   stale seq_cmd_table entry $2B
  *
  * gate_mode[x] = 1: seq_set_length reads it to decide whether a note length
  * carries a gate byte after it. Command $2B is never emitted, so the mode is
@@ -556,7 +556,7 @@ static void orphan_gate_on(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * orphan_gate_off — $0FB9   stale seq_cmd_table entry $2C
+ * orphan_gate_off: $0FB9   stale seq_cmd_table entry $2C
  *
  * The same with the zero seq_retrigger left in A.
  * ------------------------------------------------------------------------- */

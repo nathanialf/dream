@@ -27,7 +27,7 @@
 #endif
 
 /* ---------------------------------------------------------------------------
- * entity_apply_hit_reaction — $C0:9A61, shared body at loc_C09A66
+ * entity_apply_hit_reaction: $C0:9A61, shared body at loc_C09A66
  *
  * Turns a button word into a new entity_state. Entry to the body: A = the button
  * word, Y = a second word whose bit 15 forces state $0C, X = entity index.
@@ -37,7 +37,7 @@
  * constant on the way in. Reaching loc_C09A7F through the bcc at $9A73 leaves it
  * clear; falling out of the bcc at $9A7D (state in [$18,$24)) leaves it set. So
  * a state in that window shifts the result by one. The bit and lda in between do
- * not touch C, which is what makes the value survive.
+ * not touch C, which makes the value survive.
  * ------------------------------------------------------------------------- */
 static void entity_hit_reaction_body(SnesState* ss, uint16_t a, uint16_t y) {
   const uint8_t pb = ss_pb(ss);
@@ -167,7 +167,7 @@ void entity_apply_hit_reaction(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_ai_none — $C0:9A5F
+ * entity_ai_none: $C0:9A5F
  *
  * The two inert entries of jtbl_C099DD. entity_update_tick calls the table with
  * X = entity_type and Y = the entity index it saved with txy at $98DA, so every
@@ -186,7 +186,7 @@ void entity_ai_none(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * check_pending_player_attack — $C0:8E8E
+ * check_pending_player_attack: $C0:8E8E
  *
  * The per-mode hook at jtbl_C0827A for game modes 1..3. When $0BB4 is set it
  * hands player 2's button words to the hit-reaction body with X = $0BB4 as the
@@ -220,7 +220,7 @@ void check_pending_player_attack(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_ground_y_lookup — $C0:9BDA
+ * entity_ground_y_lookup: $C0:9BDA
  *
  * Walks the per-mode 6-byte ground table at $80:B2F6 for the first span whose
  * left edge is at or past the entity's X, and reports its slope byte in $0BAE.
@@ -309,7 +309,7 @@ void entity_ground_y_lookup(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_vel_y_from_vel_x — $C0:A1F3
+ * entity_vel_y_from_vel_x: $C0:A1F3
  *
  * Derives a vertical velocity from the horizontal one: negate entity_vel_x,
  * arithmetic-shift it right twice, then flip the sign again unless the ground
@@ -355,15 +355,15 @@ void entity_vel_y_from_vel_x(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_accelerate_velocity_x — $C0:A232
+ * entity_accelerate_velocity_x: $C0:A232
  *
  * Eases entity_vel_x toward entity_vel_x_target by an eighth of the gap. With no
  * target it instead brakes: add $0100 and, if the result is still below $0200,
  * snap to zero, so a velocity within one unit of standstill stops.
  *
  * The negative branch is a signed divide: sec ; ror A three times shifts ones in
- * from the top, and the closing cmp #$FFFF is what makes -1 count as "no step
- * left" at loc_C0A255, where the shared bne tests it.
+ * from the top, and the closing cmp #$FFFF counts -1 as "no step left" at
+ * loc_C0A255, where the shared bne tests it.
  * Entry: X = entity index.
  * ------------------------------------------------------------------------- */
 void entity_accelerate_velocity_x(SnesState* ss) {
@@ -444,7 +444,7 @@ void entity_accelerate_velocity_x(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_apply_velocity_x — $C0:A26F, entity_apply_velocity_y — $C0:A2B9
+ * entity_apply_velocity_x: $C0:A26F, entity_apply_velocity_y: $C0:A2B9
  *
  * The 8.8 fixed-point integrator, and the same twelve instructions at both
  * addresses (the y copy sits $4A bytes later with the same internal offsets).
@@ -452,9 +452,9 @@ void entity_accelerate_velocity_x(SnesState* ss) {
  * "and #$FF00" isolates the fractional byte already shifted into place, adds it
  * to the sub-pixel accumulator, then reads one byte high, sign-extends the
  * integer byte and adds it to the position *with the carry the first add
- * produced*. That carry is the whole mechanism: and, bit and ora leave C alone,
- * so the fractional overflow reaches the second add untouched. Getting it wrong
- * loses a pixel per wrap.
+ * produced*. The carry has to survive: and, bit and ora leave C alone, so the
+ * fractional overflow reaches the second add untouched. Getting it wrong loses
+ * a pixel per wrap.
  *
  * Entry: X = entity index. Exit: Y = 0, position and accumulator updated.
  * The addresses in the comments below are the x copy's; every step is written
@@ -509,7 +509,7 @@ void entity_apply_velocity_y(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * unused_entity_apply_velocity_z — $C0:A294
+ * unused_entity_apply_velocity_z: $C0:A294
  *
  * A third copy of the same thirty-seven bytes, sitting between the x and y
  * copies, on the column triple $08E8 / $0908 / $0928. $08E8 is entity_z_dead

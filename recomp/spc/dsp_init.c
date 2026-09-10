@@ -13,7 +13,7 @@
 #include "spc_time.h"
 
 /* ---------------------------------------------------------------------------
- * dsp_init — $103E
+ * dsp_init: $103E
  * ------------------------------------------------------------------------- */
 static void dsp_init(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -147,7 +147,7 @@ static void dsp_init(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * dsp_flg_20 — $1123
+ * dsp_flg_20: $1123
  *
  * FLG = $20: unmute, echo *write* still off. dsp_init falls into it, and
  * seq_echo_delay calls it directly.

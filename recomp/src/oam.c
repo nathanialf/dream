@@ -12,7 +12,7 @@
 #include "dream_time.h"
 
 /* ---------------------------------------------------------------------------
- * clear_sprite_table — $C0:A500
+ * clear_sprite_table: $C0:A500
  *
  * Called once per main-loop iteration from $C08235 and once from $C09324.
  * Clears the sixteen high-OAM words and rewinds the two write cursors.
@@ -40,7 +40,7 @@ void clear_sprite_table(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * oam_hide_unused_sprites — $C0:ADE7
+ * oam_hide_unused_sprites: $C0:ADE7
  *
  * Fills the tail of the low OAM table, from oam_write_ptr to $0400, with
  * $F0FF: Y = $F0, off the bottom of the screen. Four bytes per entry, so the
@@ -81,7 +81,7 @@ void oam_hide_unused_sprites(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * oam_dma_upload — $C0:ADFD
+ * oam_dma_upload: $C0:ADFD
  *
  * Programs channel 0 for the $220-byte OAM buffer at $00:0200 but does not start
  * it: the channel bit goes into dma_pending_mask ($02), which whichever NMI
@@ -114,7 +114,7 @@ void oam_dma_upload(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_sort_draw_order — $C0:AE1F
+ * entity_sort_draw_order: $C0:AE1F
  *
  * One forward and one backward pass of a bubble sort over the sixteen entity
  * indices in entity_render_order ($09A8..$09C7), keyed on entity_depth_key.
@@ -252,7 +252,7 @@ void entity_sort_draw_order(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_upload_pending_tiles — $C0:AE7E
+ * entity_upload_pending_tiles: $C0:AE7E
  *
  * Runs the queue of per-entity VRAM tile uploads: 8-byte records from $0A8A,
  * flagged pending by bit 15 of the word at $0A90. Each pending record is one

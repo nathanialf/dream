@@ -5,13 +5,13 @@
 
 Run from CMake at configure time (recomp/app/CMakeLists.txt), which re-runs it when
 config/assets.txt changes. The output holds offsets, sizes, kinds, manifest paths and
-manifest notes -- no ROM bytes, ever: the gallery decodes the user's own ROM at run time
+manifest notes, never ROM bytes: the gallery decodes the user's own ROM at run time
 and this table only says where to look (docs/LEGAL.md).
 
 "Unused" is not a machine-readable column in docs/data_formats.md's "referenced by" table,
 so it is derived here, deterministically, from the manifest alone:
 
-  * kinds that are unreferenced by construction -- stale, filler, unknown, sprite_frame_alt;
+  * kinds that are unreferenced by construction: stale, filler, unknown, sprite_frame_alt;
   * any note that says so (unreferenced / unused / stale / dead / no known reader), except
     on `code` assets, whose notes mention stale byte runs inside otherwise live code;
   * the font and picture-strip block in bank $C1 (0x010000-0x0155E0), which docs/
@@ -21,8 +21,8 @@ The second half of the header is the palette assignment: which palette bytes eac
 game mode's init DMAs into which CGRAM entries, which tileset belongs to which BG of
 which mode (so its tilemap words' palette bits resolve), and the landmark offsets the
 gallery needs to walk the entity/animation/frame tables in the user's ROM at run time.
-Those are ROM-*derived* facts -- offsets, colour counts, CGRAM addresses, mode numbers,
-entity types -- read off the mode-init bodies and the tables docs/data_formats.md
+Those are ROM-*derived* facts (offsets, colour counts, CGRAM addresses, mode numbers,
+entity types) read off the mode-init bodies and the tables docs/data_formats.md
 "Palette assignment" derives, never ROM bytes. Anything that needs the bytes themselves
 (the colours, the entity init records, the animation scripts) the gallery reads from the
 user's own ROM.
@@ -69,29 +69,29 @@ MODE_NAMES = ['game_mode 0', 'game_mode 1', 'game_mode 2', 'game_mode 3', 'title
 # program at 008791 rather than a DMA; it is the one row whose source is not the
 # bank-$C4 palette block.
 CGRAM_UPLOADS = [
-    # mode 0 -- mode0_level_init $C0:8292, DMAs at $8386/$8392/$839E/$83AA
+    # mode 0: mode0_level_init $C0:8292, DMAs at $8386/$8392/$839E/$83AA
     (0, 0x00, 128, 0x046DA8, 'C08386'),
     (0, 0x80, 128, 0x046C48, 'C08392'),
     (0, 0xE0,  16, 0x046D68, 'C0839E'),
     (0, 0xF0,  16, 0x046D48, 'C083AA'),
-    # mode 1 -- mode1_level_init $C0:84D7, DMAs at $873A/$8746/$8752/$8776
+    # mode 1: mode1_level_init $C0:84D7, DMAs at $873A/$8746/$8752/$8776
     (1, 0x80, 128, 0x046C48, 'C0873A'),
     (1, 0xA0,  16, 0x046D08, 'C08746'),
     (1, 0x00, 128, 0x046EA8, 'C08752'),
     (1, 0xB0,  16, 0x046D88, 'C08776'),
     (1, 0xE1,   1, 0x008791, 'C0877D'),   # sta CGADD #$E1, then two sta CGDATA
-    # mode 2 -- mode2_level_init $C0:8798, DMAs at $886A/$8876/$8882/$888E
+    # mode 2: mode2_level_init $C0:8798, DMAs at $886A/$8876/$8882/$888E
     (2, 0x80, 128, 0x046C48, 'C0886A'),
     (2, 0xC0,  64, 0x046C48, 'C08876'),
     (2, 0xE0,  16, 0x046CC8, 'C08882'),
     (2, 0x00, 128, 0x046FE3, 'C0888E'),
-    # mode 3 -- title_screen_init $C0:88AB (the fourth scene, not the title),
+    # mode 3: title_screen_init $C0:88AB (the fourth scene, not the title),
     # DMAs at $8992/$899E/$89AA/$89B6
     (3, 0x80, 128, 0x046C48, 'C08992'),
     (3, 0xC0,  64, 0x046C48, 'C0899E'),
     (3, 0xA0,  16, 0x047443, 'C089AA'),
     (3, 0x00, 128, 0x047343, 'C089B6'),
-    # title -- loc_C0BB81, the CGDATA loop at $BC2A: 512 bytes straight to CGRAM
+    # title: loc_C0BB81, the CGDATA loop at $BC2A: 512 bytes straight to CGRAM
     (MODE_TITLE, 0x00, 256, 0x06A36B, 'C0BC2A'),
 ]
 
@@ -109,8 +109,8 @@ CGRAM_ANIMATED = [
 ]
 
 # Sprite palettes: the OBJ half of CGRAM. Every mode uploads 046C48 to CGRAM $80,
-# so OBJ palette p is 046C48 + 32*p unless a later, narrower DMA overwrote it --
-# which is what CGRAM_UPLOADS above already encodes. This row only names the
+# so OBJ palette p is 046C48 + 32*p unless a later, narrower DMA overwrote it;
+# CGRAM_UPLOADS above already encodes those overwrites. This row only names the
 # block for the gallery's text.
 SPRITE_PAL_BLOCK = 0x046C48
 
@@ -118,9 +118,9 @@ SPRITE_PAL_BLOCK = 0x046C48
 # address the init DMAs it to, the BG's character base from BG12NBA/BG34NBA, and
 # the map assets whose words carry its palette bits}.
 #
-# The BG number is the PPU's, read off BG12NBA and BGnSC in each init -- not the
-# manifest's file names, which call mode 0's $2000 set "bg1" where the register
-# makes it BG2. Each association is confirmed by the maps' own tile indices: the
+# The BG number is the PPU's, read off BG12NBA and BGnSC in each init. The
+# manifest's file names disagree: they call mode 0's $2000 set "bg1" where the
+# register makes it BG2. Each association is confirmed by the maps' own tile indices: the
 # largest index a map uses is exactly one less than the tile count of the set it
 # is paired with (docs/data_formats.md, "Palette assignment").
 BG_TILESETS = [
@@ -139,6 +139,70 @@ BG_TILESETS = [
     # the tilemap's palette field does not apply, so there are no map rows and the
     # character base (0, from `stz BG12NBA`) is only here for completeness.
     (0x06002B, MODE_TITLE, 1, 0x0600, 0x0000, []),
+]
+
+
+# Every VRAM write a scene's init performs, in the order it performs them:
+# {mode, VRAM word address, source file offset (or VRAM_FILL), words, bias
+# added to each word as it is written, the word a fill writes, call site}.
+#
+# Read off the mode-init bodies exactly as CGRAM_UPLOADS is (recomp/src/mode_init.c
+# for the four scenes, recomp/src/top_level.c's title_init for the title). The
+# point of having them is that a tileset is not what the game draws: several sets
+# land at different VRAM addresses and the maps index across them, so the only
+# arrangement in which a map word means what it says is VRAM itself.
+#
+# `dma_upload_to_vram` ($C0:A46A) takes A = source lo16, X = bank, Y = byte count
+# and writes to the address VMADDL was set to; `dma_fill_vram_zero` ($C0:A445)
+# writes $800 bytes of zero to the address in A. The title writes its tiles and
+# its four tilemaps with VMDATAL loops instead, and adds $0030 to every tilemap
+# word (its tiles start at VRAM $0600, which is 8bpp tile index $30).
+#
+# The metatile blitter's own column writes to VRAM $7800 are not here: they are
+# not init uploads, they are one column per frame as the camera moves
+# (recomp/src/vram_stream.c). The Scenes page is where those are shown.
+VRAM_FILL = 0xFFFFFFFF
+
+VRAM_UPLOADS = [
+    # mode 0: mode0_level_init $C0:8292
+    (0, 0x1600, 0x0502C0, 0x0600, 0, 0, 'C08314'),
+    (0, 0x1C00, 0x0AE38E, 0x0400, 0, 0, 'C08326'),
+    (0, 0x2000, 0x090000, 0x2D60, 0, 0, 'C08338'),
+    (0, 0x5000, 0x098AC0, 0x1550, 0, 0, 'C0834A'),
+    (0, 0x6800, 0x0AF38E, 0x0400, 0, 0, 'C0835C'),
+    (0, 0x6C00, VRAM_FILL, 0x0400, 0, 0, 'C08362'),
+    (0, 0x7000, 0x0AEB8E, 0x0400, 0, 0, 'C08374'),
+    (0, 0x7400, VRAM_FILL, 0x0400, 0, 0, 'C0837A'),
+    # mode 1: mode1_level_init $C0:84D7
+    (1, 0x2000, 0x086AC0, 0x3000, 0, 0, 'C0856A'),
+    (1, 0x5000, 0x08C980, 0x1B10, 0, 0, 'C0857C'),
+    (1, 0x6C00, VRAM_FILL, 0x0400, 0, 0, 'C08582'),
+    (1, 0x6C40, 0x0B0000, 0x0400, 0, 0, 'C08594'),
+    (1, 0x7020, 0x0CAB02, 0x0380, 0, 0, 'C085A6'),
+    (1, 0x7000, 0x0CAB02, 0x0380, 0, 0, 'C085B8'),
+    (1, 0x7420, 0x0CA402, 0x0380, 0, 0, 'C085CA'),
+    (1, 0x7400, 0x0CA402, 0x0380, 0, 0, 'C085DC'),
+    (1, 0x1E00, 0x050000, 0x0100, 0, 0, 'C08767'),
+    # mode 2: mode2_level_init $C0:8798
+    (2, 0x2000, 0x070342, 0x37E0, 0, 0, 'C08822'),
+    (2, 0x5800, 0x0B1000, 0x0400, 0, 0, 'C08834'),
+    (2, 0x5C00, VRAM_FILL, 0x0400, 0, 0, 'C0883A'),
+    (2, 0x6000, 0x07DF82, 0x0CF0, 0, 0, 'C0884C'),
+    (2, 0x7400, 0x0B0800, 0x0400, 0, 0, 'C0885E'),
+    # mode 3: title_screen_init $C0:88AB (the fourth scene, not the title)
+    (3, 0x1800, VRAM_FILL, 0x0400, 0, 0, 'C0892C'),
+    (3, 0x1C00, 0x0B3000, 0x0400, 0, 0, 'C0893E'),
+    (3, 0x2000, 0x080000, 0x3560, 0, 0, 'C08950'),
+    (3, 0x5800, 0x0B3800, 0x0400, 0, 0, 'C08962'),
+    (3, 0x5C00, 0x0B2800, 0x0400, 0, 0, 'C08974'),
+    (3, 0x6000, 0x095AC0, 0x1800, 0, 0, 'C08986'),
+    # title: title_init (loc_C0BB81), VMDATAL loops rather than DMAs
+    (MODE_TITLE, 0x0600, 0x06002B, 0x4E60, 0, 0, 'C0BC47'),
+    (MODE_TITLE, 0x6000, VRAM_FILL, 0x0400, 0, 0x0030, 'C0BC60'),
+    (MODE_TITLE, 0x6500, 0x069CEB, 0x01A0, 0x30, 0, 'C0BC7C'),
+    (MODE_TITLE, 0x6960, 0x06A02B, 0x00E0, 0x30, 0, 'C0BC98'),
+    (MODE_TITLE, 0x61C0, 0x06A1EB, 0x0040, 0x30, 0, 'C0BCB4'),
+    (MODE_TITLE, 0x6DA0, 0x06A2EB, 0x0080, 0x30, 0, 'C0BCD0'),
 ]
 
 # Tilesets that are OBJ, not BG: their palette comes from an OAM attribute byte
@@ -225,7 +289,7 @@ def main(argv):
     w('/* Generated from config/assets.txt by recomp/app/gen_gallery_table.py.')
     w(' * Do not edit: change the manifest (or the generator) and re-run cmake.')
     w(' *')
-    w(' * Offsets, kinds, manifest paths and manifest notes only -- no ROM bytes.')
+    w(' * Offsets, kinds, manifest paths and manifest notes only. No ROM bytes.')
     w(' */')
     w('#ifndef GALLERY_TABLE_H')
     w('#define GALLERY_TABLE_H')
@@ -317,6 +381,27 @@ def main(argv):
     w('};')
     w('static const unsigned kGalleryPalAnimatedCount = %d;' % len(CGRAM_ANIMATED))
     w('')
+    w('/* One VRAM write a scene\'s init performs, in the order it performs them. */')
+    w('#define GAL_VRAM_FILL 0x%08Xu' % VRAM_FILL)
+    w('')
+    w('typedef struct {')
+    w('  uint8_t  mode;')
+    w('  uint16_t vram;      /* VRAM word address */')
+    w('  uint32_t src;       /* file offset of the first word, or GAL_VRAM_FILL */')
+    w('  uint16_t words;')
+    w('  uint16_t bias;      /* added to each word written (the title\'s +$30) */')
+    w('  uint16_t fill;      /* the word a fill writes */')
+    w('  const char* site;')
+    w('} GalleryVramUpload;')
+    w('')
+    w('static const GalleryVramUpload kGalleryVramUploads[%d] = {' % len(VRAM_UPLOADS))
+    for mode, vram, src, words, bias, fill, site in VRAM_UPLOADS:
+        w('  { %d, 0x%04Xu, 0x%08Xu, 0x%04Xu, 0x%04Xu, 0x%04Xu, %s },'
+          % (mode, vram, src, words, bias, fill, c_string(site)))
+    w('};')
+    w('static const unsigned kGalleryVramUploadCount = %d;' % len(VRAM_UPLOADS))
+    w('')
+
     w('/* The OBJ palette block every scene uploads to CGRAM $80. */')
     w('#define GAL_SPRITE_PAL_BLOCK 0x%06Xu' % SPRITE_PAL_BLOCK)
     w('')

@@ -104,7 +104,7 @@ static void read_joypads_check(SnesState* ss, uint8_t pb, uint16_t base, uint16_
 #undef SYREP
 
 /* ---------------------------------------------------------------------------
- * read_joypads — $C0:A2DE
+ * read_joypads: $C0:A2DE
  *
  * Waits out the auto-joypad read, then latches held and newly-pressed words for
  * both pads. Newly-pressed is the classic (new ^ old) & new.

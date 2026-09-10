@@ -8,8 +8,8 @@
 The trace file holds one canonical `C0XXXX` address per executed instruction
 (mirror banks folded onto $C0:0000 + file offset, the form used by out/dream.asm).
 out/codemap.txt holds the ranges tools/trace65816.py decided are code, as file
-offsets. The two answer different questions -- "what ran" versus "what the static
-trace believes is reachable" -- so the interesting output is the two differences:
+offsets. The two answer different questions ("what ran" versus "what the static
+trace believes is reachable"), so the output is the two differences:
 
   * executed but not in any static code range: either the static trace missed a
     routine, or the emulator ran something the tracer never saw (RAM handlers,

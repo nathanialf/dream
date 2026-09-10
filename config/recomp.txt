@@ -7,8 +7,8 @@
 ;
 ;   plain    every script under recomp/harness/inputs/ passed and the routine
 ;            was entered at least once while they ran.
-;   ; unit   no script can reach the routine -- nothing in the ROM calls it, or
-;            no song or sound effect emits the command that dispatches it -- so
+;   ; unit   no script can reach the routine (nothing in the ROM calls it, or
+;            no song or sound effect emits the command that dispatches it), so
 ;            it was run from the seeded states in config/recomp_units.txt
 ;            instead: at least four per routine, the ROM and the C body started
 ;            from the identical machine and compared afterwards down to the

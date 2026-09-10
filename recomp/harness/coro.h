@@ -1,4 +1,4 @@
-/* coro — the one stack-switching primitive the --no-cpu scheduler needs.
+/* coro: the one stack-switching primitive the --no-cpu scheduler needs.
  *
  * A dispatched body chain runs on a stack of its own, and a yield *suspends*
  * that stack instead of unwinding it: the scheduler regains control at exactly
@@ -7,8 +7,8 @@
  * "Running without the CPUs" in recomp/README.md for why that is the whole of
  * the "resume at an interior address" problem.
  *
- * That needs three operations and nothing else -- create with an explicit stack
- * size, switch, destroy -- so it is one header with one backend per platform,
+ * That needs three operations and nothing else (create with an explicit stack
+ * size, switch, destroy), so it is one header with one backend per platform,
  * chosen by CMake (recomp/CMakeLists.txt):
  *
  *   coro_ucontext.c   POSIX: getcontext/makecontext/swapcontext

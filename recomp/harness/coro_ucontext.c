@@ -1,4 +1,4 @@
-/* coro — POSIX backend: getcontext/makecontext/swapcontext (recomp/harness/coro.h).
+/* coro POSIX backend: getcontext/makecontext/swapcontext (recomp/harness/coro.h).
  *
  * This is the code the --no-cpu scheduler has always run on, moved out of
  * snes_state.c unchanged: same stack allocation, same trampoline, same

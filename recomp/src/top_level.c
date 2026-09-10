@@ -5,21 +5,21 @@
  * this file transliterates. There is no main loop at the outer level: `reset`
  * initialises the machine, installs an NMI handler pointer in `$0000` and then
  * parks the CPU on a `wai` at `loc_C0A4FD`. Every frame of the game is one
- * pass through the handler the NMI vector reaches with `jmp ($0000)` --
- * `nmi_handler_gameplay` for the three level scenes, `nmi_handler_title_fade`
- * for the title -- and each of them ends by jumping back to `loc_C0A4F5`,
+ * pass through the handler the NMI vector reaches with `jmp ($0000)`
+ * (`nmi_handler_gameplay` for the three level scenes, `nmi_handler_title_fade`
+ * for the title), and each of them ends by jumping back to `loc_C0A4F5`,
  * which re-arms NMITIMEN and parks again.
  *
- * Three things in here need more than the usual instruction-for-instruction
+ * Three parts of this file need more than the usual instruction-for-instruction
  * treatment.
  *
- * The NMI vector. `nmi` is not called, it is *entered*: the core has already
+ * The NMI vector. `nmi` is *entered* rather than called: the core has already
  * pushed PB, PC and P and cleared D and set I by the time the hook's entry
  * address is offered (LakeSnes cpu.c `cpu_doInterrupt`, which the core runs
  * before it consults the hook table at all). So the frame on the stack is the
  * real one and this body has nothing to build; it just runs the handler's
- * instructions. `unused_vec` is the other half of that story -- the single
- * `rti` every other vector points at -- and it does pop that frame, in
+ * instructions. `unused_vec` is the other half of that story (the single
+ * `rti` every other vector points at), and it does pop that frame, in
  * LakeSnes' own order (two idles, P, PC, latch, PB).
  *
  * `reset` and the emulation flag. `clc ; xce` is two entries rather than two
@@ -40,15 +40,15 @@
  *
  * The park loop. `wai` puts the CPU into a state only the core can leave, so
  * `loc_C0A4FD` models the instruction with `ss_wai()` and returns: the machine
- * then idles in the emulator's own `waiting` path -- `cpu_runOpcode`'s, or the
- * `--no-cpu` scheduler's, both the same code -- until the next NMI lifts it.
+ * then idles in the emulator's own `waiting` path (`cpu_runOpcode`'s, or the
+ * `--no-cpu` scheduler's, both the same code) until the next NMI lifts it.
  * `loc_C0A4FE` is the `bra` back to it, which only an IRQ this game never
  * enables could ever reach.
  *
  * Calls to converted callees go through the emulator with a real pushed frame
  * (the JSR / JSL / JSR_IAX macros below), so the callee's own hook fires at its
  * own entry address and is credited with the call, and the callee can be left
- * running when the machine moves on underneath -- which matters here more than
+ * running when the machine moves on underneath. That matters here more than
  * anywhere else, because `nmi_handler_gameplay` calls twenty routines and the
  * frame boundary lands inside one of them nearly every frame.
  *
@@ -232,19 +232,19 @@ static uint16_t t_xba(SnesState* ss, uint16_t a) {
  *
  * ss_run_callee stops when the stack pointer is back above the frame, and that
  * test alone is not enough here. particle_update_and_draw_mode0 ($C0:9331) uses
- * S as a scratch register -- it parks a slot index and later an OAM coordinate
- * there (txs/tcs at $9408, $949A, $94B6) before restoring S from $18 -- and
- * every call tree below reaches it: nmi_handler_gameplay through
- * jtbl_C0828A[0], nmi_handler_title_fade through mode1_reset_particles_and_oam.
+ * S as a scratch register: it parks a slot index and later an OAM coordinate
+ * there (txs/tcs at $9408, $949A, $94B6) before restoring S from $18. Every
+ * call tree below reaches it: nmi_handler_gameplay through jtbl_C0828A[0],
+ * nmi_handler_title_fade through mode1_reset_particles_and_oam.
  * Whenever the ROM is running that stretch at an instruction boundary the
  * parked value can read as "above the frame", and ss_run_callee comes back
  * false with the callee still mid-flight.
  *
  * The pc settles it: the callee returned only if it is standing on the
- * instruction after the call. Otherwise it is still running, and the right
- * thing is the same as for a yield -- return, and let the ROM finish it. The
- * frame that was pushed is the routine's real return address, so the callee's
- * own rts lands where the ROM expects and it carries on with the caller too.
+ * instruction after the call. Otherwise it is still running, and the handling
+ * is the same as for a yield: return, and let the ROM finish it. The frame
+ * that was pushed is the routine's real return address, so the callee's own
+ * rts lands where the ROM expects and it carries on with the caller too.
  */
 #define CALLEE_RETURNED(sp0_, ret_) \
   (!ss_run_callee(ss, (sp0_)) && ss_pc(ss) == (ret_) && ss_pb(ss) == pb)
@@ -285,9 +285,9 @@ static uint16_t t_xba(SnesState* ss, uint16_t a) {
   } while(0)
 
 /* jsr (abs,X): the odd one. The return address is pushed after only the low
- * operand byte has been fetched, so it is the pc as it stands two bytes in --
- * still one short of the next instruction, which is what rts's +1 supplies --
- * and the high operand byte is fetched afterwards. Then an internal cycle and
+ * operand byte has been fetched, so it is the pc as it stands two bytes in
+ * (still one short of the next instruction, the +1 that rts supplies), and the
+ * high operand byte is fetched afterwards. Then an internal cycle and
  * the vector read out of the program bank (LakeSnes case 0xfc). */
 #define JSR_IAX(addr, tbl) do {                                               \
     const uint16_t sp0_ = ss_sp(ss);                                          \
@@ -328,22 +328,22 @@ static void t_dpx_w16(SnesState* ss, uint16_t off, uint16_t x, uint16_t v) {
 }
 
 /* ---------------------------------------------------------------------------
- * unused_wram_clear_full — $C0:A35C
+ * unused_wram_clear_full: $C0:A35C
  *
  * An unreferenced duplicate of the WRAM clear `reset` runs at loc_C08012:
  * three loops that zero the direct page ($0000-$00FE, downwards), low WRAM
  * ($0200-$1FFE, upwards) and the whole of bank $7E from $2000 ($7E:2000-
- * $7E:7FFE -- the bpl ends the loop when the cpx result goes negative, which
+ * $7E:7FFE; the bpl ends the loop when the cpx result goes negative, which
  * is X = $6000, not at the $E000 the compare names). The stack page is the gap
- * between the first two loops and is left alone, which is what lets the
- * routine return at all.
+ * between the first two loops and is left alone, so the routine can return at
+ * all.
  *
  * Nothing calls it: no jsr, jsl or table word anywhere in out/dream.asm names
  * the address, and config/recomp_order.txt marks it cold. It is credited by the
  * unit gate rather than by a script (config/recomp_units.txt,
  * `dream_harness --unit`).
  *
- * Entry: nothing, and it takes the direct page with it -- tcd loads D from the
+ * Entry: nothing, and it takes the direct page with it; tcd loads D from the
  * zero it has just put in A. Exit: rts with A = 0, X = $6000, D = 0.
  * ------------------------------------------------------------------------- */
 static void unused_wram_clear_full(SnesState* ss) {
@@ -401,7 +401,7 @@ static void unused_wram_clear_full(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * ppu_init — $C0:A385
+ * ppu_init: $C0:A385
  *
  * Writes a known value into every PPU and CPU register the game cares about
  * and then clears the two interrupt latches on the way out. Called twice: once
@@ -506,11 +506,11 @@ static void ppu_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * unused_vec — $C0:A442
+ * unused_vec: $C0:A442
  *
  * The single `rti` the COP, BRK, ABORT and IRQ vectors all point at, in both
- * modes (docs/NOTES.md, "Mapping"). Nothing in the game enables an IRQ --
- * NMITIMEN is only ever $00, $01 or $81 -- and it executes no `cop` or `brk`,
+ * modes (docs/NOTES.md, "Mapping"). Nothing in the game enables an IRQ
+ * (NMITIMEN is only ever $00, $01 or $81) and it executes no `cop` or `brk`,
  * so this is expected never to be entered; it is converted because it is a
  * routine the vector table names.
  *
@@ -534,18 +534,18 @@ static void unused_vec(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi — $C0:A4D1, and the loc_C0A4E9 / loc_C0A4F5 tails
+ * nmi: $C0:A4D1, and the loc_C0A4E9 / loc_C0A4F5 tails
  *
  * The NMI vector. The hook is entered *after* the core has taken the interrupt
- * -- PB, PC and P are already on the stack, I is set, D is clear and the pc is
- * the vector's $00:A4D1 -- so there is no frame to build here and no `rti` to
+ * (PB, PC and P are already on the stack, I is set, D is clear and the pc is
+ * the vector's $00:A4D1), so there is no frame to build here and no `rti` to
  * match: the handler this hands control to resets the stack pointer and leaves
  * through `loc_C0A4F5` instead.
  *
  * The body saves A/X/Y 16-bit, acknowledges the NMI by reading RDNMI, forces
  * blanking at full brightness ($8F) and then jumps through the handler pointer
  * the install path left in $0000. That last `jmp ($0000)` is modelled by
- * setting the pc, so the registry dispatches whichever handler is installed --
+ * setting the pc, so the registry dispatches whichever handler is installed:
  * `nmi_handler_gameplay` or `nmi_handler_title_fade`, both converted here.
  * ------------------------------------------------------------------------- */
 static void nmi(SnesState* ss) {
@@ -553,7 +553,7 @@ static void nmi(SnesState* ss) {
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
   const uint16_t dp = ss_dp(ss);
 
-  /* C0A4D1 jml loc_C0A4D5 -- the vector's one job is to leave bank $00 for the
+  /* C0A4D1 jml loc_C0A4D5: the vector's one job is to leave bank $00 for the
    * $80 mirror the rest of the game runs in. The latch sits between the address
    * word and the bank byte (LakeSnes case 0x5c). */
   S(0xA4D1, 3);
@@ -581,7 +581,7 @@ static void nmi(SnesState* ss) {
   S(0xA4E1, 3); t_write8(ss, ss_abs(ss, INIDISP_), 0x8F);  /* C0A4E1 sta INIDISP */
   REP(0xA4E4, 0x20);                        /* C0A4E4 rep #$20 */
 
-  /* C0A4E6 jmp ($0000) -- the pointer is read out of bank 0, never through the
+  /* C0A4E6 jmp ($0000): the pointer is read out of bank 0, never through the
    * data bank (LakeSnes case 0x6c), and the pc it yields is the handler the
    * registry dispatches next. */
   S(0xA4E6, 3);
@@ -590,7 +590,7 @@ static void nmi(SnesState* ss) {
     TAIL(pb, target); }
 }
 
-/* loc_C0A4E9 — the handler install path.
+/* loc_C0A4E9: the handler install path.
  *
  * Reached with `lda #handler ; jmp $A4E9` from the end of an init routine
  * (`reset` at $80F1 with #$80F4, the title init at $BD1D with #$BD20), so A is
@@ -620,7 +620,7 @@ static void nmi_install_handler(SnesState* ss) {
   TAIL(pb, 0xA4F5);
 }
 
-/* loc_C0A4F5 — re-arm and park.
+/* loc_C0A4F5: re-arm and park.
  *
  * Two flag states reach this. Falling out of the install path above it is
  * 8-bit (the sep at $A4EB); the tail `jmp` at the end of each NMI handler
@@ -656,7 +656,7 @@ static void nmi_park(SnesState* ss) {
   TAIL(pb, 0xA4FD);                         /* into the wai park loop below */
 }
 
-/* loc_C0A4FD — the park loop itself, `wai ; bra loc_C0A4FD`.
+/* loc_C0A4FD: the park loop itself, `wai ; bra loc_C0A4FD`.
  *
  * `wai` stops the 65816 until an interrupt is raised; the machine idles there
  * for the rest of the frame and the next NMI lifts it, so the frame line's pc
@@ -664,7 +664,7 @@ static void nmi_park(SnesState* ss) {
  * (LakeSnes cpu.c case 0xcb, minus the opcode fetch): both bodies exist so that
  * --no-cpu has no instruction left to hand to a CPU. The `bra` runs only if
  * something lifts the park without an interrupt being taken, which needs an IRQ
- * this game never enables -- it is modelled because the address is reachable,
+ * this game never enables: it is modelled because the address is reachable,
  * not because it is reached. */
 static void nmi_wai(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
@@ -685,15 +685,15 @@ static void nmi_park_loop(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_handler_gameplay — $C0:80F4
+ * nmi_handler_gameplay: $C0:80F4
  *
  * The game's main loop. It runs inside NMI, once per frame, for game modes 0-2
  * (the level scenes) and mode 3 (the title, once its fade-in handler has handed
  * over). Reading down it: reset the stack, blank OAM's address, run the mode's
  * vblank half through jtbl_C08272, flush the palette and tile upload queues,
  * blank the screen for the rest of the frame, step the INIDISP fade ($30 towards
- * $32), take Select as the debug mode-cycle when no fade is running, and -- if
- * $4A (pause) is clear -- run the simulation: camera, the two metatile columns,
+ * $32), take Select as the debug mode-cycle when no fade is running, and, if
+ * $4A (pause) is clear, run the simulation: camera, the two metatile columns,
  * the mode's per-frame handler, the walk-cycle timer and its footstep sound, the
  * weather and effect spawners, then every live entity. What is left is the fade
  * bookkeeping, the mode advance when both fade words are zero, and the draw
@@ -1022,7 +1022,7 @@ loc_C08267:
 }
 
 /* ---------------------------------------------------------------------------
- * ppu_regs_default — $C0:8BDB, and the loc_C08BE4 / loc_C08E2B / loc_C08E39 /
+ * ppu_regs_default: $C0:8BDB, and the loc_C08BE4 / loc_C08E2B / loc_C08E39 /
  * loc_C08E7F entries
  *
  * The mode-0 per-frame scroll and camera-zone update (see the file header on
@@ -1038,8 +1038,8 @@ loc_C08267:
  * $0100 boundary and the walk-cycle reset at $4000; set the player's facing
  * bits in entity_flags; derive the vertical offsets from data_C46888 /
  * data_C46808 / data_C46B88 and the per-frame ramp step from data_C46988;
- * fill $0DB9 with 196 words -- constant down to index $E0, then a ramp adding
- * $0C2F -- and flag it ready in $0C04. The loc_C08E2B / loc_C08E39 entries are
+ * fill $0DB9 with 196 words (constant down to index $E0, then a ramp adding
+ * $0C2F) and flag it ready in $0C04. The loc_C08E2B / loc_C08E39 entries are
  * the two shorter camera-only variants, and everything converges on
  * loc_C08E7F, which publishes $0BFC/$0BE4/$0BE6 and calls the VRAM stream
  * dispatcher. It then falls through into check_pending_player_attack, which is
@@ -1575,7 +1575,7 @@ static void ppu_regs_default_8E39(SnesState* ss) { ppu_regs_default_at(ss, 0x8E3
 static void ppu_regs_default_8E7F(SnesState* ss) { ppu_regs_default_at(ss, 0x8E7F); }
 
 /* ---------------------------------------------------------------------------
- * loc_C0BB81 — the title screen's init, and the last routine `reset` reaches
+ * loc_C0BB81: the title screen's init, and the last routine `reset` reaches
  *
  * `reset` ends `jmp loc_C0BB81`, and this is where the program spends its first
  * two seconds: it clears the twelve words of the fade table at $0F43, seeds the
@@ -1592,7 +1592,7 @@ static void ppu_regs_default_8E7F(SnesState* ss) { ppu_regs_default_at(ss, 0x8E7
  * --no-cpu, which has no ROM to give it to. Written from out/dream.asm
  * $BB81-$BD1D, instruction for instruction like the rest of the file.
  *
- * Two things in it are the ROM's own oddities and are transliterated as they
+ * Two details in it are the ROM's own oddities and are transliterated as they
  * stand: the `clc` before the first tilemap loop's `adc #$0030` is inside the
  * loop, while the other three tilemap loops have no `clc` at all and carry
  * whatever the previous iteration left; and the `lda #$02` at $BCFB loads a
@@ -1830,7 +1830,7 @@ static void title_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_handler_title_fade — $C0:BD20
+ * nmi_handler_title_fade: $C0:BD20
  *
  * The title screen's own NMI handler, installed by the init at $BD1D. It runs
  * the whole title sequence out of a small state machine in $0F43, one step per
@@ -1848,8 +1848,8 @@ static void title_init(SnesState* ss) {
  * joypad words) leaves through $BEA0, which blanks the screen and restarts the
  * game at loc_C08042; every other path ends at $C008 and parks.
  *
- * The m and x flags move constantly here -- the routine spends most of its
- * time 8-bit and drops into 16-bit for the two-byte counters -- so the body
+ * The m and x flags move constantly here (the routine spends most of its
+ * time 8-bit and drops into 16-bit for the two-byte counters), so the body
  * narrows its own X and Y locals wherever a sep touches the index width, as
  * the CPU does.
  * ------------------------------------------------------------------------- */
@@ -2372,7 +2372,7 @@ loc_C0C008:
 }
 
 /* ---------------------------------------------------------------------------
- * reset — $C0:8000, and the loc_C08042 / loc_C0805E entries
+ * reset: $C0:8000, and the loc_C08042 / loc_C0805E entries
  *
  * Power-on. Native mode, interrupts off, direct page and data bank zero, stack
  * at $01FF, then both 64 KB WRAM banks written to zero a word at a time, the
@@ -2416,13 +2416,13 @@ static void reset(SnesState* ss) {
   TAIL(pb, 0x8001);                         /* into the xce below */
 }
 
-/* loc_C08001 — the `xce` that leaves emulation mode.
+/* loc_C08001: the `xce` that leaves emulation mode.
  *
  * Its own entry rather than two lines of `reset`, because the `clc` above it is
  * where the very first yield of a run can land: the ROM used to run this one
  * instruction and hand the routine back at $8002, and the address has to be
  * dispatchable for that. ss_xce() is the instruction (LakeSnes cpu.c case 0xfb,
- * minus the opcode fetch) -- e is the one bit of 65816 state no other accessor
+ * minus the opcode fetch): e is the one bit of 65816 state no other accessor
  * reaches, and without it --no-cpu could not get past the third instruction of
  * the program. */
 static void reset_xce(SnesState* ss) {
@@ -2439,7 +2439,7 @@ static void reset_xce(SnesState* ss) {
  * the ROM's: the clear is 32768 iterations of about 130 master cycles, some
  * fifteen frames' worth, so the first vblank always lands inside it and the
  * body hands it back. Without an entry at the loop head the hook could never
- * be offered the routine again -- $8002 is only ever reached once -- and
+ * be offered the routine again ($8002 is only ever reached once) and
  * everything after the loop (spc_init, spc_command, ppu_init, the two seed
  * words) would run as 65816 code for the life of the program. With it, the
  * ROM's own `bne` puts the pc back on $8012 one iteration later and the C
@@ -2616,8 +2616,8 @@ static void reset_mode_init(SnesState* ss){ reset_mode_restart(ss, 0x805E); }
  * ($8012). Each needs its own row for the registry to dispatch it, and each
  * carries the disassembly's own label name, so the harness prints one call
  * count per entry rather than folding them together. Only the seven names that
- * `out/symbols.txt` gives a routine -- reset, nmi_handler_gameplay,
- * ppu_regs_default, ppu_init, unused_vec, nmi, nmi_handler_title_fade -- carry
+ * `out/symbols.txt` gives a routine (reset, nmi_handler_gameplay,
+ * ppu_regs_default, ppu_init, unused_vec, nmi, nmi_handler_title_fade) carry
  * traced bytes for tools/progress.py; the loc_* rows credit nothing and are
  * there to be read and to be bisectable with --only. */
 static const RecompEntry kTopLevel[] = {

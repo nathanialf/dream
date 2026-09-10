@@ -346,8 +346,8 @@ void ss_call_long(SnesState* ss, uint8_t bank, uint16_t addr) {
 /* The entry snapshots are a stack, one frame per hook in flight, because hooks
  * nest: ss_run_callee runs the reference CPU over a callee, and a converted
  * callee's own hook fires inside the caller's. The inner hook has to answer
- * ss_yield_wanted() about its own entry -- it may hand its part of the routine
- * back on its own -- and the outer hook has to get its own answer back when the
+ * ss_yield_wanted() about its own entry (it may hand its part of the routine
+ * back on its own), and the outer hook has to get its own answer back when the
  * callee returns, because it is still holding a routine that has to be given
  * back at the boundary it crossed. */
 void ss_enter_hook(SnesState* ss) {
@@ -399,17 +399,17 @@ bool ss_yield_wanted(const SnesState* ss) {
   }
   if(!ss->nocpu) return want;
   /* --no-cpu: there is no ROM to hand the rest of the routine to, so the answer
-   * is always "carry on". What the yield point is used for instead is to stop
-   * the body exactly where the reference machine stops -- by suspending the
-   * stack it runs on, which the scheduler resumes at this same instruction.
+   * is always "carry on". The yield point instead stops the body exactly where
+   * the reference machine stops, by suspending the stack it runs on, which the
+   * scheduler resumes at this same instruction.
    *
    * Two boundaries need the machine back, and they are the two the reference
    * stops at: an interrupt, which the 65816 services between two instructions,
    * and the end of a frame, which is where snes_runFrame() returns and the
    * harness and the app sample the machine. Every other yield the ROM would
-   * have been offered is invisible from outside the routine -- the ROM would
-   * simply have finished it, which is what the body now does itself -- so
-   * suspending for one would cost a context switch and change nothing. */
+   * have been offered is invisible from outside the routine: the ROM would
+   * have finished it and the body now does that itself, so suspending for one
+   * would cost a context switch and change nothing. */
   SnesState* m = (SnesState*) ss;
   if(m->running != NULL && (snes->cpu->intWanted || ss_nocpu_frame_ends_here(m))) {
     ss_nocpu_suspend(m);
@@ -551,7 +551,7 @@ void ss_nocpu_enable(SnesState* ss, bool on) {
 bool ss_nocpu_enabled(const SnesState* ss) { return ss->nocpu; }
 
 /* Give the body chains' stacks back. Only the harness's teardown calls this;
- * a suspended chain is simply dropped, which is safe because a body owns
+ * a suspended chain is dropped, which is safe because a body owns
  * nothing but its own stack frames. */
 void ss_nocpu_free(SnesState* ss) {
   for(int i = 0; i < SS_NOCPU_CTX_MAX; i++) {
@@ -588,10 +588,10 @@ static bool ss_nocpu_frame_ends_here(SnesState* ss) {
   return snes->inVblank || snes->frames != ss->flFrameMark;
 }
 
-/* A pc the registry does not name. In --no-cpu that is the whole point of the
- * mode: it is either dead code the port never had to convert, or a routine that
- * is still the ROM's. Name the body that handed the pc over, so the gap can be
- * read off the message. */
+/* A pc the registry does not name. --no-cpu exists to find these: the pc is
+ * either dead code the port never had to convert, or a routine that is still
+ * the ROM's. Name the body that handed the pc over, so the gap can be read off
+ * the message. */
 static void ss_nocpu_no_body(SnesState* ss, uint32_t pc24) {
   const char* from = "(the reset vector)";
   /* the body in flight if there is one, otherwise the last one that ran: a tail
@@ -612,7 +612,7 @@ static void ss_nocpu_no_body(SnesState* ss, uint32_t pc24) {
 }
 
 /* Run the one body that owns this pc. The dispatcher is the harness's own hook
- * callback -- the same one the CPU core calls -- so a body is entered, counted
+ * callback (the same one the CPU core calls), so a body is entered, counted
  * and charged exactly as it is with the CPU running. */
 static void ss_nocpu_call_body(SnesState* ss, uint32_t pc24) {
   Cpu* c = ss->snes->cpu;
@@ -649,7 +649,7 @@ static void ss_nocpu_suspend(SnesState* ss) {
 /* A suspended context an interrupt displaced is reachable again only through an
  * rti that lands on its pc with its stack pointer. Once the stack pointer is
  * back at or above where it stood, the frame that rti would pop is gone and the
- * routine has been abandoned -- which is what this game's NMI handler does two
+ * routine has been abandoned. This game's NMI handler does that two
  * instructions in, with `ldx #$01FF ; txs`. Free the stack and put the hook
  * snapshot depth back where the chain found it. */
 static void ss_nocpu_reap(SnesState* ss) {
@@ -721,7 +721,7 @@ static void ss_nocpu_step(SnesState* ss) {
     } else if(top->suspended && !top->displaced) {
       /* Nothing but an interrupt can move the machine away from a suspended
        * routine: it stopped between two instructions and the scheduler was the
-       * only thing running since. If this fires, a body left the pc somewhere
+       * only code running since. If this fires, a body left the pc somewhere
        * other than where it suspended. */
       fprintf(stderr, "dream_harness: --no-cpu: a body suspended at %06X sp %04X"
                       " but the machine is at %06X sp %04X\n",

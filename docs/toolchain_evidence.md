@@ -34,7 +34,7 @@ Each section separates **Established from bytes** (checkable) from **Inference**
   first 0xD86 bytes (they diverge only in the song/sample pointer tables that follow the
   driver).
 - Dream's image aligned against DKC2's: **3290 of 3418 bytes equal (96.3 %)**. Every
-  difference is one of three things:
+  difference falls into one of three cases:
   1. The loader's last two bytes: Dream 0x20086 = `07 1F`, DKC2 0x2E0086 = `04 D6`, KI
      0x1F4F4 = `E6 E6`. These are SPC `$055E-$055F`, adjacent to `cmd_param` (`$055D`), and
      nothing in `spc/driver.asm` references `$055E/$055F`.
@@ -372,7 +372,7 @@ all seven ROMs (stack at `$01FF`).
   everything after it by a constant.
 - The image being left in the low half of bank `$C0` (which HiROM maps but the reset vector
   never reaches) means the ROM file was built by writing each 32 KiB block from its own
-  output and the block for `$C0:0000-$7FFF` was simply not regenerated, consistent with a
+  output and the block for `$C0:0000-$7FFF` was not regenerated, consistent with a
   build that assembles fixed-size bank images into a pre-existing file rather than linking
   one image. The sound interface in bank `$C1` did not move between the two builds, so it
   was a separately assembled module with a fixed origin.

@@ -1,4 +1,4 @@
-/* gallery — a viewer for what the ROM holds and the game never shows.
+/* gallery: a viewer for what the ROM holds and the game never shows.
  *
  * Everything here is decoded from the user's own ROM image at run time, with the same
  * formats tools/assetcodec.py implements; the list of what exists comes from the
@@ -6,7 +6,7 @@
  * bytes are compiled in (docs/LEGAL.md).
  *
  * The gallery draws into the app's own 256x224 framebuffer and never touches emulator
- * state: while a page is open main.c simply does not step the machine.
+ * state: while a page is open main.c does not step the machine.
  */
 #ifndef GALLERY_H
 #define GALLERY_H
@@ -20,7 +20,8 @@
 
 /* Sections, in menu order. */
 enum {
-  GALLERY_SEC_SPRITES = 0,   /* live sprite frames */
+  GALLERY_SEC_SCENES = 0,    /* the levels, composed out of the game's own PPU */
+  GALLERY_SEC_SPRITES,       /* live sprite frames */
   GALLERY_SEC_SPRITES_ALT,   /* alternate-format frames, unread by the game */
   GALLERY_SEC_BACKGROUNDS,   /* tilesets, with a palette picker */
   GALLERY_SEC_FONTS,         /* the unreferenced font and the bank $C1 picture strips */
@@ -42,6 +43,14 @@ typedef struct Gallery Gallery;
 
 /* `rom` must stay alive and unmodified for the gallery's lifetime; it is only read. */
 Gallery* gallery_create(const uint8_t* rom, size_t romLen);
+
+/* The scene composer (scene.c), which owns a machine of its own and so cannot
+ * live in here: main.c creates it when a page that needs it is opened and steps
+ * it while the page is up. NULL means "not available yet". */
+struct Scenes;
+void gallery_set_scenes(Gallery* g, struct Scenes* sc);
+/* True while an open page still wants the composer stepped. */
+bool gallery_wants_scenes(const Gallery* g);
 void gallery_destroy(Gallery* g);
 
 const char* gallery_section_name(int section);

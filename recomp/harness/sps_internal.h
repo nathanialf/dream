@@ -2,8 +2,8 @@
  * the vendored LakeSnes APU. Harness sources only.
  *
  * Unlike the 65816 side there is no per-invocation entry snapshot to keep. The
- * 65816's yield condition is a *level* -- "vblank has started" is true for the
- * rest of the frame -- so a hook has to remember what it looked like when it
+ * 65816's yield condition is a *level* ("vblank has started" is true for the
+ * rest of the frame), so a hook has to remember what it looked like when it
  * began, and hooks nest. The SPC's condition is a threshold on a monotonically
  * increasing cycle count (apu->sliceEnd, set by apu_runCycles), and every hook
  * dispatch happens strictly below it, so the same question has the same right
@@ -23,7 +23,7 @@
  * The shape is the 65816 side's (recomp/harness/ss_internal.h) with the two
  * complications taken out. The catch-up slice can end between any two
  * instructions of a routine, so a body still has to stop there, and a body is
- * still straight-line C that cannot be re-entered in its middle -- so it runs
+ * still straight-line C that cannot be re-entered in its middle, so it runs
  * on a stack of its own and a yield suspends that stack. But the SPC700 takes
  * no interrupts here and nothing else moves its pc, so a suspension is always
  * resumed at the instruction it stopped on: one context, never displaced,

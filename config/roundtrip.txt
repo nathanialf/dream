@@ -1,4 +1,4 @@
-; config/roundtrip.txt -- asset kinds (from config/assets.txt) whose decoder + encoder pair
+; config/roundtrip.txt: asset kinds (from config/assets.txt) whose decoder + encoder pair
 ; in tools/assetcodec.py is verified byte-exact: the decoded, human-editable form
 ; re-encodes to the exact ROM bytes for every asset of that kind.  Regenerate with
 ;

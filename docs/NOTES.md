@@ -167,14 +167,14 @@ Hand edits to `src/` are lost on `regen`, so the intended path is to keep enrich
     python3 tools/trace65816.py DREAM.sfc out/
     python3 tools/emit_asar.py DREAM.sfc src data
 
-- `tools/names.txt` — curated labels (ROM code/data and RAM). Code entries only name a
+- `tools/names.txt`: curated labels (ROM code/data and RAM). Code entries only name a
   routine; add `m0x0` etc. after the name to force tracing from an address that is not
   otherwise reachable.
-- `out/codemap.txt` — code ranges, jump tables, flag-state conflicts.
-- `out/symbols.txt` — plain address/offset/name list.
-- `out/dream.mlb` — Mesen2 labels (ROM, registers, WRAM).
-- `out/dream.sym` — bsnes-plus style labels.
-- `out/dream.asm` — listing: traced code disassembled with symbols, gaps as `.incbin`.
+- `out/codemap.txt`: code ranges, jump tables, flag-state conflicts.
+- `out/symbols.txt`: plain address/offset/name list.
+- `out/dream.mlb`: Mesen2 labels (ROM, registers, WRAM).
+- `out/dream.sym`: bsnes-plus style labels.
+- `out/dream.asm`: listing of traced code disassembled with symbols, gaps as `.incbin`.
 
 The tracer follows `jsr/jsl/jmp/jml`/branches, tracks M/X through `rep/sep/php/plp` and
 through subroutine return states (only flags a callee explicitly sets are adopted by the
@@ -185,8 +185,8 @@ via RAM pointers.
 ## Open items
 
 1. Four small unreferenced fragments remain (`unused_entity_apply_velocity_z` at $A294,
-   `unused_wram_clear_full` at $A35C, `entity_clear_anim_unused`, the dead $9206 dispatcher
-   -- named `unused_stream_desc_dispatch` since it reads data_C0B208/vram_stream_desc_table,
+   `unused_wram_clear_full` at $A35C, `entity_clear_anim_unused`, the dead $9206 dispatcher,
+   named `unused_stream_desc_dispatch` since it reads data_C0B208/vram_stream_desc_table,
    now repurposed as non-code); everything else in the code bank is reached from a vector,
    a table, or an animation script.
 2. Split `data/` along the region table in `docs/data_formats.md` (sprite frames, BRR,

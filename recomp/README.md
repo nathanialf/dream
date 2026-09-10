@@ -1,4 +1,4 @@
-# recomp — verification harness
+# recomp: verification harness
 
 `dream_harness` runs the original ROM in an embedded SNES core, hashes the machine
 state after every frame, and can run two instances side by side so a C
@@ -67,10 +67,10 @@ SPC700's. Every local change is marked `// dream:` and listed in
 ### Forcing HiROM
 
 This ROM's internal header at `$FFC0` is tilemap fill (`06 37 00 37 ...`) and it has
-no checksum, so `snes_loadRom()`'s header scoring is meaningless on it — it reads the
-"name" as `.7.7.7.7.7.7.7.7.7.7.` and fails the checksum test. (As it happens the
-scorer still lands on HiROM for this image, but only by accident of how the other
-candidates score; nothing about that is a guarantee.)
+no checksum, so `snes_loadRom()`'s header scoring is meaningless on it: it reads the
+"name" as `.7.7.7.7.7.7.7.7.7.7.` and fails the checksum test. (The scorer still
+lands on HiROM for this image, by accident of how the other candidates score;
+that is not a guarantee.)
 
 The harness therefore does not call `snes_loadRom()` at all. `machine_load_rom()` in
 `harness/main.c` does by hand what `snes_loadRom()` does *after* the scoring:
@@ -142,8 +142,8 @@ game from a blanked one. The sample point is the instant the frame enters vblank
 
 `--dump-wram DIR` additionally writes the raw 128 KB per frame, for `cmp`/`xxd` work
 when a hash differs and you need to know where. `--dump-cgram DIR` and `--dump-oam DIR`
-do the same for the other two PPU regions the frame line hashes — 512 bytes of CGRAM,
-512 + 32 bytes of OAM — out of the same snapshot, so what lands in the file is what the
+do the same for the other two PPU regions the frame line hashes (512 bytes of CGRAM,
+512 + 32 bytes of OAM) out of the same snapshot, so the file holds exactly what the
 hash covered. They are how `docs/data_formats.md`'s "Palette assignment" section is
 checked against the running game.
 
@@ -164,7 +164,7 @@ An optional `| Button+Button+...` second column addresses player 2's controller
 existing scripts (all first-column-only) still load and behave exactly as
 before. `harness/inputs/p2_enemy_attack.txt` is the worked example: a live
 second controller is otherwise unreachable in-game (`harness/inputs/README.md`
-has the full story, filed as a debug/test feature the developers left in).
+documents it, filed as a debug/test feature the developers left in).
 
     240  Right
     500  none | B
@@ -181,7 +181,7 @@ exit as sorted canonical addresses, one per line:
     ...
 
 The game executes most of its code through the `$80`/`$81` mirror banks, so PCs are
-folded onto the disassembly's `$C0:0000 + file offset` form before being written —
+folded onto the disassembly's `$C0:0000 + file offset` form before being written,
 the same form `out/codemap.txt`, `out/symbols.txt` and `out/dream.asm` use. PCs
 outside the cart map (WRAM, registers) are not representable in that form and are
 only counted, in the second header line.
@@ -228,8 +228,8 @@ installs the whole registry.
 
 `harness/hooks.c` keeps the older `recomp_hooks[]` shape for `--hook-table demo`:
 its entries return `bool`, and returning `false` means "not handled", which lets a
-hook guard a precondition (CPU mode, direct page) instead of silently doing the
-wrong thing. Registry routines return `void` and always handle the call.
+hook guard a precondition (CPU mode, direct page) instead of silently mishandling
+the call. Registry routines return `void` and always handle the call.
 
 Entry addresses are written in the canonical `$C0:0000 + offset` form; the harness
 folds the running PC through the mirror banks before matching, so one entry catches
@@ -254,7 +254,7 @@ the routine whether the ROM reaches it as `$C0:A500` or `$80:A500`.
 | registry | `recomp_register`, `recomp_registry`, `recomp_find`, `RECOMP_REGISTER` |
 | no-cpu | `ss_nocpu_enable`, `ss_nocpu_enabled`, `ss_nocpu_run_frame` |
 
-The timed accessors are the reason a hook can be cycle-exact: they go through the
+The timed accessors make a hook cycle-exact: they go through the
 same `snes_cpuRead`/`snes_cpuWrite`/`snes_cpuIdle` entry points the CPU core itself
 uses, so they charge the same access times, run DMA and HDMA at the same points, and
 leave the same open-bus value. A hook that replays a routine's bus transactions in
@@ -275,12 +275,12 @@ back above the frame, then return to C. Interrupts taken inside the callee are
 serviced normally, and any hook the callee hits still fires, so a callee that gets
 converted later needs no change at the call site. `ss_run_until_return` is the
 primitive underneath, for a body that is also modelling the calling instruction's
-own cycles and wants to build the frame itself. `ss_run_callee` is the same thing
-but it stops at a boundary inside the callee when the machine moves on, which a
+own cycles and wants to build the frame itself. `ss_run_callee` does the same but
+stops at a boundary inside the callee when the machine moves on, which a
 hand-built frame can afford because the address it pushed is the routine's real
 one. `src/anim.c` does exactly that for the `jsl anim_update` at the end of every
-animation-rate handler, which is what keeps that hook from being atomic across a
-routine that can reach a VRAM block upload.
+animation-rate handler, so that hook is not atomic across a routine that can reach
+a VRAM block upload.
 
 ### Cycle cost, and `--profile`
 
@@ -301,7 +301,7 @@ and `--profile` confirms it.
 The other is the charge `--profile` measures, for a routine where modelling is not
 worth doing. It runs two machines side by side over the same input: the reference with hooks off, measuring
 what the ROM's own code spends between a routine's first instruction and the
-return that leaves it (see below -- that is not the same thing as the return that
+return that leaves it (see below; not the same as the return that
 pops its frame), and the candidate with hooks on, measuring what the C body spends
 on its own. It writes `config/recomp_cycles.txt`:
 
@@ -309,13 +309,13 @@ on its own. It writes `config/recomp_cycles.txt`:
 
 The number after the name is the charge: the difference of the two means, which the
 harness spends after the hook returns (in short steps, so the DRAM refresh lands
-where it would have). Taking the *difference* rather than the ROM's total is what
-makes a DMA routine come out right: the transfer time is in both means and cancels,
-leaving only the instruction overhead the C body skipped. The bracketed ranges are
-the per-call minimum and maximum, and they are the check that a body is exact: when
-the ROM's range and the hook's range are the same interval, the charge is 0 and the
-routine costs what it always did. Every routine in this batch is in that state, so
-the file is all zeros; it exists for the next one that is not.
+where it would have). For a DMA routine the *difference* rather than the ROM's total
+is the correct charge: the transfer time is in both means and cancels, leaving only
+the instruction overhead the C body skipped. The bracketed ranges are the per-call
+minimum and maximum: when the ROM's range and the hook's range are the same interval,
+the charge is 0 and the routine costs what it always did. Every routine in this
+batch is in that state, so the file is all zeros; it exists for the next one that
+is not.
 
     make recomp-profile        # rewrite config/recomp_cycles.txt
 
@@ -330,7 +330,7 @@ is.
   `jsl anim_update ; pla ; rts`, where the 16-bit `pla` drops the return address
   `entity_update_tick`'s `jsr` pushed so that the `rts` leaves the whole tick.
 * the animation-rate handlers run into `anim_rate_store`, whose `plb` pops the
-  byte the caller's `pea $8080 ; plb` left on the stack -- three instructions
+  byte the caller's `pea $8080 ; plb` left on the stack, three instructions
   before the `jsl anim_update` that is nearly all of the routine's cost.
 * every OAM emitter's "table is full" exit is `pla ; jmp loc_C0A6CD`, a jump into
   `entity_build_oam_frame`'s `pea $8080 ; plb ; plb ; rtl` tail.
@@ -343,26 +343,26 @@ a routine that costs 1709.
 A frame closes on the *pc* instead. At the routine's first instruction the
 harness remembers the eight stack bytes above the frame; a frame is closed when
 the pc is the instruction a return that moved the stack pointer to where it now
-stands would land on, read back out of those bytes -- `rts` pops a word and adds
+stands would land on, read back out of those bytes: `rts` pops a word and adds
 one, `rtl` pops a word and a bank and adds one, `rti` pops flags, a word and a
 bank and adds nothing. The stack pointer is still the guard: a frame that is
 still on the stack cannot have returned. With that, `entity_spawn_transform_b`
 and `_c` report the ROM and the hook covering the same interval to the master
-cycle, which is the reading that says a body is exact.
+cycle.
 
 The limitation that remains: a routine that leaves through a tail `jmp` reaches
 no return of its own, so its frame can only be closed when the routine it was
 called from returns, and its figure then covers that tail as well. Those lines
-say so -- `(rom side left through a tail jmp: measured to its caller's return)` --
+carry `(rom side left through a tail jmp: measured to its caller's return)`
 and are never charged. Frames still open when the run ends are reported and
 dropped rather than billed, and an entry that could not be measured because 64
 routines were already in flight is counted in the same line.
 
 Some entries carry a note instead of a charge. A routine the ROM only reaches by
 falling through from the one above it is never entered as a hook, so there is
-nothing to calibrate. And a hook that did not always return -- one ending in a
+nothing to calibrate. And a hook that did not always return (one ending in a
 tail `jmp`, whose callee has not run yet, or one that handed the routine back to
-the ROM at a frame boundary -- has the two figures covering different work, so the
+the ROM at a frame boundary) has the two figures covering different work, so the
 harness bills only a hook that returned.
 
 ### Atomicity, and yielding back to the ROM
@@ -374,7 +374,7 @@ reference run stops in the middle of a long routine at exactly the point a hooke
 run cannot: the two are then compared at different points of the same routine.
 
 `ss_yield_wanted()` reports either condition, and a body that models the
-instruction stream can simply stop. Every register, flag and byte of memory is
+instruction stream can stop. Every register, flag and byte of memory is
 already what the 65816 would have left at that boundary, so pointing the pc at the
 address of the next instruction and returning hands the rest of the routine to the
 ROM, which finishes it.
@@ -401,7 +401,7 @@ long, and the long input scripts catch it within a couple of thousand frames.
 
 #### One snapshot per invocation
 
-"Since this hook began" is the whole of that mechanism, and hooks nest. A
+The condition is "since this hook began", and hooks nest. A
 converted routine reaches a converted callee through `ss_run_callee`, which runs
 the reference CPU over it: the callee's entry address is dispatched again and its
 own hook fires *inside* the caller's. The chain the ROM builds every frame is
@@ -416,10 +416,10 @@ included. `ss_yield_wanted()` answers from the innermost frame, so the inner hoo
 is asked about its own entry and the outer hook gets its own answer back when the
 callee returns. Overflowing the stack is a fatal error, not a wrong answer.
 
-A single slot per machine looks like it works -- `ss_run_callee` checks before
-every opcode, so the inner hook is normally entered at an instant the outer hook
-has just approved -- but it is only true while every path into a nested hook is
-one of those checks. `ss_call_sub` / `ss_call_long` / `ss_run_until_return` run a
+A single slot per machine looks like it works, since `ss_run_callee` checks before
+every opcode and the inner hook is normally entered at an instant the outer hook
+has just approved. That holds only while every path into a nested hook is one of
+those checks. `ss_call_sub` / `ss_call_long` / `ss_run_until_return` run a
 callee with no check at all, and a hook entered from inside one of those, after
 the machine crossed a frame boundary, would leave the outer hook holding a
 snapshot from the wrong side of the boundary: the outer hook would then finish its
@@ -433,7 +433,7 @@ uses, so it needs no ROM code and no input script:
 The outer hook is entered, spends cycles until the machine moves on under it
 (vblank starts in phase 0, the frame counter moves in phase 1), then calls the
 inner hook the way a converted routine reaches a converted callee. The inner hook
-must see nothing to hand back -- it has only just started -- and the outer hook
+must see nothing to hand back (it has only just started), and the outer hook
 must *still* want to yield afterwards. It exits 0 on pass, 1 on fail, and prints
 one line per check.
 
@@ -444,18 +444,18 @@ either: the coroutine backend of `harness/coro.h`, on its own.
 
     ./build/recomp/dream_harness --test-coro
 
-It checks the five things the `--no-cpu` scheduler asks of a backend: that a body
+It checks the five properties the `--no-cpu` scheduler asks of a backend: that a body
 suspends and resumes where it stopped with its stack intact (16 KiB of locals
 written before a yield and verified after); that coroutines *nest*, so a coro
-started or resumed from inside another coro's stack comes back to that stack --
-which is what happens every time the SPC700's driver stack is resumed from inside
+started or resumed from inside another coro's stack comes back to that stack, as
+it does every time the SPC700's driver stack is resumed from inside
 a 65816 body catching the APU up; that a body yields across a simulated frame
 boundary and resumes inside the same loop, which is `ss_yield_wanted()`'s shape
 with the machine replaced by a counter; that a coroutine suspended halfway
 through a body can be torn down, which the scheduler does whenever an interrupt
 abandons one and at every exit; and that coro_start on a coroutine still parked
 in coro_yield discards that parked body instead of resuming it and runs the new
-fn from scratch -- checked with the restart issued from main and from inside
+fn from scratch, checked with the restart issued from main and from inside
 another coro's stack, the shape `ss_nocpu_reap()` abandons a driver's body chain
 in. It exits 0 on pass, 1 on fail, one line per check.
 
@@ -475,9 +475,8 @@ commands no live 65816 code sends, the sequence opcodes no song or sound-effect
 bank emits, the stale `seq_cmd_table` slots, the one-row OAM emitters (no sprite
 frame in the ROM is short enough to pick them), the animation-rate entries no
 table word points at, the `rti` at the unused vectors, and the five 65816
-routines with no caller anywhere in the ROM. "Never entered" was the honest thing
-to say about them, and it left the `recomp` figure short of the code the port
-actually covers.
+routines with no caller anywhere in the ROM. "Never entered" was accurate, and it
+left the `recomp` figure short of the code the port covers.
 
 `--unit` is the same comparison at the granularity of one routine. For each seed
 line it:
@@ -485,8 +484,8 @@ line it:
 1. boots the ROM under a named input script to a named frame, so WRAM, VRAM,
    CGRAM, OAM, ARAM, the DSP and the SPC registers hold content the game itself
    produced rather than zeroes;
-2. loads that state into two fresh machines — the reference, which runs no hooks
-   at all, and the candidate, which runs the whole table on both processors —
+2. loads that state into two fresh machines (the reference, which runs no hooks
+   at all, and the candidate, which runs the whole table on both processors)
    and checks that the two are byte-identical before anything else happens;
 3. applies the seed's register and memory overrides to both, pushes the return
    frame the routine expects, and points both at the entry address (in the
@@ -504,34 +503,34 @@ line it:
 Exit status is 0 when every seed passed, 1 when one did not, 2 on a bad spec.
 The instruction counts are the check on the check: "rom ran N instrs" is what the
 reference executed, and "C left M" is what the emulated core still had to execute
-on the candidate — a callee the port has not converted, and nothing else when it
+on the candidate: a callee the port has not converted, and nothing else when it
 is zero.
 
 ### Knowing when the routine is over
 
 Control has left when the instruction about to run is outside the routine's byte
 range, the instruction *before* it was inside, and no frame the routine pushed is
-still on the stack. All three conditions earn their place. The stack pointer
+still on the stack. All three conditions are needed. The stack pointer
 alone cannot say, because the pc leaves the range on every call to a routine that
 is not converted yet and comes back. The range alone cannot say either, for the
-same reason. And "the instruction before it was inside" is what keeps a callee
+same reason. And "the instruction before it was inside" stops a callee
 that deliberately unbalances the stack from looking like the end: the sound
 driver has exactly one, `seq_pop_x`, which pops its own return address, pops the
-slot index its caller pushed and pushes only the return address back — for two
+slot index its caller pushed and pushes only the return address back; for two
 instructions in the middle of it the stack pointer is *above* where the handler
 started while the pc is nowhere near the handler.
 
 The return frame the harness pushes carries a sentinel address no routine owns,
 so an `rts`, an `rtl`, an `rti` and the SPC700's `ret` all satisfy the one rule
 and no instruction at the sentinel is ever fetched. `ret=` in the seed says which
-frame to push, because the shape of the frame is the routine's own business.
+frame to push, because the shape of the frame differs from routine to routine.
 
-Interrupts are the one thing taken out of the picture. A hook is atomic where the
+Interrupts are excluded. A hook is atomic where the
 routine it replaces is not, so an NMI landing inside the reference's run and
 inside a different instruction of the candidate's would be a difference the
 routine is not responsible for. The boot therefore ends with NMI and both timer
 IRQs off and the pending latch cleared, and with the machine parked just past the
-end of vblank, which leaves a whole active frame — some 300 000 master cycles —
+end of vblank, which leaves a whole active frame (some 300 000 master cycles)
 before the vblank flag or the frame counter can move under the routine. For the
 one routine longer than that (`unused_wram_clear_full`, about five frames) the
 candidate is additionally held to the end of its routine (`ss_unit_hold`,
@@ -557,7 +556,7 @@ Anything a line does not name keeps the value the booted machine had. The file's
 own header documents every key.
 
 Every routine carries at least four seeds, including the edge values its own
-bounds allow — slot 0 and the last slot the entity or channel arrays hold, a zero
+bounds allow: slot 0 and the last slot the entity or channel arrays hold, a zero
 and an all-ones operand, both sides of every branch the routine tests. A routine
 counts only when all of its seeds pass.
 
@@ -575,12 +574,11 @@ label before the semicolon and credits both the same.
 
 In `--no-cpu` nothing fetches an instruction. The C bodies are the program: a
 scheduler starts at the reset body and follows every pc the machine hands over
--- a tail `jmp`, an `rts`, a callee frame, interrupt entry, the resumption of a
-routine that stopped at a frame boundary -- by looking up the body that owns
+(a tail `jmp`, an `rts`, a callee frame, interrupt entry, the resumption of a
+routine that stopped at a frame boundary) by looking up the body that owns
 that address in the registry and running it. `cpu_runOpcode` is never called at
-all, and `spc_runOpcode` never reaches its fetch -- except in the SPC700's IPL
-boot ROM, the one documented exception below. The run report says so as a
-measurement rather than a claim:
+all, and `spc_runOpcode` never reaches its fetch, except in the SPC700's IPL
+boot ROM, the one documented exception below. The run report counts it:
 
     no-cpu: 0 65816 instructions and 53547 SPC700 instructions executed by the
             emulated cores (53547 of them the IPL boot ROM)
@@ -593,14 +591,14 @@ measurement rather than a claim:
 
 Everything else is the same machine. The PPU, DMA and HDMA, the DSP, the APU
 timers and the port handshake all keep running out of the vendored core, driven
-by the cycles the bodies charge through the timed accessors, which is why the
-frame timing is identical to the reference's rather than merely close: every
+by the cycles the bodies charge through the timed accessors, so the frame timing
+is identical to the reference's rather than merely close: every
 script passes `--lockstep` at `+0 master cycles and +0 APU cycles`.
 
 ### The scheduler
 
 `ss_nocpu_run_frame()` (`harness/snes_state.c`) stands in for `snes_runFrame()`
--- same stopping point, same APU catch-up at the end -- and its step is:
+(same stopping point, same APU catch-up at the end) and its step is:
 
 1. `cpu_runNonInstruction()`, the core's own reset / `stp` / `wai` / interrupt
    entry path. It is factored out of `cpu_runOpcode` in the vendored core (one
@@ -617,19 +615,18 @@ handed it over:
     dream_harness: --no-cpu: no C body at 80:9679 (canonical C09679)
                    handed over by mode1_particle_dispatch at C0922A, 0 bodies in flight
 
-which is what makes the mode the port's **dead-code check**: it cannot run at
-all until every address the program actually reaches has a body. Running it
-until it stopped saying that is what added `loc_C08001`, `loc_C0A4FD`,
-`loc_C0A4FE`, `loc_C0BB81`, `loc_C0A6CD`, `loc_C09679` and `loc_C097DD` on the
-65816 side, and thirteen interior entries on the SPC700 side (below).
+so the mode doubles as the port's **dead-code check**: it cannot run at all
+until every address the program reaches has a body. Running it until it stopped
+saying that added `loc_C08001`, `loc_C0A4FD`, `loc_C0A4FE`, `loc_C0BB81`,
+`loc_C0A6CD`, `loc_C09679` and `loc_C097DD` on the 65816 side, and thirteen
+interior entries on the SPC700 side (below).
 
 ### Suspending a routine instead of handing it back
 
-A body is not a resumable object. It is straight-line C that `return`s when
-`ss_yield_wanted()` says the machine has moved on underneath it, leaving the ROM
-to finish the routine from the address it stopped at -- and that address is in
-the middle of a routine, which the registry does not name. With no ROM there is
-nothing to finish it.
+A body is straight-line C that `return`s when `ss_yield_wanted()` says the machine
+has moved on underneath it, leaving the ROM to finish the routine from the address
+it stopped at, an address in the middle of a routine that the registry does not
+name. With no ROM there is nothing to finish it.
 
 So a dispatched body chain runs on a stack of its own (`Coro`,
 `harness/coro.h`) and a yield *suspends* that stack instead of unwinding it.
@@ -640,9 +637,8 @@ explicit stack size, over `getcontext`/`makecontext`/`swapcontext` on POSIX
 CMake per platform and by nothing else. `--test-coro` exercises whichever one was
 built, with no ROM (below). The scheduler gets control back at exactly the instruction
 boundary the reference CPU stops on; resuming continues the body from inside
-`ss_yield_wanted()`, which then answers false. One suspended context is the
-whole of the "resume at an interior address" problem, and it needs no change to
-any body.
+`ss_yield_wanted()`, which then answers false. One suspended context covers the
+"resume at an interior address" problem, with no change to any body.
 
 Only two boundaries need the machine back, and they are the two the reference
 stops at:
@@ -652,12 +648,12 @@ stops at:
   the app sample the machine.
 
 Every other yield the ROM would have been offered is invisible from outside the
-routine -- the ROM would simply have finished it, which is what the body now
-does itself -- so suspending for one would cost a context switch and change
-nothing. A 900-frame script suspends about 150 times, because the machine is
-parked on the `wai` at `loc_C0A4FD` at almost every frame boundary and there is
-no body in flight to stop; the ones that do are the boot's long routines and the
-frames where the NMI handler overruns.
+routine (the ROM would have finished it, and the body now finishes it itself),
+so suspending for one would cost a context switch and change nothing. A 900-frame
+script suspends about 150 times, because the machine is parked on the `wai` at
+`loc_C0A4FD` at almost every frame boundary and there is no body in flight to
+stop; the ones that do are the boot's long routines and the frames where the NMI
+handler overruns.
 
 A suspension an interrupt displaces is kept, not dropped: an `rti` landing on
 its pc with its stack pointer would resume it. This game's NMI handler resets S
@@ -669,10 +665,10 @@ count is that; it is zero in the current scripts.
 ### Interrupts
 
 NMI is raised by the PPU at the start of vblank and taken by the core's own
-`cpu_doInterrupt`, before any hook is consulted -- that has always been true of
+`cpu_doInterrupt`, before any hook is consulted. That has always been true of
 the `nmi` body, which is *entered* with PB, PC and P already pushed rather than
 called, and `--no-cpu` changes nothing about it. `--no-cpu` additionally
-*checks* the other half of the story on every step: the IRQ path is never used.
+*checks* the other half on every step: the IRQ path is never used.
 NMITIMEN's shadow at `$34` is only ever `$00`, `$01` or `$81`, so the h/v timer
 enables are never set; no `cop` or `brk` is executed; and the `rti` at
 `unused_vec` ($C0:A442) that every non-NMI vector points at is never reached. If
@@ -689,7 +685,7 @@ call either resumes the driver's suspended stack on the instruction it stopped
 at or starts the body that owns the pc, and the body suspends when
 `sps_yield_wanted()` sees the slice end. So the interleaving between the two
 processors is the reference's, instruction boundary for instruction boundary,
-which is what the upload handshake needs: `upload_spc_block` on the 65816 side
+which the upload handshake needs: `upload_spc_block` on the 65816 side
 busy-waits against `loader_block_loop` on this one.
 
 It needs one context and never more: the SPC700 takes no interrupts here and
@@ -700,7 +696,7 @@ The **IPL boot ROM** is the one exception in the whole mode. `$FFC0-$FFFF` while
 receives the 136-byte loader block at power-on, jumps to it, and is never
 entered again (the driver's "back to the loader" command jumps to `$04F3` in
 ARAM). There is no body for it and `--no-cpu` does not invent one; those
-instructions execute on the core and are counted separately in the report --
+instructions execute on the core and are counted separately in the report:
 53547 of them, the same number in every script, all of them before the title
 screen appears.
 
@@ -708,7 +704,7 @@ screen appears.
 
 The registry names routine entry addresses, and a body starts at its own first
 instruction. Where the program jumps into the *middle* of a routine, the address
-needs a row of its own and a body that can start there -- the shape
+needs a row of its own and a body that can start there, the shape
 `reset_native_at(ss, entry)` has always used for `loc_C08012` and `loc_C0805E`.
 `--no-cpu` needs it wherever the ROM's own code used to pick the pc up:
 
@@ -732,7 +728,7 @@ needs a row of its own and a body that can start there -- the shape
 
 Three of the addresses the check named were not interior at all: they were whole
 routines the port had left to the ROM because a tail `jmp` was the only way in
-and the ROM was still there to take it. They are bodies now, like any other --
+and the ROM was still there to take it. They are bodies now:
 `loc_C0BB81`, the title screen's init that `reset` jumps to, in
 `src/top_level.c`; and `loc_C09679` and `loc_C097DD`, the mode-1 and mode-2
 particle spawn/cull loops the two dispatchers jump to, in `src/particles_fx.c`.
@@ -741,8 +737,8 @@ particle spawn/cull loops the two dispatchers jump to, in `src/particles_fx.c`.
 
 `ss_xce()` and `ss_wai()` (`include/snes_state.h`) are the 65816's `xce` and
 `wai`, each mirroring LakeSnes' own case body minus the opcode fetch. They exist
-because both instructions move state no other accessor reaches -- the emulation
-flag, and the CPU's `waiting` park -- and both are executed by this ROM, so
+because both instructions move state no other accessor reaches (the emulation
+flag, and the CPU's `waiting` park) and both are executed by this ROM, so
 without them `--no-cpu` could not get past the third instruction of the program
 or past the end of the first frame. `wai` leaves the machine idling in the
 emulator's own `waiting` path, which `cpu_runNonInstruction()` runs for the
@@ -769,25 +765,25 @@ The sound driver is the ROM's other program: 3514 bytes of SPC700 code
 (`spc/driver.asm`, `spc/spc_map.txt`) uploaded into the APU at boot and running
 on its own processor for the rest of the session. `recomp/spc/` is its half of
 the port, `include/spc_state.h` is the API it is written against, and
-`harness/spc_state.c` implements that over the vendored APU. The shape is the
-same as the 65816 side deliberately — a dispatcher in the core's instruction
-loop, a self-registering table, timed accessors, a yield — but three things
-differ enough to change the design, and they are the whole of what is new.
+`harness/spc_state.c` implements that over the vendored APU. The shape is
+deliberately the same as the 65816 side (a dispatcher in the core's instruction
+loop, a self-registering table, timed accessors, a yield), and three properties
+differ enough to change the design.
 
 **Cycles are the only clock, and there is no charge to calibrate.** The SPC700
 takes no interrupts here. What the driver observes is its own timers, the DSP's
 tick and the four ports the 65816 writes, and every one of those moves on APU
-cycles. An APU cycle is spent by exactly one thing: `apu_spcRead`,
+cycles. An APU cycle is spent by exactly one call: `apu_spcRead`,
 `apu_spcWrite` and `apu_spcIdle` each call `apu_cycle()` once and nothing else
 does. So a body that replays a routine's access sequence in order costs the
-emulator exactly what the routine cost, to the cycle — there is no `--profile`
+emulator exactly what the routine cost, to the cycle. There is no `--profile`
 step for this side and no `config/recomp_cycles.txt` entry, because the figure
 is zero by construction. `sps_read8` / `sps_write8` / `sps_idle` / `sps_fetch`
 are those primitives; `sps_aram_*` are the untimed escape hatch.
 
 **The yield boundary is the catch-up slice, not the frame.** The SPC does not
-run alongside the 65816. `snes_catchupApu()` hands `apu_runCycles()` a budget —
-at the end of every frame, and before every read or write of `$2140-$217F` — and
+run alongside the 65816. `snes_catchupApu()` hands `apu_runCycles()` a budget
+(at the end of every frame, and before every read or write of `$2140-$217F`) and
 it runs whole opcodes until the budget is spent. The reference SPC therefore
 stops *between two instructions in the middle of a routine*, at an instant a
 hooked run would have to run the routine to its end. That is the same atomicity
@@ -797,9 +793,9 @@ added to the core for this), `sps_yield_wanted()` compares the cycle count
 against it, and a body that models the instruction stream points the pc at the
 next instruction and returns. The driver picks the routine up and finishes it.
 
-It needs no entry snapshot and no snapshot stack, which is the one place this
-side is *simpler*. The 65816's condition is a level — "vblank has started" stays
-true for the rest of the frame — so a hook has to remember what the machine
+It needs no entry snapshot and no snapshot stack, the one place this side is
+*simpler*. The 65816's condition is a level ("vblank has started" stays true for
+the rest of the frame), so a hook has to remember what the machine
 looked like when it began, and hooks nest (`--test-nesting`). The SPC's is a
 threshold on a monotonically increasing cycle count, and `apu_runCycles()` only
 calls `spc_runOpcode()` while the budget is unspent, so every dispatch happens
@@ -815,8 +811,8 @@ and the echo buffer evolve exactly as they did. A body writes DSP registers with
 does; `sps_dsp_read` / `sps_dsp_write` are untimed inspection only.
 
 A routine in `recomp/spc/` registers itself the same way `recomp/src/` does, and
-the entry address is the SPC's own 16-bit one — no bank folding, because ARAM has
-no mirrors:
+the entry address is the SPC's own 16-bit one, with no bank folding, because ARAM
+has no mirrors:
 
 ```c
 #include "spc_state.h"
@@ -870,7 +866,7 @@ if(cmd) S_GOTO(0x068C);
 
 `S_GOTO(addr)` is how a body leaves through a tail `jmp` or falls through into
 the next routine: it publishes the registers and points the pc at `addr`, so the
-routine that owns that address runs next — its own hook if it has one. Most of
+routine that owns that address runs next: its own hook if it has one. Most of
 this driver's routines end that way rather than on `ret`.
 
 ### Calling a routine that is not converted yet
@@ -885,7 +881,7 @@ back above the frame. Any hook the callee hits still fires, so `driver_init`'s
 directly because these callees are long: `dsp_init` executes some 360
 instructions (its two loops run eight times each) and `cmd7_stop_to_loader` spins
 on `$FE` for a full timer-1 period, about 25 600 APU cycles. It stops when
-the slice ends and returns true, leaving the callee running — safe because the
+the slice ends and returns true, leaving the callee running; that is safe because the
 address the body pushed is the routine's real return address, so the callee's own
 `ret` lands where the driver expects.
 
@@ -913,21 +909,21 @@ It exits 0 on pass, 1 on fail.
 `recomp/spc/` holds the whole driver, every routine modelling its own instruction
 stream (95 registered entry addresses, counting the interior ones below):
 
-* `loader.c` — `spc_loader`, `loader_reset_dsp`, `loader_block_loop`, `loader_jump`:
+* `loader.c` (`spc_loader`, `loader_reset_dsp`, `loader_block_loop`, `loader_jump`):
   the IPL-uploaded block at `$04D8` and the handshake the 65816's `upload_spc_block`
   busy-waits against. The block loop patches the upload destination into the operand
   bytes of its own two `mov $0000+y,a` instructions and leaves through `jmp ($0539+x)`;
   the C body stores through the timed path and reads the vector back out of ARAM
   exactly where the SPC700's operand fetch reads it.
-* `driver_cmd.c` — `driver_entry`, `driver_init`, `main_loop`, `cmd_receive`,
+* `driver_cmd.c`: `driver_entry`, `driver_init`, `main_loop`, `cmd_receive`,
   `cmd_dispatch`, the eight `cmd_table` handlers, `start_song`, `play_sfx`,
   `dsp_step_toward_zero`.
-* `dsp_init.c` — `dsp_init`, `dsp_flg_20`.
-* `sequencer.c` — `tick_wait`, `channel_loop`, `seq_step`, `seq_fetch`, `seq_note`,
+* `dsp_init.c`: `dsp_init`, `dsp_flg_20`.
+* `sequencer.c`: `tick_wait`, `channel_loop`, `seq_step`, `seq_fetch`, `seq_note`,
   `seq_note_length`, `channel_update`, `seq_end`, `seq_pop_x`, `seq_retrigger`,
   `sfx_start`. The opcode dispatch `jmp (seq_cmd_table+x)` reads its vector from ARAM
   and hands the pc to the registry so each handler's hook fires.
-* `seq_ops_a.c`, `seq_ops_b.c` — the sequence-opcode handlers `$00-$32`, including the
+* `seq_ops_a.c`, `seq_ops_b.c`: the sequence-opcode handlers `$00-$32`, including the
   four stale table slots nothing emits.
 
 Every route between routines goes through the registry (pc hand-off or a real pushed

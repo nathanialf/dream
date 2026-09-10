@@ -2,7 +2,7 @@ name: Deploy progress dashboard
 
 # Publish the SINGLE-TARGET progress dashboard (docs/index.html + docs/progress.json)
 # to GitHub Pages. Unlike the sibling ICO project, Dream has one prototype target and
-# one branch, so this workflow just uploads docs/ as-is — no multi-branch assembly step.
+# one branch, so this workflow uploads docs/ as-is: no multi-branch assembly step.
 on:
   push:
     branches: [main]
@@ -20,7 +20,7 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
-# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+# Force JS actions onto Node.js 24: Node 20 is deprecated on the runners.
 # Covers actions still pinned to Node 20 internally (configure-pages@v5,
 # upload-pages-artifact@v3, deploy-pages@v4) until they ship a Node-24 major.
 env:

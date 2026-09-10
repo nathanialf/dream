@@ -13,7 +13,7 @@
 #include "dream_time.h"
 
 /* ---------------------------------------------------------------------------
- * mode0_particle_draw_dispatch — $C0:9227
+ * mode0_particle_draw_dispatch: $C0:9227
  *
  * One entry of jtbl_C0828A (game mode 0). A tail jump, so the routine leaves no
  * return of its own: execution continues at particle_update_and_draw_mode0 and
@@ -29,7 +29,7 @@ void mode0_particle_draw_dispatch(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * particle_dispatch_noop — $C0:9233
+ * particle_dispatch_noop: $C0:9233
  *
  * The do-nothing entry of jtbl_C08282 and jtbl_C0828A. Registers and flags pass
  * through untouched.
@@ -42,7 +42,7 @@ void particle_dispatch_noop(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * particle_table_clear — $C0:9246
+ * particle_table_clear: $C0:9246
  *
  * Zeroes the 40 particle slot words at $7F:0906. tdc loads the accumulator from
  * the direct page register rather than an immediate, which is zero throughout
@@ -88,12 +88,12 @@ void particle_table_clear(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * unused_stream_desc_dispatch — $C0:9206
+ * unused_stream_desc_dispatch: $C0:9206
  *
  * A jump-table dispatcher nothing calls: no jsr, jsl or table word anywhere in
  * out/dream.asm names the address, and config/recomp_order.txt marks it cold.
  * It adds the accumulator to the word at $0BB8, uses the sum as a byte index
- * into the word table at $C0:B208, and -- when the entry is non-zero -- parks
+ * into the word table at $C0:B208, and, when the entry is non-zero, parks
  * it in $04, reads and post-increments a second counter at $0BBA, and leaves
  * through `jmp ($0004)`, so the table entry is the routine that runs next. A
  * zero entry ends the table and the routine returns instead.
@@ -101,10 +101,10 @@ void particle_table_clear(SnesState* ss) {
  * What it reads is not a jump table any more: $C0:B208 is
  * vram_stream_desc_table, the VRAM streaming-descriptor array (docs/NOTES.md,
  * "Open items" 1), so the words it would jump to ($5000, $8AC0, $FFC9, ...)
- * are descriptor bytes. Nothing sets $0BB8 or $0BBA either. That is what makes
- * this dead code rather than an unreached branch, and why the unit gate seeds
- * both exits explicitly instead of leaving them to a script
- * (config/recomp_units.txt, `dream_harness --unit`).
+ * are descriptor bytes. Nothing sets $0BB8 or $0BBA either, so this is dead code
+ * rather than an unreached branch, and the unit gate therefore seeds both exits
+ * explicitly instead of leaving them to a script (config/recomp_units.txt,
+ * `dream_harness --unit`).
  *
  * The ten bytes after the rts ($C0:921D-$C0:9226) decode as `inc $0BB8 ; inc
  * $0BB8 ; stz $0BBA ; rts`; the tracer reaches none of them, so they stay a

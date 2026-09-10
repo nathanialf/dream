@@ -3,8 +3,8 @@
  * docs/naming_proposals.md section 5 describes the subsystem. The records live
  * in the upper WRAM bank as twenty $80-byte columns from $7F:0906, indexed by
  * X (or Y) = slot * 2, forty slots, $00..$4E. The columns keep the addresses
- * the listing uses -- nothing outside this cluster names them, and section 5
- * names the subsystem but not the fields -- so a body here reads against
+ * the listing uses (nothing outside this cluster names them, and section 5
+ * names the subsystem but not the fields), so a body here reads against
  * out/dream.asm line for line. $7F0906 is dream_ram.h's `particle_table`: zero
  * means the slot is free, and particle_table_clear (recomp/src/particles.c)
  * is what frees them all.
@@ -15,7 +15,7 @@
  * and mode-2 loops themselves at loc_C09679 and loc_C097DD, which the two
  * dispatchers here tail-jump to.
  *
- * Two things in here are worth knowing before reading a body:
+ * Two details matter before reading a body:
  *
  *  - particle_update_and_draw_mode0 uses the *stack pointer* as scratch. It
  *    saves S in $18 at entry, parks the slot index in S across a tax/long-read
@@ -42,10 +42,10 @@
  * file pushes is the routine's real return address, so a callee that hands the
  * rest of itself back to the ROM (ss_yield_wanted) still returns to the right
  * place; the caller notices by the pc and stops as well. */
-void clear_sprite_table(SnesState* ss);       /* oam.c    — $C0:A500 */
-void oam_hide_unused_sprites(SnesState* ss);  /* oam.c    — $C0:ADE7 */
-void oam_dma_upload(SnesState* ss);           /* oam.c    — $C0:ADFD */
-void random_next(SnesState* ss);              /* random.c — $C0:A212 */
+void clear_sprite_table(SnesState* ss);       /* oam.c    ($C0:A500) */
+void oam_hide_unused_sprites(SnesState* ss);  /* oam.c    ($C0:ADE7) */
+void oam_dma_upload(SnesState* ss);           /* oam.c    ($C0:ADFD) */
+void random_next(SnesState* ss);              /* random.c ($C0:A212) */
 
 void particle_update_and_draw_mode0(SnesState* ss);
 void sparkle_update_and_draw(SnesState* ss);
@@ -77,7 +77,7 @@ static void t_rol8_dp(SnesState* ss, uint16_t off) {
 
 /* The second half of a `jsr abs` whose callee is converted: the internal cycle
  * and the return frame the opcode pushes, then the C body. Returns true when
- * the callee did not come back -- it yielded, the ROM owns the rest of it, and
+ * the callee did not come back: it yielded, the ROM owns the rest of it, and
  * its rts will land on `ret` without this body's help. */
 static bool call_converted(SnesState* ss, uint8_t pb, uint16_t ret,
                            uint16_t target, void (*fn)(SnesState*)) {
@@ -100,7 +100,7 @@ static bool call_converted(SnesState* ss, uint8_t pb, uint16_t ret,
   } while(0)
 
 /* ---------------------------------------------------------------------------
- * mode1_particle_dispatch — $C0:922A
+ * mode1_particle_dispatch: $C0:922A
  *
  * jtbl_C08282[1]: draw the sparkle array, then tail-jump into loc_C09679, the
  * mode-1 spawn/cull loop below. The jmp leaves no return of its own, so
@@ -136,7 +136,7 @@ void mode1_particle_dispatch(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * mode2_particle_dispatch — $C0:9230
+ * mode2_particle_dispatch: $C0:9230
  *
  * jtbl_C08282[2]: a bare tail jump into loc_C097DD, the mode-2 variant of the
  * same loop, below. Registers and flags pass through.
@@ -150,7 +150,7 @@ void mode2_particle_dispatch(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * particle_spawn_mode0_weather — $C0:9253
+ * particle_spawn_mode0_weather: $C0:9253
  *
  * Walks all forty slots backwards; every free one ($7F0906 zero) is seeded from
  * random_next around the weather-zone anchor $0C17 and the camera. Occupied
@@ -295,12 +295,12 @@ void particle_spawn_mode0_weather(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * mode1_reset_particles_and_oam — $C0:92F3
+ * mode1_reset_particles_and_oam: $C0:92F3
  *
  * Mode 1's scene reset, called from $C0:BE93: zero the camera and the height
  * mask, reload the $0C1F-$0C2D weather-parameter block with mode 1's constants
  * (the same block mode0_weather_zone_update drives in mode 0), then run one
- * whole particle frame by hand — clear the sprite table, update and draw, hide
+ * whole particle frame by hand: clear the sprite table, update and draw, hide
  * the unused sprites, DMA the buffer out.
  * Exit: whatever oam_dma_upload left; A = $0400, X and Y its own.
  * ------------------------------------------------------------------------- */
@@ -359,7 +359,7 @@ static void particle_draw_finish(SnesState* ss, uint8_t pb, uint16_t base,
 }
 
 /* ---------------------------------------------------------------------------
- * particle_update_and_draw_mode0 — $C0:9331
+ * particle_update_and_draw_mode0: $C0:9331
  *
  * One frame of the mode-0 particle field. Reached two ways: as the tail of
  * mode0_particle_draw_dispatch (jtbl_C0828A[0]) and by jsr from
@@ -407,7 +407,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
       goto integrate;
     }
 
-    /* loc_C09351 — the respawn gate */
+    /* loc_C09351: the respawn gate */
     S(0x9351, 3);                           /* C09351 lda $0C1F */
     a = t_read16(ss, ss_abs(ss, 0x0C1F)); ss_set_nz16(ss, a);
     taken = !ss_z(ss);
@@ -571,7 +571,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
     ss_check_int(ss);
     ss_idle(ss);
 
-    SI(0x9408); ss_set_sp(ss, x);           /* C09408 txs — the slot index parks in S */
+    SI(0x9408); ss_set_sp(ss, x);           /* C09408 txs: the slot index parks in S */
     S(0x9409, 3); a = alu_and16(ss, a, 0x001F);     /* C09409 and #$001F */
     S(0x940C, 3); alu_cmp16(ss, a, 0x0010);         /* C0940C cmp #$0010 */
     taken = !ss_c(ss);
@@ -606,7 +606,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
     S(0x9433, 4);                           /* C09433 lda data_C50260,X */
     a = t_read16(ss, (0xC50260 + x) & 0xffffff); ss_set_nz16(ss, a);
     S(0x9437, 2); t_write16(ss, dp + 0x06, a);      /* C09437 sta $06 */
-    SI(0x9439); x = ss_sp(ss); ss_set_nz16(ss, x);  /* C09439 tsx — slot index back */
+    SI(0x9439); x = ss_sp(ss); ss_set_nz16(ss, x);  /* C09439 tsx: slot index back */
 
     S(0x943A, 4);                           /* C0943A lda $7F0C86,X */
     a = t_read16(ss, (0x7F0C86 + x) & 0xffffff); ss_set_nz16(ss, a);
@@ -673,7 +673,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
 
     SI(0x9496); ss_set_c(ss, true);         /* C09496 sec */
     S(0x9497, 3); a = alu_sbc16(ss, a, 0x0080);     /* C09497 sbc #$0080 */
-    SI(0x949A); ss_set_sp(ss, a);           /* C0949A tcs — the OAM x parks in S */
+    SI(0x949A); ss_set_sp(ss, a);           /* C0949A tcs: the OAM x parks in S */
     SI(0x949B); ss_set_c(ss, false);        /* C0949B clc */
     S(0x949C, 2);                           /* C0949C adc ptr_04 */
     a = alu_adc16(ss, a, t_read16(ss, dp + ptr_04));
@@ -698,7 +698,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
 
     SI(0x94B2); ss_set_c(ss, true);         /* C094B2 sec */
     S(0x94B3, 3); a = alu_sbc16(ss, a, 0x0080);     /* C094B3 sbc #$0080 */
-    SI(0x94B6); ss_set_sp(ss, a);           /* C094B6 tcs — the OAM y parks in S */
+    SI(0x94B6); ss_set_sp(ss, a);           /* C094B6 tcs: the OAM y parks in S */
     SI(0x94B7); ss_set_c(ss, false);        /* C094B7 clc */
     S(0x94B8, 2);                           /* C094B8 adc $05 */
     a = alu_adc16(ss, a, t_read16(ss, dp + 0x05));
@@ -736,7 +736,7 @@ void particle_update_and_draw_mode0(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * sparkle_array_init — $C0:94E4
+ * sparkle_array_init: $C0:94E4
  *
  * Called from mode2_level_init. Seeds the thirty-two 8-byte "sparkle" records
  * at $7F:0E86 (index $F8 down to 0, step 8) with random_next values: position
@@ -801,7 +801,7 @@ void sparkle_array_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * sparkle_update_and_draw — $C0:9521
+ * sparkle_update_and_draw: $C0:9521
  *
  * The mode-1 half of mode1_particle_dispatch. Walks the $7F:0E86 records from
  * $F8 down, emits an 8-byte OAM record for each one inside the camera window
@@ -1010,15 +1010,15 @@ void sparkle_update_and_draw(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * particle_spawn_from_table — $C0:95E3
+ * particle_spawn_from_table: $C0:95E3
  *
  * Called from mode2_level_init. Builds the solid particle tile at VRAM $1F00,
  * then seeds slots from the per-mode spawn list at data_C0B26C (4 bytes per
  * entry, x then y, terminated by a negative x), mixing in random_next for
  * velocity, phase and lifetime. Slots the list did not reach are marked $FFFF.
  *
- * DB is $7F for the body (pea $807F / plb), which is what makes the $0A06,Y
- * stores land in the particle table; the closing plb pulls the $80 back.
+ * DB is $7F for the body (pea $807F / plb), which makes the $0A06,Y stores
+ * land in the particle table; the closing plb pulls the $80 back.
  * vram_generate_particle_tile is another agent's routine and is not converted
  * here, so the hook builds its jsr frame and lets the reference CPU run it.
  * Exit: A = the last random value, Y = $FFFE, DB = $80.
@@ -1187,11 +1187,11 @@ void particle_spawn_from_table(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * particle_spawn_random — $C0:9781
+ * particle_spawn_random: $C0:9781
  *
  * Called from title_screen_init. The same tile build as
  * particle_spawn_from_table, then all forty slots seeded entirely from
- * random_next — no spawn table — with fixed velocity constants ($FC00, $0800)
+ * random_next, with no spawn table, and fixed velocity constants ($FC00, $0800)
  * and a per-slot delay in $7F0986.
  * Exit: X = $FFFE, N set.
  * ------------------------------------------------------------------------- */
@@ -1278,7 +1278,7 @@ void particle_spawn_random(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * loc_C09679 — the mode-1 spawn / integrate / cull / emit loop
+ * loc_C09679: the mode-1 spawn / integrate / cull / emit loop
  *
  * mode1_particle_dispatch tail-jumps here, so the routine's rts is what returns
  * to the `jsr (jtbl_C08282,X)` that reached the dispatcher. It walks the slot
@@ -1319,7 +1319,7 @@ void particle_update_mode1(SnesState* ss) {
     return;
   }
 
-  /* loc_C09683 — the buffer's free space, in slots, capped at the last one */
+  /* loc_C09683: the buffer's free space, in slots, capped at the last one */
   S(0x9683, 3); a = alu_eor16(ss, a, 0xFFFF);  /* C09683 eor #$FFFF */
   SI(0x9686); a = alu_inc16(ss, a);            /* C09686 inc A */
   SI(0x9687); a = alu_lsr16(ss, a);            /* C09687 lsr A */
@@ -1490,7 +1490,7 @@ loc_977E: ;
 }
 
 /* ---------------------------------------------------------------------------
- * loc_C097DD — the mode-2 variant of the same loop
+ * loc_C097DD: the mode-2 variant of the same loop
  *
  * mode2_particle_dispatch is a bare tail jump to here. Same shape as
  * loc_C09679 with three differences: there is no "skip the slot" test on bit 15

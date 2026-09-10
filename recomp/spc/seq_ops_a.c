@@ -12,11 +12,11 @@
  * Three conventions carry through the file, all of them the driver's own shape:
  *
  *   A tail reached by `jmp` is left through S_GOTO, so the address owns itself
- *   and the routine registered there -- its own hook if it has one, the ROM's
- *   code if not -- runs next. loc_0B78/loc_0B7B (the pointer advance at the end
+ *   and the routine registered there (its own hook if it has one, the ROM's
+ *   code if not) runs next. loc_0B78/loc_0B7B (the pointer advance at the end
  *   of seq_instrument), loc_0D6A, loc_0DDF, loc_0DF2, loc_0F09 and seq_advance5
  *   are all entered that way. Where a handler *falls through* into the next
- *   routine (seq_read_volume into seq_read_volume_r) the same thing happens, so the
+ *   routine (seq_read_volume into seq_read_volume_r) the same applies, so the
  *   routine that owns the address is still credited with the call.
  *
  *   A tail reached by a *branch* from inside two handlers belongs to both of
@@ -25,13 +25,13 @@
  *   shared by seq_slide_up and seq_slide_down).
  *
  *   A `call` runs on the emulator through sps_run_callee (call_sub below), so a
- *   callee that is converted gets its hook -- seq_load_srcn, seq_read_volume,
- *   seq_read_volume_r, seq_push_return, seq_read_vibrato and dsp_flg_20 are all in the
- *   table -- and one that is not (seq_read_adsr, seq_retrigger) runs as the
- *   ROM's own code. `call seq_pop_x` is the single exception, and the comment on
- *   call_seq_pop_x says why: it reaches its argument by pulling the return
- *   address off the stack, which is the one thing a stack-pointer threshold
- *   cannot bracket.
+ *   callee that is converted gets its hook (seq_load_srcn, seq_read_volume,
+ *   seq_read_volume_r, seq_push_return, seq_read_vibrato and dsp_flg_20 are all
+ *   in the table) and one that is not (seq_read_adsr, seq_retrigger) runs as
+ *   the ROM's own code. `call seq_pop_x` is the single exception, and the
+ *   comment on call_seq_pop_x says why: it reaches its argument by pulling the
+ *   return address off the stack, which is the one case a stack-pointer
+ *   threshold cannot bracket.
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -61,7 +61,7 @@
 /* `call abs` (case 0x3f) to a callee the emulator runs: the five cycles the
  * opcode spends after its three fetches, then the callee itself, stopping when
  * the catch-up slice ends underneath it. Any hook the callee hits still fires.
- * Returns true when the body must return -- the address pushed is the routine's
+ * Returns true when the body must return: the address pushed is the routine's
  * real return address, so the driver finishes what is left. */
 static bool call_sub(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
   sps_idle(sp);
@@ -83,7 +83,7 @@ static bool call_sub(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
  *
  * It is the one callee here the emulator cannot be handed whole. seq_pop_x
  * reaches that index by pulling the return address off the stack first, so for
- * three instructions the stack pointer is *above* the frame the `call` built --
+ * three instructions the stack pointer is *above* the frame the `call` built,
  * and that threshold is sps_run_callee's only stopping condition, so it would
  * end the callee at its second instruction. The five stack instructions are
  * modelled here at their own addresses instead; by $0B69 the stack is back
@@ -114,7 +114,7 @@ static bool call_seq_pop_x(SpcState* sp, uint16_t at,
 }
 
 /* ---------------------------------------------------------------------------
- * seq_instrument -- $0B72, seq command $01
+ * seq_instrument: $0B72, seq command $01
  *
  * The instrument byte becomes the voice's SRCN, and the event is three bytes
  * long. loc_0B78 and loc_0B7B are its tail and the driver's most-jumped-to
@@ -153,7 +153,7 @@ static void loc_0B78(SpcState* sp) { seq_instrument_at(sp, 0x0B78); }
 static void loc_0B7B(SpcState* sp) { seq_instrument_at(sp, 0x0B7B); }
 
 /* ---------------------------------------------------------------------------
- * seq_load_srcn -- $0B8B
+ * seq_load_srcn: $0B8B
  *
  * The sample number in the sequence goes through sample_remap ($0560, uploaded
  * by the 65816) to become the voice's directory slot.
@@ -173,7 +173,7 @@ static void seq_load_srcn(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_instr_full -- $0B97, seq command $22
+ * seq_instr_full: $0B97, seq command $22
  *
  * Instrument, transpose, finetune, volume and ADSR in one eight-byte event.
  * ------------------------------------------------------------------------- */
@@ -205,7 +205,7 @@ static void seq_instr_full(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_volume -- $0BB6, seq command $02
+ * seq_volume: $0BB6, seq command $02
  *
  * Two bytes, L and R. loc_0BBC (the three-byte event length) is its tail and
  * seq_adsr jumps into it.
@@ -230,10 +230,10 @@ static void seq_volume(SpcState* sp) { seq_volume_at(sp, 0x0BB6); }
 static void loc_0BBC(SpcState* sp) { seq_volume_at(sp, 0x0BBC); }
 
 /* ---------------------------------------------------------------------------
- * seq_read_volume -- $0BC2
+ * seq_read_volume: $0BC2
  *
  * The L,R pair out of the sequence. With the mono flag set the two are halved
- * (as magnitudes, so a negative -- phase-inverted -- channel keeps its weight)
+ * (as magnitudes, so a negative, phase-inverted channel keeps its weight)
  * and summed into both; otherwise L is stored here and the routine falls
  * through into seq_read_volume_r for R.
  * ------------------------------------------------------------------------- */
@@ -280,7 +280,7 @@ static void seq_read_volume(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_read_volume_r -- $0BCC
+ * seq_read_volume_r: $0BCC
  *
  * One sequence byte into the slot's right volume. It is the second half of
  * seq_read_volume's stereo path, which falls into it, and seq_volume_mono calls
@@ -296,7 +296,7 @@ static void seq_read_volume_r(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_volume_mono -- $0BF0, seq command $23
+ * seq_volume_mono: $0BF0, seq command $23
  *
  * One byte to both channels. The store at $0BF3 writes the A seq_retrigger left
  * behind (zero) and is immediately overwritten from $0264+x, which is what
@@ -318,7 +318,7 @@ static void seq_volume_mono(SpcState* sp) {
   S(0x0BFF, 3); S_GOTO(LOC_0B78);                         /* 0BFF jmp loc_0B78 */
 }
 
-/* loc_0C2E -- the mono average of the two preset volumes, shared by
+/* loc_0C2E: the mono average of the two preset volumes, shared by
  * seq_volume_preset and orphan_volume_preset2, which both branch here. */
 static void tail_0C2E(SpcState* sp, uint8_t a, uint8_t x, uint8_t y) {
   S(0x0C2E, 3); s_idx(sp);                                /* 0C2E mov a,$0254+x */
@@ -350,7 +350,7 @@ static void tail_0C2E(SpcState* sp, uint8_t a, uint8_t x, uint8_t y) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_volume_preset -- $0C02, seq command $20
+ * seq_volume_preset: $0C02, seq command $20
  *
  * The volume pair set aside by seq_volume_presets ($04B8/$04B9).
  * ------------------------------------------------------------------------- */
@@ -372,7 +372,7 @@ static void seq_volume_preset(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * orphan_volume_preset2 -- $0C18
+ * orphan_volume_preset2: $0C18
  *
  * seq_cmd_table entry $31, in the stale range past command $24: the same
  * routine over the second preset pair ($04BA/$04BB), which seq_volume_presets
@@ -397,7 +397,7 @@ static void orphan_volume_preset2(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_master_percent -- $0C4E, seq command $24
+ * seq_master_percent: $0C4E, seq command $24
  *
  * One byte into master_percent ($04B6), the divisor scale_volume applies to
  * every note volume.
@@ -412,7 +412,7 @@ static void seq_master_percent(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * scale_volume -- $0C59
+ * scale_volume: $0C59
  *
  * A = A * master_percent / 100, clamped to +/-127 and done on the magnitude so
  * that a negative (phase-inverted) volume scales the same way. X above 7 is an
@@ -464,7 +464,7 @@ loc_0C71:
 }
 
 /* ---------------------------------------------------------------------------
- * seq_volume_presets -- $0C83, seq command $1E
+ * seq_volume_presets: $0C83, seq command $1E
  *
  * Four bytes into the two preset pairs seq_volume_preset and
  * orphan_volume_preset2 read back.
@@ -488,11 +488,11 @@ static void seq_volume_presets(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_echo_delay -- $0CA0, seq command $1F
+ * seq_echo_delay: $0CA0, seq command $1F
  *
  * EDL from one byte, ESA = $FF - EDL*8, and then the echo buffer that ESA opens
- * is cleared byte by byte up to $FFFF -- up to 32 KB of writes through the timed
- * path, which is the longest loop in the driver after the loader's.
+ * is cleared byte by byte up to $FFFF: up to 32 KB of writes through the timed
+ * path, the longest loop in the driver after the loader's.
  * ------------------------------------------------------------------------- */
 static void seq_echo_delay(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -541,7 +541,7 @@ static void seq_echo_delay(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_jump -- $0CD7, seq command $03
+ * seq_jump: $0CD7, seq command $03
  *
  * The slot's sequence pointer is replaced outright, so A = 1 sends the
  * sequencer straight back to seq_fetch without the pointer advance.
@@ -560,7 +560,7 @@ static void seq_jump(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_call -- $0CE6, seq command $04
+ * seq_call: $0CE6, seq command $04
  *
  * A repeat count and a target: the return address and the count go on the
  * slot's own eight-deep stack ($0334/$03B4/$0434, indexed by seq_sp $D4+x) and
@@ -599,7 +599,7 @@ static void loc_0CF1(SpcState* sp) { seq_call_at(sp, 0x0CF1); }
 static void loc_0CF4(SpcState* sp) { seq_call_at(sp, 0x0CF4); }
 
 /* ---------------------------------------------------------------------------
- * seq_call_once -- $0CFF, seq command $21
+ * seq_call_once: $0CFF, seq command $21
  *
  * A target with an implied count of one. seq_push_return leaves A = the return
  * address' low byte and Z set when it is zero, so the decrement that makes the
@@ -632,7 +632,7 @@ static void seq_call_once(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_push_return -- $0D1C
+ * seq_push_return: $0D1C
  *
  * Reads the target word into $02/$03 and writes the count and the caller's
  * sequence pointer to the slot's stack, leaving the pointer's low byte in A for
@@ -658,11 +658,11 @@ static void seq_push_return(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_return -- $0D34, seq command $05
+ * seq_return: $0D34, seq command $05
  *
  * Pop the slot's stack. While the count is still non-zero the same call is
- * re-entered -- the stored pointer is re-read for its target word and pushed
- * again -- so this doubles as the loop end; when it reaches zero the sequence
+ * re-entered (the stored pointer is re-read for its target word and pushed
+ * again), so this doubles as the loop end; when it reaches zero the sequence
  * carries on after the call through loc_0D6A.
  * ------------------------------------------------------------------------- */
 /* Entered in its middle as well: loc_0D6A. --no-cpu resolves every pc
@@ -717,7 +717,7 @@ static void seq_return(SpcState* sp) { seq_return_at(sp, 0x0D34); }
 static void loc_0D6A(SpcState* sp) { seq_return_at(sp, 0x0D6A); }
 
 /* ---------------------------------------------------------------------------
- * seq_set_length -- $0D70, seq command $06
+ * seq_set_length: $0D70, seq command $06
  *
  * The default note length, and with gate_mode set a second byte that separates
  * the sounding part from the whole. The event length is computed from Y rather
@@ -750,7 +750,7 @@ static void seq_set_length(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_clear_length -- $0D8F, seq command $07
+ * seq_clear_length: $0D8F, seq command $07
  *
  * Back to lengths inline after each note. It takes X off the stack itself
  * rather than through seq_pop_x, so the retrigger is loc_0DDF's job.
@@ -767,10 +767,10 @@ static void seq_clear_length(SpcState* sp) {
   S(0x0D98, 3); S_GOTO(LOC_0DDF);                         /* 0D98 jmp loc_0DDF */
 }
 
-/* loc_0DAA -- the body of the pitch slide, which seq_slide_up branches into and
+/* loc_0DAA: the body of the pitch slide, which seq_slide_up branches into and
  * seq_slide_down falls into: delta, the slide flag, delay, rate, steps and hold
- * out of a six-byte event. seq_retrigger leaves Y = 1, which is what makes the
- * reads that follow start at the event's second byte. */
+ * out of a six-byte event. seq_retrigger leaves Y = 1, so the reads that follow
+ * start at the event's second byte. */
 static void tail_0DAA(SpcState* sp, uint8_t a, uint8_t x, uint8_t y) {
   S(0x0DAA, 3); s_idx(sp);                                /* 0DAA mov $01B0+x,a */
   s_movs(sp, (uint16_t) (0x01B0 + x), a);
@@ -803,7 +803,7 @@ static void tail_0DAA(SpcState* sp, uint8_t a, uint8_t x, uint8_t y) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_slide_up -- $0D9B, seq command $08
+ * seq_slide_up: $0D9B, seq command $08
  * ------------------------------------------------------------------------- */
 static void seq_slide_up(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -816,7 +816,7 @@ static void seq_slide_up(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_slide_down -- $0DA2, seq command $09
+ * seq_slide_down: $0DA2, seq command $09
  *
  * The same event with the delta negated, falling into loc_0DAA.
  * ------------------------------------------------------------------------- */
@@ -832,7 +832,7 @@ static void seq_slide_down(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_slide_off -- $0DD6, seq command $0A
+ * seq_slide_off: $0DD6, seq command $0A
  *
  * Clears the slide flag and falls into loc_0DDF, the one-byte-event tail that
  * seq_clear_length and seq_vibrato_off jump to.
@@ -863,7 +863,7 @@ static void seq_slide_off(SpcState* sp) { seq_slide_off_at(sp, 0x0DD6); }
 static void loc_0DDF(SpcState* sp) { seq_slide_off_at(sp, 0x0DDF); }
 
 /* ---------------------------------------------------------------------------
- * seq_tempo -- $0DEB, seq command $0B
+ * seq_tempo: $0DEB, seq command $0B
  *
  * The tick accumulator's increment ($1F), which tick_wait adds up eighty times
  * a second to decide when the sequencer advances. loc_0DF2 is its tail.
@@ -890,7 +890,7 @@ static void seq_tempo(SpcState* sp) { seq_tempo_at(sp, 0x0DEB); }
 static void loc_0DF2(SpcState* sp) { seq_tempo_at(sp, 0x0DF2); }
 
 /* ---------------------------------------------------------------------------
- * seq_tempo_add -- $0DF8, seq command $0C
+ * seq_tempo_add: $0DF8, seq command $0C
  * ------------------------------------------------------------------------- */
 static void seq_tempo_add(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -905,7 +905,7 @@ static void seq_tempo_add(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_vibrato_off -- $0E05, seq command $0E
+ * seq_vibrato_off: $0E05, seq command $0E
  * ------------------------------------------------------------------------- */
 static void seq_vibrato_off(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -920,7 +920,7 @@ static void seq_vibrato_off(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_vibrato -- $0E11, seq command $0D
+ * seq_vibrato: $0E11, seq command $0D
  *
  * Rate, speed and depth with no delay, so A = 0 goes in as the delay.
  * ------------------------------------------------------------------------- */
@@ -936,7 +936,7 @@ static void seq_vibrato(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_vibrato_delay -- $0E1A, seq command $0F
+ * seq_vibrato_delay: $0E1A, seq command $0F
  *
  * The same with the delay as the event's fourth byte, read before the call.
  * ------------------------------------------------------------------------- */
@@ -953,10 +953,10 @@ static void seq_vibrato_delay(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_read_vibrato -- $0E25
+ * seq_read_vibrato: $0E25
  *
  * The delay in A, the vibrato flag, and then rate, speed and depth out of the
- * event -- again from its second byte, because seq_retrigger leaves Y = 1.
+ * event, again from its second byte, because seq_retrigger leaves Y = 1.
  * ------------------------------------------------------------------------- */
 static void seq_read_vibrato(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);

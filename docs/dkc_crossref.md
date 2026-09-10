@@ -46,7 +46,7 @@ projects makes any claim about Rare's original toolchain.** What each one says i
   limit for line length is 120 chars"). This is a convention document for p4plus2's own
   hand-written labels; it says nothing about how Rare built the original ROM.
 - `ref/DKC2-disassembly/notes.txt`: a scratch log of unresolved addresses, DMA trigger
-  sites, and an sprite-command table — investigative notes, not toolchain claims.
+  sites, and a sprite-command table; investigative notes rather than toolchain claims.
 - No file in any of the four repos mentions an assembler name (SNASM, WLA, ORCA/M,
   Cross-Products, etc.), a source-file layout, or leftover debug text in the retail ROMs.
   The only "leftover text" observations anywhere are Dream's own, in
@@ -69,10 +69,10 @@ byte-level comparison, not on anything documented by these projects.
   and `DKC2/SPC700/InitializeSPC700.asm` (the IPL loader, `base $04D8`) label every routine
   and table purely by address: `CODE_0560`... `CODE_11CB`, `DATA_0FA5`, `DATA_1199`, etc.
   There is not one hand-chosen name in either file.
-- Yoshifanatic1's `DKC2/SPC700/ARAM_Map_DKC2.asm` — the file `DKC2_LoadGameSpecificMainSPC700Files`
-  includes for SPC RAM names — is **empty** (0 bytes).
+- Yoshifanatic1's `DKC2/SPC700/ARAM_Map_DKC2.asm` (the file `DKC2_LoadGameSpecificMainSPC700Files`
+  includes for SPC RAM names) is **empty** (0 bytes).
 - p4plus2's `DKC2-disassembly` has no SPC700 disassembly at all (only `music.txt` and
-  `sound_effects.txt`, which list DKC2's own song/sfx *content* IDs — not applicable to
+  `sound_effects.txt`, which list DKC2's own song/sfx *content* IDs; they do not apply to
   Dream, which is a different game with different songs/samples at those same driver slots).
 
 So there are no DKC2 names to adopt for the driver itself. Dream's own tracer-derived names
@@ -117,7 +117,7 @@ and the same duplicated `seq_echo_off` at $30/$32). Full opcode table:
 | $0E | $0E05 | `seq_vibrato_off` | `CODE_0E05` | |
 | $0F | $0E1A | `seq_vibrato_delay` | `CODE_0E1A` | |
 | $10 | $0E45 | `seq_adsr` | `CODE_0E45` | |
-| $11 | $0E5A | `seq_master_volume` | *(none — table entry is `dw $0000` in DKC2)* | Dream-only opcode |
+| $11 | $0E5A | `seq_master_volume` | *(none; table entry is `dw $0000` in DKC2)* | Dream-only opcode |
 | $12 | $0EA4 | `seq_finetune` | `CODE_0E71` | shift −0x33 begins here |
 | $13 | $0EAE | `seq_transpose` | `CODE_0E7B` | |
 | $14 | $0EBB | `seq_transpose_add` | `CODE_0E88` | |
@@ -193,10 +193,10 @@ confirmed against `ROM_Map_DKC2_U1.asm`'s bank macro list). I looked up every ad
 | Dream routine | bytes | reference hit(s) | verified label(s) |
 |---|---|---|---|
 | `loc_C0A6CD`+`data_C0A6D3` (`pea $8080;plb;plb;rtl` + 2bpp→4bpp table) | 142 | DKC2 0x35A18A | `Routine_Macros_DKC2.asm:59539 CODE_B5A18A`, table at `:59545 DATA_B5A190` (byte-identical `03 0C 30 C0 01 04 10 40...`) |
-| same | 137 | DKC1 0x3BAA3F | `Routine_Macros_DKC1.asm:76532 CODE_BBAA37` / table `:76539 DATA_BBAA40` (DKC1's copy inserts one extra `stz $170D` before `rtl`, so the label lands 8 bytes earlier than the raw offset — still the same stub+table) |
-| same | 136 | DKC3 0x3791D0 | not found at an exact label boundary in `Routine_Macros_DKC3.asm`; nearest labelled data is `DATA_B791D4` (4 bytes downstream) — the match is mid-block, consistent with §1.3's note that this stub recurs 2× in DKC3 |
-| `loc_C0A04B` (metatile copy, H-flip variant) | 124 | DKC3 0x37BC8F | `Routine_Macros_DKC3.asm:103551 CODE_B7BC8F` — byte-identical (`asl` x5, `adc $1E`, `tay`, `lda $0000,y`, `eor #$4000`...) |
-| same (44-byte tail) | 44 | DKC2 0x35B196 | inside `Routine_Macros_DKC2.asm:61771 CODE_B5B18F` (DKC2's own routine uses DP `$36` where Dream uses `$1E` — same algorithm, different variable, matches §1.3's description) |
+| same | 137 | DKC1 0x3BAA3F | `Routine_Macros_DKC1.asm:76532 CODE_BBAA37` / table `:76539 DATA_BBAA40` (DKC1's copy inserts one extra `stz $170D` before `rtl`, so the label lands 8 bytes earlier than the raw offset; still the same stub+table) |
+| same | 136 | DKC3 0x3791D0 | not found at an exact label boundary in `Routine_Macros_DKC3.asm`; nearest labelled data is `DATA_B791D4` (4 bytes downstream); the match is mid-block, consistent with §1.3's note that this stub recurs 2× in DKC3 |
+| `loc_C0A04B` (metatile copy, H-flip variant) | 124 | DKC3 0x37BC8F | `Routine_Macros_DKC3.asm:103551 CODE_B7BC8F`: byte-identical (`asl` x5, `adc $1E`, `tay`, `lda $0000,y`, `eor #$4000`...) |
+| same (44-byte tail) | 44 | DKC2 0x35B196 | inside `Routine_Macros_DKC2.asm:61771 CODE_B5B18F` (DKC2's own routine uses DP `$36` where Dream uses `$1E`; same algorithm, different variable, matches §1.3's description) |
 | same (33-byte tail) | 33 | DKC1 0x18E96 | inside `Routine_Macros_DKC1.asm:16193 CODE_818E8F` |
 | `ppu_init` | 175 | KI 0x191F8 | Killer Instinct has no public disassembly in this session's references; not checked |
 | `clear_sprite_table` | 49-52 | DKC1/DKC2/BTBM/BTDD | not individually re-verified beyond the OAM RAM-address match in §4 below |
@@ -205,7 +205,7 @@ confirmed against `ROM_Map_DKC2_U1.asm`'s bank macro list). I looked up every ad
 specific Dream names (`ppu_init`, `clear_sprite_table`, `set_bg_scroll`, the `loc_C0A04B`
 flip-variant family). I'm not proposing changes to bank `$C0`.
 
-### 3.2 Bank $C1 sound interface — p4plus2's DKC2-disassembly has real names
+### 3.2 Bank $C1 sound interface: p4plus2's DKC2-disassembly has real names
 
 Unlike both Yoshifanatic1 clones, **p4plus2's `DKC2-disassembly/bank_B5.asm` is hand-written
 with descriptive labels and inline comments for exactly the routines Dream's bank `$C1`
@@ -227,10 +227,10 @@ cross-reference where adoption is warranted. Mapping (DKC2 addresses/labels from
 | `sub_C1813D` | load per-song sound-effect-bank pointer (song×3 index), upload it | `.upload_song_sound_effects` | 390-400 | entry: `A`/`$48`=song number |
 | `sub_C18392` | load per-song sample-set pointer (song×6 index), rebuild the directory | `.upload_song_sample_set` | 662-682 | entry: `$48`=song number |
 | `sub_C1803E` | send `$0672`,0-count → (re)start the driver at `driver_entry` | `.execute_spc_sound_engine` | 268-273 | no args |
-| C1804C (currently unlabelled 14-byte dead twin, `lda #$06E3`) | same shape as `sub_C1803E` but targets `$06E3` | `.unused_spc_execute` — **p4plus2's own comment: "Dead code, would crash SPC engine."** | 275-280 | n/a — confirmed dead in both games |
-| `spc_command` ($C183CE) | pack song number, run upload-mode + all three per-song uploads + restart + play, in one `jsl` | closest DKC2 analogue is `.play_song` (same five-step sequence: enter upload mode, `upload_song_sample_set`, `upload_song_data`, `upload_song_sound_effects`, `execute_spc_sound_engine`, then play) — DKC2 splits this into 8 separate JSL entries (`queue_sound_effect`, `queue_song`, `play_queued_song`, `play_song`, `play_song_with_transition`, `transition_song`, `play_queued_sound_effect`, `play_high_priority_sound`); Dream has only the one generic entry | 177-197 | entry: `A`=song/command number |
-| `orphan_C183F1` (dead, sends cmd $F9 then $FE) | — | no exact analogue; closest shape is the small per-command JSL trampolines `.CODE_B581C2`/`.CODE_B581CE` (themselves left unnamed by p4plus2) | 282-296 | — |
-| `sub_C18415` (`tax; jsr sub_C180FF; rtl`, called by `play_sound_effect` at `C0B0C5`) | raw pass-through to the command-word sender for sfx playback | structurally matches `.unused_play_sound_effect` (`$B58024`) — **also marked dead/superseded in DKC2**, replaced there by the ring-buffered `queue_sound_effect`/`play_queued_sound_effect` pair | 34-46 | entry: `X` = packed `channel:sfx_id` |
+| C1804C (currently unlabelled 14-byte dead twin, `lda #$06E3`) | same shape as `sub_C1803E` but targets `$06E3` | `.unused_spc_execute`; **p4plus2's own comment: "Dead code, would crash SPC engine."** | 275-280 | n/a; confirmed dead in both games |
+| `spc_command` ($C183CE) | pack song number, run upload-mode + all three per-song uploads + restart + play, in one `jsl` | closest DKC2 analogue is `.play_song` (same five-step sequence: enter upload mode, `upload_song_sample_set`, `upload_song_data`, `upload_song_sound_effects`, `execute_spc_sound_engine`, then play); DKC2 splits this into 8 separate JSL entries (`queue_sound_effect`, `queue_song`, `play_queued_song`, `play_song`, `play_song_with_transition`, `transition_song`, `play_queued_sound_effect`, `play_high_priority_sound`); Dream has only the one generic entry | 177-197 | entry: `A`=song/command number |
+| `orphan_C183F1` (dead, sends cmd $F9 then $FE) | n/a | no exact analogue; closest shape is the small per-command JSL trampolines `.CODE_B581C2`/`.CODE_B581CE` (themselves left unnamed by p4plus2) | 282-296 | n/a |
+| `sub_C18415` (`tax; jsr sub_C180FF; rtl`, called by `play_sound_effect` at `C0B0C5`) | raw pass-through to the command-word sender for sfx playback | structurally matches `.unused_play_sound_effect` (`$B58024`); **also marked dead/superseded in DKC2**, replaced there by the ring-buffered `queue_sound_effect`/`play_queued_sound_effect` pair | 34-46 | entry: `X` = packed `channel:sfx_id` |
 
 **Interpretation:** Dream's sound-effect call path (`play_sound_effect` → `sub_C18415` →
 `sub_C180FF`, one direct command write, no queueing) matches the code DKC2 kept around as
@@ -243,14 +243,14 @@ source file, as `docs/toolchain_evidence.md` §1.2 already inferred from the sha
 `docs/toolchain_evidence.md` also notes the argument convention question for `sub_C1815F`/
 `sub_C180C1`/`sub_C18119`/`sub_C1813D`; the p4plus2 comments above answer it: `A`/`$48` is
 always the **song number**, and the per-routine direct-page pointers (`$0E/$10`, `$02/$06`,
-`$0A`... — Dream: `$36/$38/$3A/$3C/$3E/$40/$42/$44/$48`) are private scratch registers, not
+`$0A`...; Dream: `$36/$38/$3A/$3C/$3E/$40/$42/$44/$48`) are private scratch registers, not
 shared with the driver side.
 
 ---
 
 ## 4. RAM (task 4)
 
-### 4.1 65816 direct page ($04-$0C, $36-$48) — no address match
+### 4.1 65816 direct page ($04-$0C, $36-$48): no address match
 
 Dream's sound-upload scratch registers (`ptr_04`/`$06`=pointer, `$07`=`spc_dest_addr`,
 `$09`=`spc_word_count`, plus the unnamed `$36/$38/$3A/$3C/$3E/$40/$42/$44/$48` used by
@@ -258,20 +258,20 @@ Dream's sound-upload scratch registers (`ptr_04`/`$06`=pointer, `$07`=`spc_dest_
 addresses than DKC2's equivalents. p4plus2's `ram.asm` puts the corresponding scratch
 registers at `$32/$34/$35/$37/$39/$02/$06/$0A/$0E/$10/$3C/$3E/$40/$42/$44` (`ref/DKC2-
 disassembly/ram.asm:8-40`, `bank_B5.asm` throughout), and even there they're named
-generically (`temp_32`, `temp_33`, ... — `ram.asm:29-40`), not by role. Since the code and
+generically (`temp_32`, `temp_33`, ...; `ram.asm:29-40`), not by role. Since the code and
 the address don't both match, **task 4's bar ("identical code," not just same address) is
-not met here — no RAM entries proposed for this range.** (`spc_transaction = $00`,
+not met here; no RAM entries proposed for this range.** (`spc_transaction = $00`,
 `current_song = $1C`, `stereo_select = $1E` are DKC2's real named globals for the higher-level
-music state, but Dream's own equivalents live in different places again — `spc_command`
+music state, but Dream's own equivalents live in different places again: `spc_command`
 packs the song number through `A`/`$48` rather than a persistent `current_song` byte, and
 Dream has no 65816-side stereo/mono global at all; `cmd2_set_mono` sets the SPC-side
 `mono_flag` directly.)
 
-### 4.2 SPC700 zero page — genuine matches (identical code)
+### 4.2 SPC700 zero page: genuine matches (identical code)
 
 Because the driver is 96.3% byte-identical (`docs/toolchain_evidence.md` §1.1), every SPC
 direct-page offset baked into that shared code **is** the same address doing the same job in
-both games — this is a real match, not a coincidence:
+both games. The match is real rather than coincidental:
 
 | SPC addr | Dream name (`spc/spc_map.txt`) | role | confirmed via |
 |---|---|---|---|
@@ -287,9 +287,9 @@ both games — this is a real match, not a coincidence:
 | $0FC8+x | `voice_bits` table | 1<<voice lookup, twice (music/sfx) | DKC2 `DATA_0F95`, byte-identical |
 
 Neither Yoshifanatic1's empty `ARAM_Map_DKC2.asm` nor p4plus2 (no SPC700 disassembly at all)
-names any of these, so nothing is adopted from DKC2 here either — but the match itself is
-worth recording since it's the strongest possible confirmation (identical opcodes, identical
-operand bytes) that this is Rare's one driver source shared across the family.
+names any of these, so nothing is adopted from DKC2 here either. The match is still worth
+recording: identical opcodes and identical operand bytes confirm that this is Rare's one
+driver source shared across the family.
 
 ### 4.3 The one real adoption: OAM buffer addresses ($0200/$0400)
 
@@ -306,17 +306,17 @@ against Yoshifanatic1's `RAM_Map_DKC2.asm`:
         (i.e. $000400) .Slot, 1 byte/sprite (SNES hardware "high OAM" table)
 
 This is a justified match: DKC2's OAM buffer is at `$0200` (main table) with its 32-byte
-hardware "high" table at `$0200+$0200=$0400` — exactly the range Dream's identical
+hardware "high" table at `$0200+$0200=$0400`, exactly the range Dream's identical
 `clear_sprite_table` zeroes (`$0400-$041E`, 30 of the 32 bytes touched by the unrolled `stz`
-chain) and exactly the value (`#$0200`) the same routine stores as a live pointer. Also
-worth flagging independently (not a DKC2-derived name, my own reading of the code): **`$94`
-is not a count.** `clear_sprite_table` stores the literal address `$0200` into it, and
-`loc_C0A53D` later does `lda $94; cmp #$0400` — i.e. `$94` is a write cursor that walks the
+chain) and exactly the value (`#$0200`) the same routine stores as a live pointer. One more
+correction, independent of DKC2 (my own reading of the code): **`$94` is not a count.**
+`clear_sprite_table` stores the literal address `$0200` into it, and
+`loc_C0A53D` later does `lda $94; cmp #$0400`: `$94` is a write cursor that walks the
 $0200-$03FF OAM buffer as sprites are emitted, not a "sprite count." The existing name
 `sprite_count` (`tools/names.txt:42`) should be corrected.
 
 DKC2's `; $000094 = BG scroll related` (`RAM_Map_DKC2.asm:9`) is a different, unconfirmed
-role at the coincidentally-same DKC2 address — I checked this and it is **not** a match
+role at the coincidentally-same DKC2 address. I checked it and it is **not** a match
 (different code, different apparent purpose), so I'm not using it to justify or contradict
 the Dream finding; it's mentioned only so the discrepancy isn't silently dropped.
 
@@ -339,7 +339,7 @@ C18392 upload_song_sample_set  ; was sub_C18392; = p4plus2 bank_B5.asm .upload_s
 C1830A upload_inline_spc_block ; was spc_upload_block; = p4plus2 bank_B5.asm .upload_inline_spc_block
 C18324 upload_spc_block        ; was spc_send_words; = p4plus2 bank_B5.asm .upload_spc_block
 C1803E execute_spc_sound_engine ; was sub_C1803E; = p4plus2 bank_B5.asm .execute_spc_sound_engine
-data C1804C unused_spc_execute ; currently unlabelled; = p4plus2 bank_B5.asm .unused_spc_execute -- dead code, would crash the SPC700 engine if reached (both games)
+data C1804C unused_spc_execute ; currently unlabelled; = p4plus2 bank_B5.asm .unused_spc_execute; dead code, would crash the SPC700 engine if reached (both games)
 
 ; ---- RAM: adopted from Yoshifanatic1's DKC2 RAM_Map_DKC2.asm
 ;      (https://github.com/Yoshifanatic1/Donkey-Kong-Country-2-Disassembly), justified by
@@ -350,7 +350,7 @@ ram 0400 oam_buffer_upper      ; = RAM_Map_DKC2.asm RAM_DKC2_Global_UpperOAMBuff
 
 ; ---- RAM: independent correction (not adopted from a reference project; see
 ;      docs/dkc_crossref.md section 4.3 for the code reasoning) ----
-ram 0094 oam_write_ptr         ; was sprite_count -- holds a live pointer into oam_buffer ($0200), not a count; clear_sprite_table sets it to #$0200, loc_C0A53D compares it against #$0400
+ram 0094 oam_write_ptr         ; was sprite_count; holds a live pointer into oam_buffer ($0200), not a count; clear_sprite_table sets it to #$0200, loc_C0A53D compares it against #$0400
 ```
 
 ### 5.2 `spc/driver.asm` renames
@@ -362,7 +362,7 @@ that could apply (`ARAM_Map_DKC2.asm`) is empty. Dream's own driver.asm names ar
 more descriptive than either source, so nothing is proposed here:
 
 ```
-; (no renames -- see docs/dkc_crossref.md section 2 for why)
+; (no renames: see docs/dkc_crossref.md section 2 for why)
 ```
 
 ---

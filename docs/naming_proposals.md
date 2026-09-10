@@ -1,16 +1,16 @@
 # Naming proposals for auto-named routines and RAM
 
 Derived statically from `out/dream.asm`, `out/symbols.txt`, `docs/progress.json` (the 76
-`"named": false` entries, of which 75 are 65816 code in banks `$C0`/`$C1` — `0BCC` is an
+`"named": false` entries, of which 75 are 65816 code in banks `$C0`/`$C1`; `0BCC` is an
 SPC700 routine and out of scope here), `docs/handler_tables.md`, `docs/dkc_crossref.md`,
 `docs/data_formats.md` and `docs/NOTES.md`. Every routine below was read in full in
 `out/dream.asm` (address ranges taken from `docs/progress.json` `size` fields). Confidence:
 
-- **high** — behaviour is unambiguous from the hardware registers/addresses touched, or is
+- **high**: behaviour is unambiguous from the hardware registers/addresses touched, or is
   already established by another doc file and just needs applying.
-- **medium** — the mechanism is clear from the code but the game-level meaning (which
+- **medium**: the mechanism is clear from the code but the game-level meaning (which
   effect, which level) is inferred rather than certain.
-- **low** — the routine is dead/orphaned or its exact role is a guess from thin evidence.
+- **low**: the routine is dead/orphaned or its exact role is a guess from thin evidence.
 
 ## 1. Init / reset / per-mode level setup
 
@@ -26,10 +26,10 @@ via `sub_C0A46A`/`sub_C0A483`/`sub_C0A445`/`sub_C0848C`.
 | addr | proposed name | conf. | justification |
 |---|---|---|---|
 | `sub_C08292` | `mode0_level_init` | medium | `game_mode_table[0]`; sets `BGMODE=1,TM=$1417,CGWSEL=$8202`, VRAM/CGRAM uploads via `sub_C0A46A`/`sub_C0A483`/`sub_C0A445`, HDMA table build at `$7F00D0-D9`/`$7F0540-49` |
-| `sub_C0848C` | `dma_setup_channel_step` | medium | called repeatedly by all 4 mode-init routines with `X`=DMA-channel byte offset, `Y`=src bank\:addr, `ptr_04`=dest; writes `A1TL0,X`/`DMAP0,X`/`A1B0,X`/`DASB0,X` — one HDMA/DMA channel descriptor per call |
+| `sub_C0848C` | `dma_setup_channel_step` | medium | called repeatedly by all 4 mode-init routines with `X`=DMA-channel byte offset, `Y`=src bank\:addr, `ptr_04`=dest; writes `A1TL0,X`/`DMAP0,X`/`A1B0,X`/`DASB0,X`: one HDMA/DMA channel descriptor per call |
 | `sub_C084D7` | `mode1_level_init` | medium | `game_mode_table[1]`; sets `$0BAC=$0018` (the mode-1-only row offset documented in `docs/handler_tables.md`), `CGWSEL=$2202`, distinct BG1SC/palette (`COLDATA` x3) |
-| `sub_C08798` | `mode2_level_init` | high | `game_mode_table[2]`; sets `$7E/$80=$B560/$C9` — exactly the bank/pointer `docs/data_formats.md` cites as the game-mode-2 metatile table read by `sub_C09FB7`/`sub_C09E83` |
-| `sub_C088AB` | `title_screen_init` | medium | `game_mode_table[3]`; mode 3 = title screen per `docs/data_formats.md`; `BGMODE=9` (mode 3 is otherwise BGMODE 1 — matches the title's documented BG-mode-3 tile format) |
+| `sub_C08798` | `mode2_level_init` | high | `game_mode_table[2]`; sets `$7E/$80=$B560/$C9`: exactly the bank/pointer `docs/data_formats.md` cites as the game-mode-2 metatile table read by `sub_C09FB7`/`sub_C09E83` |
+| `sub_C088AB` | `title_screen_init` | medium | `game_mode_table[3]`; mode 3 = title screen per `docs/data_formats.md`; `BGMODE=9` (mode 3 is otherwise BGMODE 1; matches the title's documented BG-mode-3 tile format) |
 | `sub_C0A4A6` | `set_bg_scroll_prep` | medium | 2-byte stub (`sep #$20`) that falls through directly into `set_bg_scroll`; called once from `mode0_level_init` before the scroll write |
 | `sub_C09234` | `vram_upload_shared_tileset_c5` | medium | identical DMA parameters (`bank $C5, off $02C0, 0x0C00 words → VMADDL 0`) to the inline copy inside `mode0_level_init`; a reusable helper for the other mode-inits |
 
@@ -40,16 +40,16 @@ jmp $A4E9` (`loc_C0A4E9`, `sta nmi_handler_ptr`). Tracing the two install sites 
 both handlers precisely:
 
 - `$80F4` is installed at file `0x80EE` (`lda #$80F4`), in the generic post-reset path
-  before falling into the main loop — used for gameplay (modes 0-2, and by default 3).
+  before falling into the main loop: used for gameplay (modes 0-2, and by default 3).
 - `$BD20` is installed at file `0xBD1A`, inside the title-screen VRAM-upload block that
   writes `data_C6002B` (the "627 raw 8bpp tiles at 0x06002B" from `docs/data_formats.md`).
   The handler body itself compares live CGRAM (`$7F0F91,X`) against `data_C6A36B`/`data_C6A36C`
-  (the title's "256-colour palette at 0x06A36B") one byte per NMI — a palette fade-in.
+  (the title's "256-colour palette at 0x06A36B") one byte per NMI: a palette fade-in.
 
 | addr | proposed name | conf. | justification |
 |---|---|---|---|
 | `nmi_handler_80F4` | `nmi_handler_gameplay` | high | installed unconditionally after `reset`/mode-switch (file 0x80EE `lda #$80F4`); dispatches `jtbl_C08272,X` (per-mode scroll) then `sub_C0AE7E` (tile DMA) |
-| `nmi_handler_BD20` | `nmi_handler_title_fade` | high | installed only inside the title tile-upload block (file 0xBD1A); body walks `$7F0F91-$7F0F92,X` vs `data_C6A36B`/`data_C6A36C` (title palette), one step per call — a CGRAM fade-in |
+| `nmi_handler_BD20` | `nmi_handler_title_fade` | high | installed only inside the title tile-upload block (file 0xBD1A); body walks `$7F0F91-$7F0F92,X` vs `data_C6A36B`/`data_C6A36C` (title palette), one step per call: a CGRAM fade-in |
 | `sub_C08E9B` | `nmi_scroll_mode0` | high | `jtbl_C08272[0]`, called from `nmi_handler_gameplay`; writes `BG1HOFS/VOFS`, `BG2HOFS/VOFS` from `$62`/`$68`/`$0BE4-$0BE6` |
 | `sub_C08F47` | `nmi_scroll_mode1` | high | `jtbl_C08272[1]`; same register set, mode-1-specific parallax math (`data_C46588` lookup, `$7F0087` etc.) |
 | `sub_C09049` | `nmi_scroll_mode2` | high | `jtbl_C08272[2]`; writes `BG2HOFS/VOFS`+`BG3HOFS/VOFS` from `$62`/`$68`/`$5E` |
@@ -58,35 +58,35 @@ both handlers precisely:
 ## 3. PPU / VRAM / OAM DMA helpers
 
 Three small, heavily-reused DMA wrappers (`sub_C0A445`, `sub_C0A46A`, `sub_C0A483`) are
-called from every mode-init routine with different `A`/`X`/`Y` arguments — they are the
-"upload one block" primitives the mode-inits compose into full scene setup, in the same
-spirit as `docs/dkc_crossref.md`'s already-adopted DMA helpers in bank `$C1`.
+called from every mode-init routine with different `A`/`X`/`Y` arguments: they are the
+"upload one block" primitives the mode-inits compose into full scene setup, like the
+already-adopted DMA helpers in bank `$C1` in `docs/dkc_crossref.md`.
 
 | addr | proposed name | conf. | justification |
 |---|---|---|---|
-| `sub_C0A445` | `dma_fill_vram_zero` | high | fixed source `data_C0A443` (a zero word, per `docs/data_formats.md`'s "zero word (VRAM fill source)"), `DMAP0=$1809` (fixed-source, word count `$0800`) — VRAM-clear helper |
-| `sub_C0A46A` | `dma_upload_to_vram` | high | `A`=src addr, `X`=src bank, `Y`=word count, dest already in `VMADDL`; `DMAP0=$1801` (word, incrementing) — generic ROM→VRAM DMA, called ~20x across mode-inits |
-| `sub_C0A483` | `dma_upload_to_cgram` | high | fixed src bank `$C4`, `X`=count word (`*8`→`DASL0`), `Y`=`CGADD`; `DMAP0=$2200` (byte, CGDATA) — palette upload helper |
+| `sub_C0A445` | `dma_fill_vram_zero` | high | fixed source `data_C0A443` (a zero word, per `docs/data_formats.md`'s "zero word (VRAM fill source)"), `DMAP0=$1809` (fixed-source, word count `$0800`): VRAM-clear helper |
+| `sub_C0A46A` | `dma_upload_to_vram` | high | `A`=src addr, `X`=src bank, `Y`=word count, dest already in `VMADDL`; `DMAP0=$1801` (word, incrementing): generic ROM→VRAM DMA, called ~20x across mode-inits |
+| `sub_C0A483` | `dma_upload_to_cgram` | high | fixed src bank `$C4`, `X`=count word (`*8`→`DASL0`), `Y`=`CGADD`; `DMAP0=$2200` (byte, CGDATA): palette upload helper |
 | `sub_C09FB7` | `build_metatile_column_580` | high | `docs/data_formats.md`'s metatile blitter: reads `[$18]` (16-bit metatile index, base `$7A/$7C` + `$62`), applies `eor #$4000/#$8000` flips, writes 32-byte metatile rows into the `$0580` buffer that `vram_upload_column_580` DMAs out |
 | `sub_C09E83` | `build_metatile_column_500` | high | same mechanism as `build_metatile_column_580` but keyed off `$82` (layer-2 parallax) and writing the `$0500` buffer that `vram_upload_column_500` DMAs out |
 | `sub_C0A0F1` | `vram_upload_column_580` | high | sets `VMAIN=$81`, DMAs the `$0580` buffer (built by `build_metatile_column_580`) to a `VMADDL` computed from `$62`/`$98`; matches `docs/data_formats.md`'s metatile-blitter description |
 | `sub_C0A148` | `vram_upload_column_500` | high | same shape, DMAs the `$0500` buffer (built by `build_metatile_column_500`) using `$68`/`$9A` |
-| `sub_C09C16` | `vram_generate_particle_tile` | medium | writes a 16-row expanded 4bpp tile to `VMDATAL` at address `A` by bit-interleaving `A`/`ptr_04` through `sub_C09C28`; called from `particle_spawn_from_table` and `particle_spawn_random` with `A=$1F00` — builds a solid-fill tile for the particle sprites |
+| `sub_C09C16` | `vram_generate_particle_tile` | medium | writes a 16-row expanded 4bpp tile to `VMDATAL` at address `A` by bit-interleaving `A`/`ptr_04` through `sub_C09C28`; called from `particle_spawn_from_table` and `particle_spawn_random` with `A=$1F00`: builds a solid-fill tile for the particle sprites |
 | `sub_C09C28` | `vram_write_tile_row_planes` | medium | inner helper for `vram_generate_particle_tile`: writes one bitplane row pair to `VMDATAL` then pads 7 zero words, looped 16x by the caller |
 | `sub_C09C62` | `vram_stream_descriptor_dispatch` | medium | reads `data_C0B24C` ("per-mode descriptor index", `docs/data_formats.md`) keyed by camera position; on change, loads the matching `data_C0B208`-family streaming descriptor (`docs/data_formats.md`'s "VRAM/CGRAM streaming descriptors") and either starts a new stream or queues it for `cgram_upload_queue_flush`; only caller is `mode0_weather_zone_update` |
 | `sub_C0A538` | `entity_build_oam_frame` | high | reads `$07C8,X` (sprite frame id) → `data_C40000`/`data_C40002` (the documented `{ptr16,bank,y-bias}` frame table), computes on-screen X/Y from `$08A8,Y`/`$08E8,Y` minus camera, culls off-screen, dispatches to the row-count-specific OAM emitters below |
 | `sub_C0A757` | `oam_emit_frame_1row` | medium | one of `sub_C0A538`'s size-class dispatch targets (`cpx #$0004` branch); builds `[$26]`/`[$2A]` pointers then falls into the shared emit loop for the smallest frames |
-| `sub_C0A772` | `oam_emit_frame_2row` | medium | same dispatch family, sets up 4 pointer fields (`$1C/$1E/$20/$22`) before the OAM-record loop — larger frame class than `oam_emit_frame_1row` |
+| `sub_C0A772` | `oam_emit_frame_2row` | medium | same dispatch family, sets up 4 pointer fields (`$1C/$1E/$20/$22`) before the OAM-record loop: larger frame class than `oam_emit_frame_1row` |
 | `sub_C0A8F6` | `oam_emit_frame_1row_flip` | medium | structurally identical to `oam_emit_frame_1row`, reached via the `$4C`≥`$8F` (h-flip) branch in `sub_C0A538` |
 | `sub_C0A911` | `oam_emit_frame_2row_flip` | medium | structurally identical to `oam_emit_frame_2row`, h-flip branch counterpart |
 | `sub_C0AAAA` | `oam_emit_frame_3row` | medium | reached from the `bit #$8000`/`#$4000` (v-flip) branches in `sub_C0A538`; tail falls into `loc_C0A6CD` (the documented shared `pea $8080;plb;plb;rtl` library stub) |
 | `sub_C0AC40` | `oam_emit_frame_3row_flip` | medium | same as `oam_emit_frame_3row` but the opposite flip combination |
-| `sub_C0ADE7` | `oam_hide_unused_sprites` | high | from `oam_write_ptr` (`$94`) to `$0400`, stores `#$F0FF` (Y=`$F0`, off-screen) — classic "hide the rest of OAM" loop |
+| `sub_C0ADE7` | `oam_hide_unused_sprites` | high | from `oam_write_ptr` (`$94`) to `$0400`, stores `#$F0FF` (Y=`$F0`, off-screen): the standard "hide the rest of OAM" loop |
 | `sub_C0ADFD` | `oam_dma_upload` | high | DMAs `$0200`-`$041F` (`oam_buffer`+`oam_buffer_upper`) to `OAMDATA` (`DMAP0=$0400`), then sets `$02` (a DMA-pending bitmask, see RAM) |
-| `sub_C0AE7E` | `entity_upload_pending_tiles` | high | walks a per-entity 8-byte descriptor array at `$0A8A` (size/dest/src/bank+pending-flag), DMAs each pending one to VRAM — matches `docs/data_formats.md`'s "`sub_C0AE7E` DMA[s]" note for sprite tile uploads |
+| `sub_C0AE7E` | `entity_upload_pending_tiles` | high | walks a per-entity 8-byte descriptor array at `$0A8A` (size/dest/src/bank+pending-flag), DMAs each pending one to VRAM: matches `docs/data_formats.md`'s "`sub_C0AE7E` DMA[s]" note for sprite tile uploads |
 | `sub_C0AE1F` | `entity_sort_draw_order` | medium | insertion-sorts the 16-entry `$09A8` index array by `$0988,Y` (a computed depth/Y key), tie-broken by `$07A8,Y` |
-| `sub_C0AEB9` | `entity_render_order_reset` | medium | fills `$09A8,X = X` — resets the sorted draw-order array to identity before `entity_sort_draw_order` runs |
-| `sub_C09D32` | `cgram_upload_queue_flush` | medium | loop over `$0B8A` (count) DMAing `{$0B84 len,$0B88 addr,$0B86 CGADD}` records — a queued-palette-write flush, consumed by the weather/effect code in section 6 |
+| `sub_C0AEB9` | `entity_render_order_reset` | medium | fills `$09A8,X = X`: resets the sorted draw-order array to identity before `entity_sort_draw_order` runs |
+| `sub_C09D32` | `cgram_upload_queue_flush` | medium | loop over `$0B8A` (count) DMAing `{$0B84 len,$0B88 addr,$0B86 CGADD}` records: a queued-palette-write flush, consumed by the weather/effect code in section 6 |
 
 ## 4. Entity update / AI dispatch
 
@@ -100,26 +100,26 @@ named in `docs/handler_tables.md`.
 
 | type | handler | proposed name | conf. |
 |---|---|---|---|
-| 0 | `sub_C09AF6` | `entity_animate_only` | high — `tyx;jsl anim_update;pla;rts`, no AI; likely the player (moved by input elsewhere) |
-| 2 | `sub_C09A61` | `entity_apply_hit_reaction` | medium — sets a "hurt" sub-state from facing bits in `A`; entry point `loc_C09A66` is also jumped into directly by `sub_C08E8E` |
-| 4 | `sub_C09AB8` | `entity_spawn_transform_a` | medium — copies parent (`$0968,X`→`Y`) position/flags into `X`, advances anim id by 2 |
-| 6, 8 | `sub_C09B00` | `entity_spawn_transform_b` | medium — 3-way branch on `game_mode`/`$0BAC`: normal copy (+`$0888,X-Y`) offsets `$08E8` by `0x10`; a mode-1-only branch (`loc_C09B51`) instead decrements `$08A8` and forces anim `$0158` |
-| 10 (`0x0A`) | `sub_C09B89` | `entity_spawn_transform_c` | medium — parent copy; if `$0BB6` (mode-1 row index) is set, also arms a knockback sub-state (`$07A8,X=2`) |
-| 12 (`0x0C`) | `sub_C099EF` | `entity_ai_chase_player` | medium — only acts on type `$0C`; computes `abs($0828-$0828,X)` (distance to player), sets facing/state thresholds at 0x40/0x80px, arms a random delay via `sub_C0A212` (RNG) |
-| 14, 16 | `sub_C09A5F` | `entity_ai_none` | high — `tyx;rts`, literal no-op; these types are animated purely by the velocity-to-rate table (`docs/handler_tables.md`) with no think logic |
+| 0 | `sub_C09AF6` | `entity_animate_only` | high: `tyx;jsl anim_update;pla;rts`, no AI; likely the player (moved by input elsewhere) |
+| 2 | `sub_C09A61` | `entity_apply_hit_reaction` | medium: sets a "hurt" sub-state from facing bits in `A`; entry point `loc_C09A66` is also jumped into directly by `sub_C08E8E` |
+| 4 | `sub_C09AB8` | `entity_spawn_transform_a` | medium: copies parent (`$0968,X`→`Y`) position/flags into `X`, advances anim id by 2 |
+| 6, 8 | `sub_C09B00` | `entity_spawn_transform_b` | medium: 3-way branch on `game_mode`/`$0BAC`: normal copy (+`$0888,X-Y`) offsets `$08E8` by `0x10`; a mode-1-only branch (`loc_C09B51`) instead decrements `$08A8` and forces anim `$0158` |
+| 10 (`0x0A`) | `sub_C09B89` | `entity_spawn_transform_c` | medium: parent copy; if `$0BB6` (mode-1 row index) is set, also arms a knockback sub-state (`$07A8,X=2`) |
+| 12 (`0x0C`) | `sub_C099EF` | `entity_ai_chase_player` | medium: only acts on type `$0C`; computes `abs($0828-$0828,X)` (distance to player), sets facing/state thresholds at 0x40/0x80px, arms a random delay via `sub_C0A212` (RNG) |
+| 14, 16 | `sub_C09A5F` | `entity_ai_none` | high: `tyx;rts`, literal no-op; these types are animated purely by the velocity-to-rate table (`docs/handler_tables.md`) with no think logic |
 
 Other entity-system routines:
 
 | addr | proposed name | conf. | justification |
 |---|---|---|---|
 | `sub_C098DA` | `entity_update_tick` | high | the master per-entity update described above; called from the main loop's `X=4..$A6 step 2` entity loop |
-| `sub_C0A232` | `entity_accelerate_velocity_x` | high | if `$0888,X` (target velocity) is 0, decays `$0868,X` toward 0 near the terminal band; else moves `$0868,X` 1/8 of the way toward `$0888,X` each call — generic accel-toward-target used for both gravity and friction |
+| `sub_C0A232` | `entity_accelerate_velocity_x` | high | if `$0888,X` (target velocity) is 0, decays `$0868,X` toward 0 near the terminal band; else moves `$0868,X` 1/8 of the way toward `$0888,X` each call: generic accel-toward-target used for both gravity and friction |
 | `sub_C0A26F` | `entity_apply_velocity_x` | high | classic 16.8 fixed-point integrator: adds the fractional byte of `$0868,X` (velocity) into `$0848,X` (sub-pixel accumulator), carries the sign-extended integer velocity into `$0828,X` (position) |
 | `sub_C0A2B9` | `entity_apply_velocity_y` | high | identical pattern for the Y axis: velocity `$0948,X`, sub-pixel accumulator `$08C8,X`, position `$08A8,X` (the same `$08A8` that `entity camera-Y-follow` code (`sub_C0A1B0`) reads for the player) |
-| `orphan_C0A294` | `entity_apply_velocity_z_dead` | medium | identical pattern for a third axis (velocity `$0928,X`, accumulator `$0908,X`, position `$08E8,X`) but unreferenced by any caller — one of the four dead fragments `docs/NOTES.md` open item 1 lists |
-| `sub_C0A1F3` | `entity_derive_bounce_velocity` | low | scales `abs($0868,X)` (X velocity) by `>>2`, applies a sign from `$0BAE`, stores to `$0948,X` (Y velocity) — reads as "convert horizontal speed into a vertical component" but the exact game use (recoil? bounce?) isn't confirmed |
+| `orphan_C0A294` | `entity_apply_velocity_z_dead` | medium | identical pattern for a third axis (velocity `$0928,X`, accumulator `$0908,X`, position `$08E8,X`) but unreferenced by any caller: one of the four dead fragments `docs/NOTES.md` open item 1 lists |
+| `sub_C0A1F3` | `entity_derive_bounce_velocity` | low | scales `abs($0868,X)` (X velocity) by `>>2`, applies a sign from `$0BAE`, stores to `$0948,X` (Y velocity): reads as "convert horizontal speed into a vertical component" but the exact game use (recoil? bounce?) isn't confirmed |
 | `sub_C09BDA` | `entity_ground_y_lookup` | medium | looks up `data_C0B2F6`/`C0B2F8`/`C0B2FA` (the documented per-mode "spawn x/y list" / "per-state Y table") by `abs($0828,X)`, writing a resolved Y-ish value to `$08A8,X`; called every tick from `entity_update_tick`, not just at spawn |
-| `sub_C08E8E` | `check_pending_player_attack` | medium | `ldx $0BB4; beq rts` else jumps into `entity_apply_hit_reaction` with `A=$8E,Y=$90` — applies a queued hit to entity `$0BB4` |
+| `sub_C08E8E` | `check_pending_player_attack` | medium | `ldx $0BB4; beq rts` else jumps into `entity_apply_hit_reaction` with `A=$8E,Y=$90`: applies a queued hit to entity `$0BB4` |
 | `sub_C0A1B0` | `camera_follow_player` | high | clamps player `$0828`/`$08A8` against `$86`/`$88` (level bounds), derives `$62`/`$68` (camera X/Y) and the look-ahead values `$98`(unused here)/`$9A`; skipped for mode 1 |
 | `sub_C0A212` | `random_next` | high | classic 16-bit xorshift/LFSR-style PRNG over `init_magic_AA55`/`init_magic_FFFF`; called 10x from entity AI, particle spawn and animation-rate code |
 | `sub_C09D6A` | `entity_init_from_table` | high | walks `data_C0B4A4` ("per-mode entity offsets"/"entity init records (18 bytes)", `docs/data_formats.md`), populating every entity SoA field (`entity_type` through `entity_anim_rate`) for each initial entity of the current `game_mode`, incrementing the active-entity count (`$A6`) |
@@ -130,7 +130,7 @@ A cluster of routines maintains up to ~40 "particle" records in a WRAM mirror re
 (`$7F0900`-`$7F0Fxx`, distinct from the entity arrays at `$0700`-`$0A80`), driven by
 `random_next`, culled against the camera (`$62`/`$68`) and written into the OAM buffer via
 `oam_write_ptr` (`$94`). The exact visual (rain? sparks? fireflies?) is not determinable
-statically — hence medium confidence throughout — but the mechanism (spawn, integrate,
+statically (hence medium confidence throughout), but the mechanism (spawn, integrate,
 cull, emit sprite) is unambiguous.
 
 | addr | proposed name | conf. | justification |
@@ -140,14 +140,14 @@ cull, emit sprite) is unambiguous.
 | `sub_C092F3` | `mode1_reset_particles_and_oam` | medium | zeroes camera vars, resets the same `$0C1F-$0C2D` weather-parameter block as `mode0_weather_zone_update`, then `clear_sprite_table`+`particle_update_and_draw_mode0`+`oam_hide_unused_sprites`+`oam_dma_upload` |
 | `sub_C09331` | `particle_update_and_draw_mode0` | medium | integrates `$7F09xx-$7F0Exx` particle fields and, when on-screen, writes 8-byte OAM records via `Y`=`oam_write_ptr` |
 | `sub_C09227` | `mode0_particle_draw_dispatch` | medium | `jtbl_C0828A[0]`; `jmp particle_update_and_draw_mode0` |
-| `sub_C094E4` | `sparkle_array_init` | medium | called from `mode2_level_init`; seeds a 39-entry `$7F0E86-$7F0E8A` array with `random_next` values — a second, smaller particle set |
+| `sub_C094E4` | `sparkle_array_init` | medium | called from `mode2_level_init`; seeds a 39-entry `$7F0E86-$7F0E8A` array with `random_next` values: a second, smaller particle set |
 | `sub_C09521` | `sparkle_update_and_draw` | medium | integrates/culls/draws the `$7F0E86-$7F0E8A` array into OAM, same shape as `particle_update_and_draw_mode0` |
 | `sub_C0922A` | `mode1_particle_dispatch` | medium | `jtbl_C08282[1]`; calls `sparkle_update_and_draw` then `loc_C09679` (an OAM-count-based particle culler) |
 | `sub_C09230` | `mode2_particle_dispatch` | medium | `jtbl_C08282[2]`; jumps to `loc_C097DD`, a third variant of the same integrate/cull/draw loop |
 | `sub_C09233` | `particle_dispatch_noop` | high | plain `rts`; the do-nothing entry shared by the game modes/slots with no particle effect |
-| `sub_C095E3` | `particle_spawn_from_table` | medium | seeds particle fields from `data_C0B26C` (the documented per-mode "entity spawn x/y list") combined with `random_next` — fixed-position particles (unlike the fully random spawns below) |
+| `sub_C095E3` | `particle_spawn_from_table` | medium | seeds particle fields from `data_C0B26C` (the documented per-mode "entity spawn x/y list") combined with `random_next`: fixed-position particles (unlike the fully random spawns below) |
 | `sub_C09781` | `particle_spawn_random` | medium | seeds 40 particle slots with fully `random_next`-derived position/velocity, no spawn table |
-| `sub_C08A74` | `mode0_weather_zone_update` | low | large camera-X-driven state machine selecting among several `$0BD8`/`$0BDA`/`$0BF0-$0BFE` HDMA-colour parameter sets and `$0C00-$0C2D` fields per screen region — reads as a per-zone lighting/weather effect but the visual isn't determinable statically |
+| `sub_C08A74` | `mode0_weather_zone_update` | low | large camera-X-driven state machine selecting among several `$0BD8`/`$0BDA`/`$0BF0-$0BFE` HDMA-colour parameter sets and `$0C00-$0C2D` fields per screen region: reads as a per-zone lighting/weather effect but the visual isn't determinable statically |
 | `sub_C0B075` | `play_footstep_sound` | high | toggles between sfx `$050A`/`$0710` and `$0712`/`$050B` based on `$72` (parity flag); called from a 60-frame (`$3C`) walk-cycle counter in the main loop |
 | `sub_C0B0BC` | `play_zone_transition_sound` | medium | plays sfx `$050F` then `$0611` unconditionally; called once from inside `mode0_weather_zone_update` at a specific camera-X boundary crossing |
 | `sub_C091BB` | `spawn_screen_flash_effect` | low | arms a one-shot entry in the `$0B90-$0B92` effect-queue array (consumed by `cgram_upload_queue_flush`) when `$0C1B` is set; called from `nmi_handler_gameplay`'s tail |
@@ -193,7 +193,7 @@ Entities are a struct-of-arrays: 16 word-sized slots (`X` = slot index × 2, so 
 
 Fields `$07E8`, `$0808`, `$09C8`, `$0A08`, `$0A28`, `$0A48` are read/written in the
 entity code but not characterised with confidence here (each appears in fewer than 3 of
-the read routines with an unambiguous role) — left for future work.
+the read routines with an unambiguous role); left for future work.
 
 ## 8. RAM (direct page / low WRAM) used in 3+ routines
 
@@ -220,9 +220,9 @@ the read routines with an unambiguous role) — left for future work.
 
 Direct-page registers `$0018/$001A/$001C/$001E/$0020/$0022/$0024` are reused as generic
 24-bit-pointer/arithmetic scratch by more than a dozen unrelated routines (metatile
-column composer, OAM emitters, physics helpers) with no single fixed role — not proposed
-for renaming beyond the existing informal `$18`/`$1A` scratch convention already visible
-in the listing.
+column composer, OAM emitters, physics helpers) with no single fixed role. They are
+not proposed for renaming beyond the existing informal `$18`/`$1A` scratch convention
+already visible in the listing.
 
 ## 9. Paste-ready block (high + medium confidence)
 
@@ -349,7 +349,7 @@ ram 0072 walk_cycle_parity
 ```
 
 Note: `orphan_C0A294` (`entity_apply_velocity_z_dead`) is intentionally omitted from this
-block — it is unreferenced (dead) code, so per the convention `docs/handler_tables.md`
+block: it is unreferenced (dead) code, so per the convention `docs/handler_tables.md`
 uses for the other unreferenced fragments (`C099C4`, `C0B1FE`) it is listed only in the
 low-confidence block below (seedable with `m0x0` if the maintainer wants it traced anyway).
 
@@ -376,7 +376,7 @@ this block's guesses where the two disagree.
   entity_vel_x via a sign-preserving /4, called once from entity_update_tick).
 
 ```
-; documented, but left unnamed/uncertain — behaviour understood, game-level meaning is not
+; documented, but left unnamed/uncertain: behaviour understood, game-level meaning still open
 C08A74 mode0_weather_zone_update m0x0
 C091BB spawn_screen_flash_effect m0x0
 ram 0748 entity_attack_timer

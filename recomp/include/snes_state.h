@@ -1,4 +1,4 @@
-/* snes_state.h — the recomp's view of the reference machine.
+/* snes_state.h: the recomp's view of the reference machine.
  *
  * A recomp hook is a C function that stands in for one 65816 routine. It runs
  * instead of the routine's first instruction, with full access to the emulator's
@@ -66,7 +66,7 @@ bool ss_int_pending(const SnesState* ss);
  * A hook that models a multi-instruction routine calls this where the real
  * instructions would, so the pending-interrupt state it leaves behind matches.
  * (An interrupt raised inside a hooked routine is serviced when the hook returns,
- * not part-way through it — see "Hook API" in recomp/README.md.) */
+ * not part-way through it; see "Hook API" in recomp/README.md.) */
 void ss_check_int(SnesState* ss);
 
 /* ---- memory, untimed -------------------------------------------------- */
@@ -135,8 +135,8 @@ void     ss_push16(SnesState* ss, uint16_t v);
  * emulator executes instructions until the stack pointer is back above the
  * pushed frame; NMIs taken inside the callee are serviced normally. Any hook
  * the callee itself hits still fires, so a converted callee stays converted.
- *   ss_call_sub  — callee ends in rts (entered with jsr)
- *   ss_call_long — callee ends in rtl (entered with jsl)
+ *   ss_call_sub:  callee ends in rts (entered with jsr)
+ *   ss_call_long: callee ends in rtl (entered with jsl)
  * A/X/Y/DB/flags are the caller's on entry and the callee's on return, exactly
  * as with the real jsr/jsl. */
 void ss_call_sub(SnesState* ss, uint8_t bank, uint16_t addr);
@@ -152,8 +152,8 @@ void ss_run_until_return(SnesState* ss, uint16_t spBefore);
  * (ss_yield_wanted) and reports that by returning true. Only safe when the frame
  * that was pushed is the routine's *real* return address, because the callee is
  * left running: its own rts/rtl then lands where the ROM would have gone, and
- * the ROM finishes the routine. A callee can run for a long time -- anim_update
- * reaches a VRAM block upload -- so without this the hook would be atomic across
+ * the ROM finishes the routine. A callee can run for a long time (anim_update
+ * reaches a VRAM block upload), so without this the hook would be atomic across
  * a frame boundary that the reference run stops at. */
 bool ss_run_callee(SnesState* ss, uint16_t spBefore);
 
@@ -168,12 +168,12 @@ bool ss_run_callee(SnesState* ss, uint16_t spBefore);
  * only after all of them. Either way the two runs are then compared at different
  * points in the same routine.
  *
- * A body that models the instruction stream can simply stop. Every register,
- * flag and byte of memory is already what the 65816 would have left at that
- * boundary, so setting the pc to the address of the next instruction and
- * returning hands the rest of the routine to the ROM, which finishes it. The
- * port checks this before every instruction (see recomp/src/dream_time.h), which
- * is what keeps a hook from being atomic over more than one of them. */
+ * A body that models the instruction stream can stop. Every register, flag and
+ * byte of memory is already what the 65816 would have left at that boundary, so
+ * setting the pc to the address of the next instruction and returning hands the
+ * rest of the routine to the ROM. The port checks this before every instruction
+ * (see recomp/src/dream_time.h), so a hook is never atomic over more than one
+ * of them. */
 bool ss_yield_wanted(const SnesState* ss);
 
 /* ---- instructions the hook API cannot otherwise perform ----------------- *
@@ -185,7 +185,7 @@ bool ss_yield_wanted(const SnesState* ss);
  * ss_xce mirrors LakeSnes cpu.c case 0xfb and ss_wai case 0xcb, in each case
  * minus the opcode fetch the body supplies. `wai` parks the CPU: the machine
  * idles until an interrupt is raised, which the scheduler (or the core's own
- * cpu_runOpcode) handles from the `waiting` flag, so the body simply returns
+ * cpu_runOpcode) handles from the `waiting` flag, so the body returns
  * afterwards with the pc on the instruction after it. */
 void ss_xce(SnesState* ss);
 void ss_wai(SnesState* ss);
@@ -193,10 +193,10 @@ void ss_wai(SnesState* ss);
 /* ---- running with no CPU (--no-cpu) ------------------------------------- *
  *
  * The C bodies are the program: nothing fetches an instruction, and every pc
- * hand-off -- a tail jmp, a return, a callee frame, interrupt entry, the
- * resumption of a yielded routine -- is resolved through the registry instead.
+ * hand-off (a tail jmp, a return, a callee frame, interrupt entry, the
+ * resumption of a yielded routine) is resolved through the registry instead.
  * A pc with no body is a fatal error naming the pc and the body that handed it
- * over, which is what makes --no-cpu the port's dead-code check.
+ * over, so --no-cpu doubles as the port's dead-code check.
  *
  * ss_nocpu_run_frame() stands in for snes_runFrame(): same stopping point, same
  * APU catch-up at the end of the frame. Enable the mode once, after the hook

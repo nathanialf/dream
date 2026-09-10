@@ -1,4 +1,4 @@
-/* music — see music.h. */
+/* music: see music.h. */
 #include "music.h"
 
 #include <stdbool.h>
@@ -44,14 +44,14 @@ struct MusicPlayer {
 /* Call one of the ROM's sound routines on the scratch machine, at a frame boundary,
  * and put the CPU back where it was. ss_call_long pushes a return frame and runs the
  * reference CPU over the routine, so the APU sees exactly the port handshake the game
- * performs — the uploads included. The registers are restored afterwards so the scratch
+ * performs, the uploads included. The registers are restored afterwards so the scratch
  * machine's own program carries on from where it was interrupted.
  *
- * NMI is masked for the duration. Not for speed: this ROM's NMI handler does not return
- * to what it interrupted, it resets the stack and jumps back into the main loop, which
- * swallows the call frame and leaves the routine half-done. Masking it means the call
- * runs to its own rtl. The scratch machine misses a frame of its own program, which
- * costs it nothing — it exists to hold the sound driver. */
+ * NMI is masked for the duration, because this ROM's NMI handler does not return to what
+ * it interrupted: it resets the stack and jumps back into the main loop, which swallows
+ * the call frame and leaves the routine half-done. Masking it means the call runs to its
+ * own rtl. The scratch machine misses a frame of its own program, which costs it nothing;
+ * it exists to hold the sound driver. */
 static bool music_ready(const MusicPlayer* mp) {
   return mp->snes->apu->outPorts[0] == mp->snes->ram[SPC_PORT0_COUNTER];
 }
@@ -127,8 +127,8 @@ void music_play_sfx(MusicPlayer* mp, uint16_t command) {
   if(mp != NULL) mp->started = true;
 }
 
-/* The machine keeps running whether or not anything has been picked — that is what
- * keeps it at a frame boundary with the driver in its command loop, ready to be asked.
+/* The machine keeps running whether or not anything has been picked. That keeps it at a
+ * frame boundary with the driver in its command loop, ready to be asked.
  * Its output only reaches the speakers once the user has asked for something: the
  * scratch machine is the game booted to its title screen, so before that it is playing
  * the title music to nobody. */

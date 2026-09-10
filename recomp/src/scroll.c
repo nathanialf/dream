@@ -2,11 +2,11 @@
  *
  * jtbl_C08272 (docs/naming_proposals.md section 2) has one of these per
  * game_mode, and nmi_handler_gameplay calls it with "jsr (jtbl_C08272,X)" as
- * the first thing it does in vblank. Each one does the same three jobs in the
+ * the first call it makes in vblank. Each one does the same three jobs in the
  * same order: kick the DMA channels the frame's code armed (the 16-bit store to
- * MDMAEN writes HDMAEN as well, which is what the "ora #$3E00" / "#$FE00" adds),
+ * MDMAEN writes HDMAEN as well, the bits the "ora #$3E00" / "#$FE00" adds),
  * upload the two metatile columns that build_metatile_column_500/_580 staged,
- * and then write the BG scroll registers for the mode -- straight from the
+ * and then write the BG scroll registers for the mode: straight from the
  * camera in mode 0, through the $C4:6588 sine table for the parallax layers in
  * modes 1 and 2, and into the $0BE0-$0BEE layer-offset words the title's HDMA
  * tables read in mode 3.
@@ -80,8 +80,8 @@ static void t_lsr_dp16(SnesState* ss, uint16_t adr) {
  * stays converted and is credited with the call. ss_run_callee stops if the
  * machine moves on underneath, and reports that by returning true: the frame
  * that was pushed is the routine's real return address, so the callee's own rts
- * lands where the ROM expects and the caller can simply return. Registers are
- * the callee's afterwards, exactly as after the real jsr. */
+ * lands where the ROM expects and the caller can return. Registers are the
+ * callee's afterwards, exactly as after the real jsr. */
 static bool t_jsr(SnesState* ss, uint8_t pb, uint16_t target) {
   ss_idle(ss);
   const uint16_t sp0 = ss_sp(ss);
@@ -94,7 +94,7 @@ static bool t_jsr(SnesState* ss, uint8_t pb, uint16_t target) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_scroll_mode0 — $C0:8E9B
+ * nmi_scroll_mode0: $C0:8E9B
  *
  * BG2 takes the camera directly; BG1 takes the pre-computed offsets the main
  * loop left in $0BE4/$0BE5 and $76 + $0BE6. A pending palette-cycle byte in
@@ -237,7 +237,7 @@ void nmi_scroll_mode0(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_scroll_mode1 — $C0:8F47
+ * nmi_scroll_mode1: $C0:8F47
  *
  * Mode 1's parallax: BG3 gets half the camera X, BG1's vertical offset comes
  * straight from camera_y and its negated form seeds the $7F:0900 HDMA table,
@@ -446,7 +446,7 @@ void nmi_scroll_mode1(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_scroll_mode2 — $C0:9049
+ * nmi_scroll_mode2: $C0:9049
  *
  * BG2 follows the camera (Y one line up, as $04 = camera_y - 1); BG3 takes the
  * $C4:6588 wave, scaled down by five sign-extending shifts, added to the camera
@@ -615,7 +615,7 @@ void nmi_scroll_mode2(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * nmi_scroll_title — $C0:90FA
+ * nmi_scroll_title: $C0:90FA
  *
  * BG2 follows the camera like mode 2's; the rest of the routine computes the
  * title screen's layer offsets into $0BDC-$0BEE, which the HDMA tables set up

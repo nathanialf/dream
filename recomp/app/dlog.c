@@ -1,12 +1,12 @@
-/* dlog — the app's own crash log. See dlog.h for what it is for.
+/* dlog: the app's own crash log. See dlog.h for what it is for.
  *
  * The whole file is about one situation: dream.exe stops on someone else's
  * Windows machine, there is no debugger, no console left open and no core dump,
- * and the only thing that can explain it is what the program wrote down before
- * it went. So every line is flushed to disk as it is written, the last stage is
- * kept in a static the fault handler can read without allocating, and the fault
- * handler reports the fault address as an offset into the image so it can be
- * looked up in build/win/dream.map.
+ * and the only evidence is what the program wrote down before it went. So every
+ * line is flushed to disk as it is written, the last stage is kept in a static
+ * the fault handler can read without allocating, and the fault handler reports
+ * the fault address as an offset into the image so it can be looked up in
+ * build/win/dream.map.
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
@@ -73,7 +73,7 @@ static void dlog_flush(void) {
 #endif
 }
 
-/* "2026-09-10 19:35:02.123 +12.345" — wall clock for correlating with anything
+/* "2026-09-10 19:35:02.123 +12.345": wall clock for correlating with anything
  * else on the machine, elapsed seconds for reading the run on its own. */
 static void dlog_stamp(char* out, size_t n) {
   double elapsed = 0.0;

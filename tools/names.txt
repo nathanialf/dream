@@ -223,19 +223,19 @@ C091BB cgram_palette_ramp_step    ; steps $0C1D by $80 toward the sign of $0C1B 
 ; ---- remaining auto-named routines, named from behaviour (out/dream.asm) ----
 ; dead: reads data_C0B208,X as if it were a jump-table entry and dispatches via jmp ($0004);
 ; the B208 table has since been repurposed as the VRAM streaming-descriptor array (non-code),
-; so this path is unreachable garbage -- see NOTES.md "Open items" #1 (dream.asm:2093-2100).
+; so this path is unreachable garbage; see NOTES.md "Open items" #1 (dream.asm:2093-2100).
 C09206 unused_stream_desc_dispatch
 ; entity_update_tick's airborne branch (jsr at C0994B): negates entity_vel_x, arithmetic-shifts
 ; it right by 2 (cmp #$8000/ror x2, a sign-preserving /4), then re-negates unless $0BAE==0 (the
 ; ground_y_lookup_threshold sentinel), and stores the result to entity_vel_y (dream.asm:4210-4211).
 C0A1F3 entity_vel_y_from_vel_x
 ; dead twin of entity_apply_velocity_x/_y: same sub-pixel-accumulate-then-integer-add pattern,
-; but on the fields at $0928 (vel)/$0908 (sub)/$08E8 (pos) -- a third per-entity axis that
+; but on the fields at $0928 (vel)/$0908 (sub)/$08E8 (pos): a third per-entity axis that
 ; entity_init_from_table clears/seeds (data_C0B4AE) but no live code ever advances via velocity;
 ; unreferenced (dream.asm:4316-4315).
 C0A294 unused_entity_apply_velocity_z
 ; unreferenced duplicate of reset's WRAM-clear sequence (DP $0000-$01FE via tcd, $0200-$1FFE,
-; then WRAM bank $7E $2000-$FFFE) -- never called (dream.asm:4424-4384).
+; then WRAM bank $7E $2000-$FFFE); never called (dream.asm:4424-4384).
 C0A35C unused_wram_clear_full
 
 ; ---- sound_iface: remaining auto-named/undissected bytes ----
@@ -243,7 +243,7 @@ C0A35C unused_wram_clear_full
 ; $FE (play), skipping the upload steps spc_command does first; unreferenced (dream.asm:7607-7614).
 C183F1 unused_spc_set_e7_and_play
 ; raw bytes right after orphan_C183F1/unused_spc_set_e7_and_play, byte-identical to it except
-; command $FB instead of $F9 (cmd3_fade_and_song) -- a second dead sibling, left undecoded by
+; command $FB instead of $F9 (cmd3_fade_and_song): a second dead sibling, left undecoded by
 ; the tracer's orphan sweep because the gap (18 bytes) is under its min_gap=24 floor. Forced
 ; here as its own routine since the bytes are valid, unreferenced 65816 (dream.asm:7616-7618).
 C18403 unused_spc_set_fb_and_play m0x0
@@ -307,10 +307,10 @@ data C088A6 mode2_init_dma_table
 ; This is the "8A5A" table referenced in the naming brief.
 data C08A5A mode0_zone_hdma_table
 ; dead tail right after loc_C0921C's rts (the exit of unused_stream_desc_dispatch): INC $0BB8
-; twice then STZ $0BBA, RTS -- more cleanup code for the same dead dispatcher, never reached.
+; twice then STZ $0BBA, RTS: more cleanup code for the same dead dispatcher, never reached.
 data C0921D unused_stream_desc_dispatch_tail
 ; dead fragment inside particle_spawn_from_table, right after loc_C097DD's rts: dex/dex/bpl/
-; jmp $98D7 -- never reached by any traced path.
+; jmp $98D7: never reached by any traced path.
 data C097E7 unused_particle_spawn_tail
 ; dead duplicate of entity_animate_only's own tail (tyx/pla/rts), sitting right after it.
 data C09AFD unused_entity_animate_tail

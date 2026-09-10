@@ -19,9 +19,9 @@ add_compile_options(-Wall -Wextra)
 
 # MinGW: use mingw's own C99 printf rather than msvcrt's, so %zu, %llu and the
 # PRI macros mean on Windows what they mean everywhere else. The app's frame
-# line has to come out byte-identical to dream_harness's on every platform --
-# that comparison is the whole point of `dream --frames` (recomp/app/README.md)
-# -- and msvcrt's printf would spell those three differently. Recent mingw-w64
+# line has to come out byte-identical to dream_harness's on every platform,
+# because `dream --frames` is compared against it (recomp/app/README.md), and
+# msvcrt's printf would spell those three differently. Recent mingw-w64
 # turns this on by default under -std=c11; older ones do not, so say it.
 if(MINGW)
   add_compile_definitions(__USE_MINGW_ANSI_STDIO=1)
@@ -60,7 +60,7 @@ file(GLOB RECOMP_SPC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/spc/*
 
 # --- the coroutine backend ---------------------------------------------------
 # The --no-cpu scheduler runs each dispatched body chain on a stack of its own
-# and suspends it at a yield (harness/coro.h). That is the one thing in the port
+# and suspends it at a yield (harness/coro.h). That is the port's one operation
 # with no portable spelling, so it is one small API with one backend per
 # platform, chosen here and nowhere else: POSIX gets ucontext, Windows gets
 # Win32 fibers. Both are exercised without a ROM by `dream_harness --test-coro`.
@@ -127,8 +127,8 @@ if(NOT SDL3_FOUND AND DREAM_FETCH_SDL3)
   message(STATUS "SDL3 not found: fetching ${DREAM_SDL3_TAG} (DREAM_FETCH_SDL3=ON)")
   # SDL sets no C standard of its own, so it would inherit this file's strict
   # C11 (-std=c11) and lose the POSIX and GNU declarations its platform code
-  # needs. Build it the way its own project does -- the compiler's default --
-  # and put the port's standard back afterwards.
+  # needs. Build it the way its own project does (the compiler's default), then
+  # put the port's standard back afterwards.
   set(_dream_c_standard "${CMAKE_C_STANDARD}")
   set(_dream_c_extensions "${CMAKE_C_EXTENSIONS}")
   unset(CMAKE_C_STANDARD)

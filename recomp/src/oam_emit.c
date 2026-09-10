@@ -183,7 +183,7 @@ static inline uint16_t alu8_set(SnesState* ss, uint16_t a, uint8_t v) {
   return a;
 }
 
-/* lda [dp],Y — the pointer half: three reads of the 24-bit pointer, no latch
+/* lda [dp],Y. The pointer half is three reads of the 24-bit pointer, no latch
  * between them, then Y added to the whole 24-bit value (cpu_adrIly). The data
  * half is t_read8/t_read16, as for any other operand. */
 static inline uint32_t t_ily(SnesState* ss, uint16_t off, uint16_t y) {
@@ -195,8 +195,8 @@ static inline uint32_t t_ily(SnesState* ss, uint16_t off, uint16_t y) {
   return (ptr + y) & 0xffffff;
 }
 
-/* ora ($54) / sta ($54) — the pointer half: two reads, no latch, then the data
- * bank supplies the high byte (cpu_adrIdp). */
+/* ora ($54) / sta ($54). The pointer half is two reads, no latch, then the
+ * data bank supplies the high byte (cpu_adrIdp). */
 static inline uint32_t t_idp(SnesState* ss, uint16_t off) {
   const uint16_t dp = ss_dp(ss);
   const uint8_t lo = ss_bus_r8(ss, (uint16_t) (dp + off));
@@ -262,9 +262,9 @@ static inline void t_pea(SnesState* ss, uint16_t v) {
  *
  * entity_build_oam_frame reaches the six emitters this way rather than by
  * calling their C bodies as functions, so that the emitter's *own* entry address
- * is entered: its hook fires if it is installed (which is what makes the C body
- * run, and what the gate counts as the routine being exercised), and the ROM's
- * copy runs if it is not, which is what --only entity_build_oam_frame needs.
+ * is entered: its hook fires if it is installed (which runs the C body, and
+ * which the gate counts as the routine being exercised), and the ROM's copy
+ * runs if it is not, which --only entity_build_oam_frame needs.
  * The frame pushed is the routine's real return address either way, so a yield
  * inside the emitter can leave it running and its rts still lands here.
  *
@@ -325,7 +325,7 @@ static uint16_t emit_adjlen(const EmitVariant* v) {
   return (uint16_t) (4 + 8 * ((v->adj_x ? 1 : 0) + (v->adj_y ? 1 : 0)));
 }
 
-/* Row block 0's loop — $A7B5 in the plain copy. Runs until the row counter goes
+/* Row block 0's loop: $A7B5 in the plain copy. Runs until the row counter goes
  * negative; the caller carries on at the block's exit address. */
 static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t L) {
   const uint8_t pb = ss_pb(ss);
@@ -351,7 +351,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
     ES(L + 0x10 + dy, 1); t_branch(ss, offscreen);                /* bcs */
     if(!offscreen) {
       ES(L + 0x12 + dy, 3); a = alu_sbc16(ss, a, 0x000F);         /* sbc #$000F */
-      ES(L + 0x15 + dy, 2); t_index(ss);    /* sta $01,X — the Y and tile bytes */
+      ES(L + 0x15 + dy, 2); t_index(ss);    /* sta $01,X: the Y and tile bytes */
       t_write16(ss, (uint16_t) (dp + 0x0001 + x), a);
       ES(L + 0x17 + dy, 2);                 /* lda [sprite_frame_ptr],Y */
       a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
@@ -363,7 +363,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
       a = alu_adc16(ss, a, t_read16(ss, dp + entity_screen_x));
       ES(L + 0x1F + dxy, 3); alu_cmp16(ss, a, 0x0100);            /* cmp #$0100 */
       ESEP(L + 0x22 + dxy, 0x20);           /* sep #$20 */
-      ES(L + 0x24 + dxy, 2); t_index(ss);   /* sta $00,X — the X byte */
+      ES(L + 0x24 + dxy, 2); t_index(ss);   /* sta $00,X: the X byte */
       t_write8(ss, (uint16_t) (dp + nmi_handler_ptr + x), (uint8_t) a);
       ES(L + 0x26 + dxy, 2);                /* lda $24 */
       a = alu8_set(ss, a, t_read8(ss, dp + oam_size_bits));
@@ -392,7 +392,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
       ES(L + 0x41 + dxy, 2);                /* lda $1A */
       a = t_read16(ss, dp + oam_flag_cursor);
       ss_set_nz16(ss, a);
-      ES(L + 0x43 + dxy, 2); t_index(ss);   /* sta $02,X — tile and attribute */
+      ES(L + 0x43 + dxy, 2); t_index(ss);   /* sta $02,X: tile and attribute */
       t_write16(ss, (uint16_t) (dp + dma_pending_mask + x), a);
       ESI(L + 0x45 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x46 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
@@ -418,7 +418,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
   }
 }
 
-/* Row blocks 1 and 2 share a second loop shape — $A82D and $A89C in the plain
+/* Row blocks 1 and 2 share a second loop shape: $A82D and $A89C in the plain
  * copy. It differs from the first only in what it does with the column byte:
  * instead of folding the "x >= 256" bit into the rotating pattern in $24, it
  * rebuilds oam_entry_ptr from X and ors a bit out of the 128-byte table at
@@ -533,7 +533,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   const uint16_t L2 = (uint16_t) (H2 + 0x1A);                  /* $A89C */
   const uint16_t X2 = (uint16_t) (L2 + 0x55 + dxy);            /* $A8F1 */
 
-  /* ---- row block 0 header — $A791 ------------------------------------- */
+  /* ---- row block 0 header: $A791 -------------------------------------- */
   ES(H0 + 0x00, 2);                         /* lda oam_write_ptr */
   a = t_read16(ss, dp + oam_write_ptr);
   ss_set_nz16(ss, a);
@@ -541,7 +541,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   ESI(H0 + 0x03); a = alu_lsr16(ss, a);     /* lsr A */
   ESEP(H0 + 0x04, 0x20);                    /* sep #$20 */
   ESI(H0 + 0x06); x = a; ss_set_nz16(ss, x);/* tax (index is 16-bit: the whole A) */
-  ES(H0 + 0x07, 2);                         /* adc $1C — carry from the lsr above */
+  ES(H0 + 0x07, 2);                         /* adc $1C: carry from the lsr above */
   a = alu8_adc(ss, a, t_read8(ss, dp + oam_rows_0));
   const bool room0 = ss_n(ss);
   ES(H0 + 0x09, 1); t_branch(ss, room0);    /* bmi */
@@ -572,7 +572,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   }
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
-  /* ---- row block 1 header — $A813 ------------------------------------- */
+  /* ---- row block 1 header: $A813 -------------------------------------- */
   EREP(H1 + 0x00, 0x20);                    /* rep #$20 */
   ESI(H1 + 0x02); a = x; ss_set_nz16(ss, a);/* txa */
   ESI(H1 + 0x03); a = alu_lsr16(ss, a);     /* lsr A */
@@ -621,7 +621,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   }
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
-  /* ---- row block 2 header — $A882 ------------------------------------- */
+  /* ---- row block 2 header: $A882 -------------------------------------- */
   EREP(H2 + 0x00, 0x20);                    /* rep #$20 */
   ESI(H2 + 0x02); a = x; ss_set_nz16(ss, a);/* txa */
   ESI(H2 + 0x03); a = alu_lsr16(ss, a);     /* lsr A */
@@ -651,7 +651,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   }
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
-  /* ---- the emitter's own return — $A8F1 ------------------------------- */
+  /* ---- the emitter's own return: $A8F1 -------------------------------- */
   EREP(X2 + 0x00, 0x20);                    /* rep #$20 */
   ES(X2 + 0x02, 2); t_write16(ss, dp + oam_write_ptr, x);       /* stx oam_write_ptr */
   ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
@@ -721,7 +721,7 @@ void oam_emit_frame_3row(SnesState* ss)      { (void) emit_3row(ss); }
 void oam_emit_frame_3row_flip(SnesState* ss) { (void) emit_3row_flip(ss); }
 
 /* ---------------------------------------------------------------------------
- * entity_build_oam_frame — $C0:A538
+ * entity_build_oam_frame: $C0:A538
  *
  * Called once per main-loop iteration with jsl from $80:823F, so the program
  * bank is $80 and the routine returns with rtl. It walks all sixteen entries of
@@ -746,7 +746,7 @@ void oam_emit_frame_3row_flip(SnesState* ss) { (void) emit_3row_flip(ss); }
  * Exit: DB = $80 (the pea $8080 / plb / plb at both tails), A = $8080.
  * ------------------------------------------------------------------------- */
 
-/* pea $8080 ; plb ; plb ; rtl — the identical tails at $A54D and $A6CD. */
+/* pea $8080 ; plb ; plb ; rtl: the identical tails at $A54D and $A6CD. */
 static void oam_frame_exit(SnesState* ss, uint16_t base) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
@@ -786,7 +786,7 @@ loc_A53D: ;
     }
   }
 
-  /* loc_C0A553 — DB = the program bank for the rest of the iteration */
+  /* loc_C0A553: DB = the program bank for the rest of the iteration */
   S(0xA553, 1);                             /* C0A553 phk */
   ss_idle(ss); ss_check_int(ss); ss_push8(ss, pb);
   S(0xA554, 1); t_plb(ss);                  /* C0A554 plb */
@@ -824,7 +824,7 @@ loc_A53D: ;
   ss_set_nz16(ss, a);
   S(0xA579, 2); t_write16(ss, dp + sprite_frame_bank, a);  /* C0A579 sta sprite_frame_bank */
   S(0xA57B, 2); t_write16(ss, dp + sprite_frame_bank2, a); /* C0A57B sta sprite_frame_bank2 */
-  S(0xA57D, 1);                             /* C0A57D xba — the frame's Y bias */
+  S(0xA57D, 1);                             /* C0A57D xba: the frame's Y bias */
   {
     /* xba is three cycles, not two: the opcode fetch and two internal cycles
      * with the interrupt latch between them, so it is not an SI(). */
@@ -881,7 +881,7 @@ loc_A53D: ;
     if(!onscreen) { S(0xA5B6, 3); goto loc_A6BF; }  /* C0A5B6 jmp loc_C0A6BF */
   }
 
-  /* loc_C0A5B9 — pick the emitter from the two flip bits */
+  /* loc_C0A5B9: pick the emitter from the two flip bits */
   S(0xA5B9, 3); t_index(ss);                /* C0A5B9 lda entity_flags,Y */
   a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_flags + y)));
   ss_set_nz16(ss, a);
@@ -1031,9 +1031,9 @@ loc_A62B: ;
   S(0xA644, 2);                             /* C0A644 adc sprite_frame_ptr */
   a = alu_adc16(ss, a, t_read16(ss, dp + sprite_frame_ptr));
   SI(0xA646); y = a; ss_set_nz16(ss, y);    /* C0A646 tay */
-  S(0xA647, 3); t_index(ss);                /* C0A647 sta $0A8E,X — source addr */
+  S(0xA647, 3); t_index(ss);                /* C0A647 sta $0A8E,X: source addr */
   t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 4 + x)), a);
-  S(0xA64A, 2);                             /* C0A64A lda $21 — the word at $21/$22 */
+  S(0xA64A, 2);                             /* C0A64A lda $21: the word at $21/$22 */
   a = t_read16(ss, dp + oam_tile_src_lo);
   ss_set_nz16(ss, a);
   S(0xA64C, 3); a = alu_and16(ss, a, 0x00FF);  /* C0A64C and #$00FF */
@@ -1042,7 +1042,7 @@ loc_A62B: ;
   SI(0xA651); a = alu_asl16(ss, a);         /* C0A651 asl A */
   SI(0xA652); a = alu_asl16(ss, a);         /* C0A652 asl A */
   SI(0xA653); a = alu_asl16(ss, a);         /* C0A653 asl A */
-  S(0xA654, 3); t_index(ss);                /* C0A654 sta $0A8A,X — byte count */
+  S(0xA654, 3); t_index(ss);                /* C0A654 sta $0A8A,X: byte count */
   t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 0 + x)), a);
   S(0xA657, 2); t_write16(ss, dp + depth_sort_key, a);  /* C0A657 sta $52 */
   SI(0xA659); a = y; ss_set_nz16(ss, a);    /* C0A659 tya */
@@ -1058,12 +1058,12 @@ loc_A62B: ;
   SI(0xA664); a = alu_asl16(ss, a);         /* C0A664 asl A */
   SI(0xA665); a = alu_asl16(ss, a);         /* C0A665 asl A */
   SI(0xA666); a = alu_asl16(ss, a);         /* C0A666 asl A */
-  S(0xA667, 3); t_index(ss);                /* C0A667 sta $0A8C,X — VRAM address */
+  S(0xA667, 3); t_index(ss);                /* C0A667 sta $0A8C,X: VRAM address */
   t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 2 + x)), a);
   S(0xA66A, 2);                             /* C0A66A lda sprite_frame_bank */
   a = t_read16(ss, dp + sprite_frame_bank);
   ss_set_nz16(ss, a);
-  S(0xA66C, 3); a = alu_ora16(ss, a, 0xFF00);  /* C0A66C ora #$FF00 — the pending flag */
+  S(0xA66C, 3); a = alu_ora16(ss, a, 0xFF00);  /* C0A66C ora #$FF00: the pending flag */
   S(0xA66F, 3); t_index(ss);                /* C0A66F sta $0A90,X */
   t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), a);
   SI(0xA672); a = x; ss_set_nz16(ss, a);    /* C0A672 txa */
@@ -1072,7 +1072,7 @@ loc_A62B: ;
   SI(0xA677); x = a; ss_set_nz16(ss, x);    /* C0A677 tax */
   S(0xA678, 3); t_index(ss);                /* C0A678 stz $0A90,X */
   t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), 0);
-  S(0xA67B, 2);                             /* C0A67B lda $23 — the word at $23/$24 */
+  S(0xA67B, 2);                             /* C0A67B lda $23: the word at $23/$24 */
   a = t_read16(ss, dp + oam_tile_src_hi);
   ss_set_nz16(ss, a);
   S(0xA67D, 3); a = alu_and16(ss, a, 0x000F);  /* C0A67D and #$000F */
@@ -1153,12 +1153,12 @@ loc_A6CD: ;
   oam_frame_exit(ss, 0xA6CD);
 }
 
-/* loc_C0A6CD — the tail on its own, because an emitter reaches it from outside.
+/* loc_C0A6CD: the tail on its own, because an emitter reaches it from outside.
  *
  * Every emitter's "OAM is full" exit is `pla ; jmp loc_C0A6CD`: it throws away
  * the jsr's return address and lands here, four instructions into a routine
  * whose entry is $A538. The address therefore has to be dispatchable in its own
- * right -- it was the ROM's code until --no-cpu, which resolves every pc
+ * right: it was the ROM's code until --no-cpu, which resolves every pc
  * through the registry. The body is the same `pea $8080 ; plb ; plb ; rtl` the
  * label above runs, entered with A/X/Y already published by the emitter. */
 void oam_frame_tail(SnesState* ss) {
@@ -1166,7 +1166,7 @@ void oam_frame_tail(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_render_order_reset — $C0:AEB9
+ * entity_render_order_reset: $C0:AEB9
  *
  * Called once from the post-reset bring-up at $C0:8073, before the first sort:
  * fills entity_render_order with the identity permutation, entry n = n * 2, so

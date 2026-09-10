@@ -11,7 +11,7 @@
  * reads the next event byte: a byte below $80 is a sequence command dispatched
  * through `jmp (seq_cmd_table+x)`, anything else is a note for seq_note.
  *
- * The dispatch is modelled rather than shortcut -- the vector is read out of
+ * The dispatch is modelled rather than shortcut: the vector is read out of
  * ARAM where the SPC700's own operand fetch reads it, and the body leaves by
  * pointing the pc at it, so the handler's hook fires and is credited exactly as
  * the ROM's `jmp` would have reached it. Every `call` here goes the same way:
@@ -20,7 +20,7 @@
  * scale_volume ($0C59) reach their own C bodies through the registry, exactly
  * as the ROM's `call` would have reached the routine.
  *
- * Timer 0's period is the whole point of the routine, so every instruction is
+ * The routine exists to spend timer 0's period, so every instruction is
  * modelled: a body that computed the tick instead of spending it would move the
  * spin loop and with it every note in the song.
  */
@@ -42,9 +42,9 @@
 /* `call abs` (case 0x3f) minus the three fetches the step supplies: an idle,
  * the return address pushed, two more idles, then the callee runs on the
  * reference SPC so any hook it hits still fires. Returns true when the catch-up
- * slice ended inside the callee, which leaves the callee running -- safe
- * because the address pushed is the real return address, so its own `ret` lands
- * where the driver expects. */
+ * slice ended inside the callee, which leaves the callee running. The address
+ * pushed is the real return address, so its own `ret` lands where the driver
+ * expects. */
 static bool call_hooked(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
   sps_idle(sp);
   uint8_t sp0 = sps_sp(sp);
@@ -56,7 +56,7 @@ static bool call_hooked(SpcState* sp, uint16_t ret_addr, uint16_t callee) {
 }
 
 /* ---------------------------------------------------------------------------
- * tick_wait — $0781
+ * tick_wait: $0781
  *
  * The tail every command handler jumps back to. Not playing: straight back to
  * main_loop. Playing: timer 0 gets the song's period from $E4, and $FD is
@@ -110,12 +110,12 @@ static void tick_wait(SpcState* sp) { tick_wait_at(sp, 0x0781); }
 static void loc_078E(SpcState* sp) { tick_wait_at(sp, 0x078E); }
 
 /* ---------------------------------------------------------------------------
- * channel_loop — $07A9
+ * channel_loop: $07A9
  *
  * X walks 0..7. On a music tick the channel is stepped through seq_step until
  * the sequencer stops returning 1 (a command handler returns 1 so that several
  * commands can be consumed in one tick); otherwise it only gets the per-tick
- * update. A channel whose sfx_override ($01E0+x) is set repeats the whole thing
+ * update. A channel whose sfx_override ($01E0+x) is set repeats the whole pass
  * on voice x|8 against the sfx tick flag.
  * ------------------------------------------------------------------------- */
 static void channel_loop(SpcState* sp) {
@@ -183,13 +183,13 @@ static void channel_loop(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_step — $0813
+ * seq_step: $0813
  *
  * One sequencer tick for channel X. An inactive channel returns 0 at once.
  * Otherwise the note duration $34+x counts down: at 1 the voice is keyed off if
  * its gate has expired, at 0 or $FF the next event is fetched (or the gate
  * counter ticks instead). Every path ends through loc_084A, which runs the
- * per-tick engine and returns 0 -- "nothing more to consume this tick".
+ * per-tick engine and returns 0: "nothing more to consume this tick".
  * ------------------------------------------------------------------------- */
 static void seq_step(SpcState* sp) {
   uint8_t a = sps_a(sp), x = sps_x(sp), y = sps_y(sp);
@@ -260,13 +260,13 @@ static void seq_step(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_fetch — $0850
+ * seq_fetch: $0850
  *
  * Read the event byte at the channel's sequence pointer ($44/$54+x, copied into
  * the $00 pointer pair). A byte with bit 7 clear is a sequence command: X is
  * saved, the byte doubled and `jmp (seq_cmd_table+x)` reads the handler address
  * out of the table in ARAM. Anything else is a note, and after seq_note the
- * body finishes on seq_step's own tail at loc_084A -- which is where the ROM's
+ * body finishes on seq_step's own tail at loc_084A, where the ROM's
  * `bra loc_0865` lands.
  * ------------------------------------------------------------------------- */
 static void seq_fetch(SpcState* sp) {
@@ -294,7 +294,7 @@ static void seq_fetch(SpcState* sp) {
   if(call_hooked(sp, 0x0865, SEQ_NOTE)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
   S(0x0865, 2); s_branch(sp, true);                     /* 0865 bra loc_084A */
-  /* loc_084A — seq_step's tail, reached by the branch above */
+  /* loc_084A: seq_step's tail, reached by the branch above */
   S(0x084A, 3);                                         /* 084A call channel_update */
   if(call_hooked(sp, 0x084D, CHANNEL_UPDATE)) return;
   a = sps_a(sp); x = sps_x(sp); y = sps_y(sp);
@@ -303,7 +303,7 @@ static void seq_fetch(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_note — $0867
+ * seq_note: $0867
  *
  * A note event. $80 is a rest: key the voice off and zero its pitch. $E0 and
  * $E1 replay the two notes the channel has stored; anything else is a note
@@ -545,7 +545,7 @@ static void seq_note(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_note_length — $0983
+ * seq_note_length: $0983
  *
  * The duration and gate that follow a note. A non-zero note_len ($0120+x) is a
  * length the sequence set once and reuses, and costs one event byte; otherwise
@@ -605,7 +605,7 @@ static void seq_note_length(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * channel_update — $09BC
+ * channel_update: $09BC
  *
  * The per-tick modulation engine, run once for every channel on every timer
  * tick. The channel's flag byte $0150+x selects three independent stages:
@@ -933,7 +933,7 @@ loc_0B17:
 }
 
 /* ---------------------------------------------------------------------------
- * seq_end — $0B18
+ * seq_end: $0B18
  *
  * Sequence command $00. seq_fetch pushed X before the table jump, so the first
  * instruction takes it back. The channel is marked inactive and its voice keyed
@@ -1009,7 +1009,7 @@ static void seq_end(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_pop_x — $0B64
+ * seq_pop_x: $0B64
  *
  * The helper the sequence-command handlers call first. seq_fetch pushed X and
  * then jumped through the table, so the handler's own `call` frame sits on top
@@ -1028,7 +1028,7 @@ static void seq_pop_x(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * seq_retrigger — $0B69
+ * seq_retrigger: $0B69
  *
  * Duration 1, gate 0: the channel fetches its next event on the very next tick.
  * Every sequence command that consumes operands and then wants the sequencer to
@@ -1045,13 +1045,13 @@ static void seq_retrigger(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * sfx_start — $112A
+ * sfx_start: $112A
  *
  * Command below $80: start sound effect A on channel X. The id is range-checked
  * against the two banks' counts ($2410 and $2E94) and forced to 0 if it is out
  * of range, then doubled into a pointer-table index. The effect runs on voice
- * X|8 -- the same DSP voice as the music channel underneath, which is why
- * $01E0+x is set on both -- with the channel state reset to defaults: full
+ * X|8 (the same DSP voice as the music channel underneath, which is why
+ * $01E0+x is set on both) with the channel state reset to defaults: full
  * volume, ADSR $8E/$E0, no transpose, no finetune, no envelope flags. The
  * sequence pointer comes from sfx_bank1_ptrs ($2412) below $C0 or
  * sfx_bank2_ptrs ($2E96) above it, and the voice's noise and echo bits are

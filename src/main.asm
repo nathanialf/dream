@@ -1,4 +1,4 @@
-; Dream: Land of Giants (SNES prototype) - reassemblable disassembly
+; Dream: Land of Giants (SNES prototype): reassemblable disassembly
 ; build: make (see README.md); data/ is produced by tools/extract.py from your own ROM
 hirom
 

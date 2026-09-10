@@ -1,4 +1,4 @@
-# `dream` — the native application. Built only when SDL3 is present; the headless
+# `dream`: the native application. Built only when SDL3 is present; the headless
 # harness never depends on it (see the parent CMakeLists.txt).
 
 # The per-routine cycle charge dream_harness calibrated (config/recomp_cycles.txt)
@@ -43,8 +43,8 @@ configure_file(${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/dream_cycles.h COPYONLY)
 
 # The gallery's table of what the ROM holds, generated from the committed manifest
-# config/assets.txt at configure time. It carries offsets, kinds, paths and notes --
-# never ROM bytes (docs/LEGAL.md) -- and CONFIGURE_DEPENDS re-runs cmake when the
+# config/assets.txt at configure time. It carries offsets, kinds, paths and notes
+# (never ROM bytes, docs/LEGAL.md), and CONFIGURE_DEPENDS re-runs cmake when the
 # manifest changes.
 set(ASSETS_TXT ${CMAKE_CURRENT_SOURCE_DIR}/../../config/assets.txt)
 set(GALLERY_TABLE ${CMAKE_CURRENT_BINARY_DIR}/gallery_table.h)
@@ -74,6 +74,7 @@ add_executable(dream
   gallery.c
   menubar.c
   music.c
+  scene.c
   ${GALLERY_TABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/snes_state.c
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/spc_state.c

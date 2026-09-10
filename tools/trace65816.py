@@ -375,8 +375,8 @@ def strict_code(f, end, m, x, bank):
     return False
 
 def orphan_sweep(regions, m=0, x=0, min_gap=24):
-    """Seed unreferenced but code-looking gaps (reached at runtime through RAM pointers we cannot
-    resolve statically). Labelled orphan_XXXXXX so their provenance stays visible."""
+    """Seed unreferenced but code-looking gaps (reached at runtime through RAM pointers the
+    tracer cannot resolve statically). Labelled orphan_XXXXXX so their provenance stays visible."""
     found = 0
     for lo, hi in regions:
         f = lo

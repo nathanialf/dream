@@ -167,7 +167,7 @@ def main():
             f += 2 * len(t.tables[f]); last_org = f
             continue
         # data run: up to next instruction/table/label (and, outside the code-embedded-table
-        # ranges, up to the end of the named asset covering `start` -- this keeps every run a
+        # ranges, up to the end of the named asset covering `start`; this keeps every run a
         # whole-file or sub-range reference into exactly one asset, never straddling two).
         start = f
         asset = asset_at(start)
@@ -196,7 +196,7 @@ def main():
         last_org = f
     for fp in bank_files.values(): fp.close()
     with open(os.path.join(srcdir, 'main.asm'), 'w') as fp:
-        fp.write('; Dream: Land of Giants (SNES prototype) - reassemblable disassembly\n')
+        fp.write('; Dream: Land of Giants (SNES prototype): reassemblable disassembly\n')
         fp.write('; build: make (see README.md); data/ is produced by tools/extract.py from your own ROM\n')
         fp.write('hirom\n\n')
         fp.write('; RAM / register symbols\n')

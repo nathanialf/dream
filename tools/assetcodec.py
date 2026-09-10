@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""assetcodec.py -- lossless, byte-exact codecs between the raw asset bytes that
+"""assetcodec.py: lossless, byte-exact codecs between the raw asset bytes that
 tools/extract.py writes under data/ (per config/assets.txt) and human-editable files.
 
     python3 tools/assetcodec.py decode <kind> <asset.bin> <outdir>
@@ -618,7 +618,7 @@ def encode_sprite_table(kind, primary, outpath):
 #   tiles   (ntiles1 + (ntiles2 & 0x7F)) * 32 bytes of 4bpp tiles
 #   trailer 0-40 bytes no traced code reads
 # Every sprite is 16x16 (the size bit from data_C0A6D3/data_C0A6D7 is always set), and the
-# emitter walks tile numbers with `tile += 2; if tile & 0x10: tile += 0x10` -- i.e. a
+# emitter walks tile numbers with `tile += 2; if tile & 0x10: tile += 0x10`, i.e. a
 # 16-tile-wide VRAM grid where a sprite owns tiles t, t+1, t+16, t+17.  Group 1 starts at
 # tile 0, group 2 at header byte 2 (tile_off); group 1's blob occupies grid slots
 # 0..ntiles1-1 and group 2's starts at grid slot vram_off (header byte 6).
@@ -648,7 +648,7 @@ def _frame_layout(data):
     trailer_len = len(data) - tiles_end
     if trailer_len > 64:
         # documented live-format trailers are 2-40 bytes; anything larger means the
-        # 8-byte header did not really apply (the alternate-format regions).
+        # 8-byte header does not apply (the alternate-format regions).
         raise CodecError('trailer too long for the live format')
     oam = []
     t = 0
@@ -790,7 +790,7 @@ def encode_sprite_frame(kind, primary, outpath):
 # tools/gen_assets.py's parse_sprite_frame_alt_region (a header-scan chain walk: the 8 bytes
 # before a maximal run of >=8 consecutive 3-byte {x,y,attr} records are a frame's header, and
 # the frame runs to the next one's header), which reproduces exactly 82 frames in
-# 1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5 -- 113 total, matching the manual header-scan count.
+# 1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5: 113 total, matching the manual header-scan count.
 # Each config/assets.txt sprite_frame_alt asset is already exactly one such frame (or, for
 # frame_alt_tail, a partial one truncated by the ROM's end), so decode only has to re-run the
 # same record-run scan locally to recover n; it always reproduces the same n the asset was
@@ -799,19 +799,19 @@ def encode_sprite_frame(kind, primary, outpath):
 #   header  8 bytes; byte 3 is 0x00 in every frame observed, the rest correlate loosely with
 #           the record/tile counts but not through one clean invertible formula (kept verbatim,
 #           not decoded, so nothing is lost)
-#   records n x 3 bytes {x, y, attr}; attr is a standard SNES OBJ low-attribute byte --
+#   records n x 3 bytes {x, y, attr}; attr is a standard SNES OBJ low-attribute byte,
 #           vhoopppN: bit7 v-flip, bit6 h-flip, bits5-4 priority, bits3-1 palette, bit0 tile
-#           index bit 8 -- decomposed losslessly below (the 5 fields cover all 8 bits with no
+#           index bit 8. Decomposed losslessly below (the 5 fields cover all 8 bits with no
 #           overlap, so decode+encode round-trips any byte value even though the corpus only
-#           actually uses 0x1E/0x20, i.e. v=h=0 throughout: no observed frame is flipped)
+#           uses 0x1E/0x20, i.e. v=h=0 throughout: no observed frame is flipped)
 #   tiles   4bpp, 32 bytes each; the tile *count* is not stored redundantly anywhere useful, so
-#           it is simply "whatever floors evenly out of the bytes left after the header and
-#           records", with 0-31 leftover bytes (rare) kept as a trailer -- same convention as
+#           it is "whatever floors evenly out of the bytes left after the header and
+#           records", with 0-31 leftover bytes (rare) kept as a trailer; same convention as
 #           the live format's undecoded trailer
 #
 # Tile-to-sprite assignment: the live format's known rule (4 tiles/16x16 sprite, `tile += 2`
-# wrapping every 16) does not fit here -- these frames average ~2.4 tiles per record, far
-# short of 4/record -- so each record is instead assigned exactly one 8x8 tile, in sequence
+# wrapping every 16) does not fit here: these frames average ~2.4 tiles per record, far
+# short of 4/record, so each record is instead assigned exactly one 8x8 tile, in sequence
 # (record i -> tile i); any tiles beyond the record count are unclaimed and, as in the live
 # decoder, spilled into the strip below the canvas. This is a rendering guess, unvalidated by
 # any code (nothing reads this format), but it does not affect round-trip exactness: the
@@ -898,7 +898,7 @@ def decode_sprite_frame_alt(kind, data, outdir, stem):
         'kind': 'sprite_frame_alt', 'format': 'alt',
         'note': 'PNG = a best-effort assembly (one 8x8 tile per OAM record, in order; unclaimed '
                 'tiles spilled below) of a frame from the alternate sprite format, unreferenced '
-                'by any live code -- see docs/data_formats.md 1b-alt. "tiles" is authoritative '
+                'by any live code; see docs/data_formats.md 1b-alt. "tiles" is authoritative '
                 'for round-tripping regardless of the assembly guess.',
         'header': _hex(header),
         'canvas': {'origin_x': ox, 'origin_y': oy, 'width': cw, 'height': chh,

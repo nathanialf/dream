@@ -7,8 +7,8 @@
  *
  *   recomp_hooks[]        --hook-table demo: one routine, clear_sprite_table,
  *                         which now lives in recomp/src/oam.c like every other
- *                         converted routine. The wrapper below is what makes it
- *                         a *declining* hook: it checks the CPU mode the routine
+ *                         converted routine. The wrapper below makes it a
+ *                         *declining* hook: it checks the CPU mode the routine
  *                         assumes and hands the instruction back to the ROM if it
  *                         does not hold. Registry routines never decline.
  *   recomp_hooks_empty[]  --hook-table empty: the zero-entry table.

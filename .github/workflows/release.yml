@@ -3,7 +3,7 @@ name: release
 # Tag v* -> one zip per platform on the GitHub release.
 #
 # A zip holds three files and nothing else: the game, the README and the LICENSE.
-# No ROM, no extracted data, no build of the ROM (docs/LEGAL.md) -- the player
+# No ROM, no extracted data, no build of the ROM (docs/LEGAL.md): the player
 # supplies their own DREAM.sfc and puts it next to the executable
 # (recomp/app/README.md, "Windows"). The staging step counts the files before
 # zipping, so "no data" is a gate rather than a promise.
@@ -23,7 +23,7 @@ on:
 permissions:
   contents: write
 
-# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+# Force JS actions onto Node.js 24: Node 20 is deprecated on the runners.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 

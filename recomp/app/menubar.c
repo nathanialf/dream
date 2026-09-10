@@ -1,4 +1,4 @@
-/* menubar — see menubar.h.
+/* menubar: see menubar.h.
  *
  * Everything is laid out in "logical" units (the same units the 5x7 font is drawn in)
  * and multiplied by an integer UI scale that follows the window width, so the bar looks
@@ -55,6 +55,7 @@ static const MenuItem kViewItems[] = {
 };
 
 static const MenuItem kGalleryItems[] = {
+  { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SCENES, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SPRITES, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SPRITES_ALT, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_BACKGROUNDS, CHK_SECTION },

@@ -1,8 +1,8 @@
 # Recomp design
 
 Target: a native C reimplementation of the game, verified frame-by-frame against the
-original ROM. This page records the decisions that shape it; it is updated as the port
-takes shape.
+original ROM. This page records the design decisions; it is updated as the port
+progresses.
 
 ## Verification
 
@@ -19,7 +19,7 @@ takes shape.
   few memory cells from `config/recomp_units.txt`, runs the ROM's routine and the C body
   from that identical state, and compares the seven regions, every register and the cycle
   counts. At least four seeds each, all of which must pass. `config/recomp.txt` marks a
-  routine credited this way `; unit`, so the badge stays readable as what it is.
+  routine credited this way `; unit`, so the badge shows how each routine was credited.
 - The disassembly (`src/`) is the source of truth for behaviour; the C mirrors its
   routine boundaries and names so the two can be read side by side.
 
@@ -51,7 +51,7 @@ Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
 - **View**: Scale 1x/2x/3x/4x, Fit to window (integer), Aspect 8:7 or 4:3, Fullscreen.
   Scaling never touches emulation state; there is no config file, the window size is the
   only memory.
-- **Gallery**: a viewer, not a settings screen. Opening a page pauses the game and shows
+- **Gallery**: a read-only viewer. Opening a page pauses the game and shows
   the page in the viewport; closing resumes exactly. It shows the ROM's content that the
   game itself never displays:
 
@@ -92,10 +92,10 @@ are documented in `recomp/README.md`.
 
 `recomp/app/` holds `dream`: the game itself, an SDL3 program that loads the
 user's own ROM (command line, `./baserom/DREAM.sfc`, `~/.local/share/dream/`, in
-that order — on Windows, next to `dream.exe` and then `%APPDATA%\dream\` first;
+that order; on Windows, next to `dream.exe` and then `%APPDATA%\dream\` first;
 refused unless the SHA-1 matches), installs every routine the recomp
 has registered, and runs at 60.0988 Hz with picture, sound and a gamepad. No
-launcher, no menu, no settings, no config file — the mapping above is compiled in,
+launcher, no menu, no settings, no config file: the mapping above is compiled in,
 and Escape quits.
 
     make app        # builds SDL3 into build/sdl3 first if the system has none
@@ -103,7 +103,7 @@ and Escape quits.
 
 `dream` and `dream_harness` are deliberately the same machine: the same core, the
 same hook dispatcher, the same accessors and the same cycle charge, with SDL as
-the only addition. Two hidden flags keep that checkable — `--frames N --input
+the only addition. Two hidden flags keep that checkable: `--frames N --input
 SCRIPT` runs a harness input script and prints the harness's own frame line, which
 must agree field for field with `dream_harness --hooks on` over the same script.
 The picture and the sound are still produced under those flags, so the check
@@ -121,27 +121,27 @@ each block so the two can be read side by side. Each file registers its own entr
 addresses from a file-scope constructor, so adding a routine touches no central
 table and no build file.
 
-Routine bodies are transliterations, not rewrites: the same branches in the same
+Routine bodies are transliterations: the same branches in the same
 order, the same flag side effects, and the same bus accesses in the same order,
 because this ROM turns out to observe its own timing in two places (the SPC upload
 handshake counts words against the APU's clock, and the joypad wait loop reads the
 hblank flag). `recomp/src/dream_time.h` supplies one helper per 65816 access
 pattern for that; `--profile` measures a routine against the ROM's own per-call
-cost and reports the two as intervals, so "exact" is a thing the harness confirms
-rather than a thing the author claims.
+cost and reports the two as intervals, so an exact-cost claim is measured rather
+than asserted.
 
 A hook is atomic where the routine it replaces is not, so every loop offers the
 ROM the chance to take the rest of the routine back (`ss_yield_wanted`) at the top
-of each iteration. That is what keeps a several-thousand-cycle routine honest when
-the frame boundary or an interrupt lands inside it.
+of each iteration. Without that, a several-thousand-cycle routine would run past a
+frame boundary or an interrupt that lands inside it.
 
 ## Running without the CPUs
 
 The end state of the port is that the C *is* the program, and `--no-cpu` is that
 state made runnable and checkable. In it neither emulated processor executes an
 instruction: a scheduler starts at the reset body and follows every pc the machine
-hands over — a tail `jmp`, a return, a callee frame, interrupt entry, the
-resumption of a routine that stopped at a frame boundary — by looking up the body
+hands over (a tail `jmp`, a return, a callee frame, interrupt entry, the
+resumption of a routine that stopped at a frame boundary) by looking up the body
 that owns the address in the registry. The PPU, DMA and HDMA, the DSP, the APU
 timers and the port handshake keep running out of the vendored core, driven by the
 cycles the bodies already charge, so the frame timing is identical rather than
@@ -149,7 +149,7 @@ close: every gate script passes `--lockstep` against full emulation at +0 master
 cycles and +0 APU cycles with 0 instructions executed.
 
 Two consequences shape it. A pc with no body is a fatal error naming the pc and the
-body that handed it over, which makes the mode the port's dead-code check: it cannot
+body that handed it over, so the mode doubles as the port's dead-code check: it cannot
 run at all until every address the program reaches has a body, and where the program
 jumps into the middle of a routine that address needs a registry row and a body that
 can start there. And a body cannot be handed back to the ROM half-finished, because
@@ -163,8 +163,8 @@ switch and destroy with an explicit stack size, implemented over
 and exercised without a ROM by `dream_harness --test-coro`.
 
 `recomp/README.md` ("Running without the CPUs") documents the scheduler, the
-interrupt rules, the SPC700 side and the one exception — the SPC700's IPL boot ROM,
-the console's firmware rather than this ROM's program, which has no body and still
+interrupt rules, the SPC700 side and the one exception: the SPC700's IPL boot ROM.
+It is the console's firmware rather than this ROM's program, has no body, and still
 executes on the core at power-on.
 
 ## The sound driver
@@ -175,11 +175,11 @@ boot and polling its command port for the rest of the session (`spc/driver.asm`,
 `recomp/include/spc_state.h` and dispatched from a hook in the vendored SPC700's
 instruction loop, exactly as `recomp/src/` is on the 65816 side.
 
-Two things about it are its own. There is no cycle charge to calibrate: an APU
+Two properties of that side differ. There is no cycle charge to calibrate: an APU
 cycle is spent by exactly one read, write or idle, so a body that replays a
 routine's access sequence costs what the routine cost by construction, and
 `dream_harness --test-spc-timing` checks the per-opcode figures against the core.
-And the yield boundary is the APU catch-up slice rather than the frame — the SPC
+And the yield boundary is the APU catch-up slice rather than the frame: the SPC
 runs in steps against the CPU's clock, so the reference stops mid-routine at an
 instant a hooked run would otherwise have to run past.
 

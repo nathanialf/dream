@@ -24,7 +24,7 @@ endif()
 # winpthreads is the one everything else expects.
 find_program(CMAKE_C_COMPILER   NAMES ${_prefix}-gcc-posix ${_prefix}-gcc HINTS ${_hints} REQUIRED)
 find_program(CMAKE_RC_COMPILER  NAMES ${_prefix}-windres                  HINTS ${_hints})
-# Nothing here is C++ -- the port, the core and SDL3 are C -- so a distribution
+# Nothing here is C++ (the port, the core and SDL3 are C), so a distribution
 # that ships only the C cross driver (this one does) is enough. The variable is
 # still set when the g++ driver exists, for anything that enables CXX.
 find_program(CMAKE_CXX_COMPILER NAMES ${_prefix}-g++-posix ${_prefix}-g++ HINTS ${_hints})

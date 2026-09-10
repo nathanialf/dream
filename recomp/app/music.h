@@ -1,12 +1,11 @@
-/* music — a scratch SNES for the gallery's Music page.
+/* music: a scratch SNES for the gallery's Music page.
  *
- * A song or a sound effect is not a file that can be played: it is a command to the
- * sound driver running on the APU, and the driver only exists once the 65816 has
- * uploaded it. So the Music page gets a machine of its own — a second core with the
- * same ROM, booted far enough that spc_init has uploaded loader and driver — and asks
- * it for a song or an effect through the same routines the game calls (spc_command,
- * sfx_command_dispatch), over the same emulated APU ports. Its DSP output is what the
- * page plays.
+ * A song or a sound effect is a command to the sound driver running on the APU, and the
+ * driver only exists once the 65816 has uploaded it. So the Music page gets a machine of
+ * its own (a second core with the same ROM, booted far enough that spc_init has uploaded
+ * loader and driver) and asks it for a song or an effect through the same routines the
+ * game calls (spc_command, sfx_command_dispatch), over the same emulated APU ports. Its
+ * DSP output is what the page plays.
  *
  * The game's own machine is never touched: it stays paused, byte for byte, while this
  * one plays. Closing the page destroys this machine.

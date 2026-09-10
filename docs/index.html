@@ -11,12 +11,12 @@
    * fetch at the bottom of the script.
    *
    * This dashboard shares its visual system with the sibling ICO decomp
-   * dashboard (nathanialf/ico, docs/index.html) — same near-black ground,
+   * dashboard (nathanialf/ico, docs/index.html): same near-black ground,
    * hairline borders, square corners, no shadows, mono micro-labels, one
    * serif for headings, contrast-audited text ramp, same 1040px measure.
    * The one deliberate difference is the accent below: a green lifted
    * from the game's own sprite palettes instead of ICO's sand, so the
-   * highlight is literally a colour the prototype puts on screen.
+   * highlight is a colour the prototype puts on screen.
    *
    * SHAPE: one headline (recomp), one section list, one table. Everything
    * that was a second number, a second tone or a duplicate rollup is now
@@ -25,7 +25,7 @@
    * page is short by default and grows only where asked.
    *
    * FONTS: named FIRST so a local install is used when the visitor has
-   * one, with a system stack behind it. Nothing is fetched either way —
+   * one, with a system stack behind it. Nothing is fetched either way;
    * see --f-body/--f-serif/--f-mono below.
    *
    * COLOUR: the neutral ramp (near-black ground through near-white text)
@@ -33,7 +33,7 @@
    * dashboard uses, so the two read as one family of pages. The accent is
    * new: #00c552, which is SNES colour (r=0, g=24, b=10) from the green
    * ramp of the main sprite palette block (data/palettes/palettes_main_block,
-   * decoded by tools/assetcodec.py) — one of the game's own greens, chosen
+   * decoded by tools/assetcodec.py), one of the game's own greens, chosen
    * from the candidates that clear 4.5:1 on the ground. Every text role
    * sits at least one step up the ladder from the portfolio-derived values
    * ICO measured, so text clears WCAG 1.4.3 (4.5:1) and control outlines
@@ -47,23 +47,23 @@
     /* -- surfaces -------------------------------------------------------- */
     --bg:#0a0a0a; --panel:#0d0d0d; --field:#171717; --hover:#171717;
     /* -- hairline. A softer #1a1a1a rule is deliberately NOT used: at
-          1.1:1 it disappears, and every hairline here is load-bearing
+          1.1:1 it disappears, and every hairline here carries the page's
           structure. ---------------------------------------------------- */
     --line:#262626;
 
     /* -- text ramp, ratios measured against --bg ------------------------ */
     --fg:#e5e5e5;      /* 15.7:1 */
-    --fg2:#d4d4d4;     /* 13.4:1 — section titles */
+    --fg2:#d4d4d4;     /* 13.4:1, section titles */
     --dim:#a3a3a3;     /*  7.9:1 */
     --faint:#8a8a8a;   /*  5.7:1 */
-    --ctl:#737373;     /*  4.2:1 — control outline */
+    --ctl:#737373;     /*  4.2:1, control outline */
 
     /* -- accent + status -------------------------------------------------
        See the block comment above for why one of the game's greens. There
        is exactly ONE accent tone on this page now: the old lighter
        --accent-dim tint carried the "extracted" level as a second fill,
        and that level moved into row hover text, so the tint is gone. Every
-       bar is one tone, and a bar means one thing. */
+       bar is one tone, and a bar carries one meaning. */
     --accent:#00c552;  /* 8.7:1 on --bg; SNES (0,24,10) from the sprite palettes */
     --on-accent:#0a0a0a;              /* 8.7:1 the other way round         */
     /* Focus is its OWN channel, not the accent: the selected control is
@@ -74,7 +74,7 @@
     --bar:#262626;                    /* progress track                    */
     --warn:#d4a000; --warn-bg:#2d2000; --warn-line:#4d3800;
     --err:#f87171;     /*  7.2:1 */
-    --mkn:var(--faint);               /* "unlabelled" marker — 5.7:1       */
+    --mkn:var(--faint);               /* "unlabelled" marker, 5.7:1       */
     --layer:rgba(229,229,229,.08);    /* hover state layer: on-surface @ 8%*/
 
     /* -- type (see FONTS above) ------------------------------------------ */
@@ -129,9 +129,8 @@
 
   /* ---------- headline ---------- *
    * The one number the project is aiming at. No panel, no border, no
-   * accent edge: it is the largest thing on the page and the only thing
-   * in accent green, which is hierarchy enough. Whitespace does the
-   * framing the old card did. */
+   * accent edge: it is the largest text on the page and the only text
+   * in accent green. Whitespace does the framing the old card did. */
   .headline { margin-block:var(--sp-3) 0; }
   .hl-row { display:flex; flex-wrap:wrap; align-items:baseline;
             justify-content:space-between; gap:4px 20px; }
@@ -162,7 +161,7 @@
    * One row per ROM region class in config/regions.txt, in two groups:
    * code (bytes inside human-named routines, plus recomp's stricter bar)
    * and data (bytes that re-encode byte-identically). Rows are hairline-
-   * separated, not boxed — the same rule language as the header, with the
+   * separated rather than boxed, the same rule language as the header, with the
    * bar carrying the shape instead of a panel fill. */
   .sections { margin-block:var(--sp-3) 0; }
   .group + .group { margin-top:var(--sp-2); }
@@ -177,7 +176,7 @@
     column-gap:var(--gap-col); padding-block:var(--sp-1);
     border-bottom:1px solid var(--line);
     /* Every row carries a title with its byte counts, and data rows carry
-       the weaker "extracted" level there too — the cursor says so. */
+       the weaker "extracted" level there too; the cursor says so. */
     cursor:help;
   }
   .secrow:last-child { border-bottom:0; }
@@ -226,7 +225,7 @@
   .seg-btn + .seg-btn { margin-left:-1px; }            /* collapse shared edge */
   /* A 44px target on a 36px control: grow the hit area without growing the
      button. Offsets are 5px, not 4px, because an absolutely positioned
-     child is laid out against the padding box — the 1px outline would
+     child is laid out against the padding box; the 1px outline would
      otherwise eat 2px of the target. */
   .seg-btn::after { content:""; position:absolute; inset:-5px 0; }
   .seg-btn:hover { background:var(--layer); color:var(--fg); }
@@ -254,7 +253,7 @@
 
   /* Real <table> markup: this is tabular data, and screen readers get
      row/column navigation for free. A dedicated scroll container is the
-     only thing on the page allowed to scroll sideways — the page body
+     only element on the page allowed to scroll sideways; the page body
      itself never does, even at phone width. */
   .table-wrap { overflow-x:auto; border:1px solid var(--line); }
   table { border-collapse:collapse; width:100%; min-width:560px; }
@@ -302,8 +301,8 @@
          background:var(--field); color:var(--dim); padding:.1em .35em; }
   .warn code { background:rgba(0,0,0,.25); color:inherit; }
 
-  /* One fade as the numbers arrive, opacity only — the page loads into
-     reading, not into a sequence. The loaded state is the DEFAULT state,
+  /* One fade as the numbers arrive, opacity only: the page loads into
+     reading rather than into a sequence. The loaded state is the DEFAULT state,
      so if the animation never runs nothing is hidden. */
   @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
   #headline, #sections, .listing { animation:fadeIn 220ms ease-out; }
@@ -347,7 +346,7 @@
     <p class="note">Code percentages count bytes inside routines that carry a human-chosen
       name; data percentages count bytes whose editable form re-encodes to the exact ROM
       bytes. Hover a row for its byte counts and, on data rows, the weaker <i>extracted</i>
-      level underneath &mdash; <a href="./PROGRESS.md">PROGRESS.md</a> defines all three.</p>
+      level underneath; <a href="./PROGRESS.md">PROGRESS.md</a> defines all three.</p>
   </section>
 </header>
 
@@ -428,7 +427,7 @@ function renderHeadline(data){
 }
 
 /* ---- section list --------------------------------------------------- *
- * Two groups: code (recomp first — it is the same routines held to the
+ * Two groups: code (recomp first: the same routines held to the
  * stricter bar) and data. stale/filler/unknown carry no work to do, so
  * they start hidden behind the toggle under the data group. */
 const CODE_GROUP = ["recomp","code","sound_iface","spc700"];
@@ -553,7 +552,7 @@ function renderBody(){
 }
 
 // The head is rebuilt only when the view changes, never when the sort
-// flips — flipping it there would destroy the focus on the button the user
+// flips; flipping it there would destroy the focus on the button the user
 // just pressed. The arrow is driven from aria-sort in CSS instead.
 function renderHead(){
   document.getElementById("thead").innerHTML = VIEWS[view].head;

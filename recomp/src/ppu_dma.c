@@ -21,7 +21,7 @@
 #include "dream_time.h"
 
 /* ---------------------------------------------------------------------------
- * dma_setup_channel_step — $C0:848C
+ * dma_setup_channel_step: $C0:848C
  *
  * Entry: A = A1Tx source address, Y = DMAPx | BBADx, X = channel byte offset
  * ($00, $10, ... $70), ptr_04 = source bank, $05 = DASBx bank.
@@ -62,7 +62,7 @@ void dma_setup_channel_step(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * cgram_upload_queue_flush — $C0:9D32
+ * cgram_upload_queue_flush: $C0:9D32
  *
  * Walks the queue of pending palette uploads backwards in 8-byte records
  * ($0B84 size, $0B86 CGRAM address, $0B88 source address, $0B8A source bank),
@@ -132,7 +132,7 @@ void cgram_upload_queue_flush(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * dma_fill_vram_zero — $C0:A445
+ * dma_fill_vram_zero: $C0:A445
  *
  * Entry: A = VRAM word address. Fills $0800 bytes from the two ROM bytes at
  * $00:A443 with the A-bus address fixed (DMAP0 = $1809), i.e. a constant fill.
@@ -166,7 +166,7 @@ void dma_fill_vram_zero(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * dma_upload_to_vram — $C0:A46A
+ * dma_upload_to_vram: $C0:A46A
  *
  * Entry: A = source address, Y = byte count, X = source bank.
  * Exit: A = $1801; X and Y truncated to their low bytes. That truncation is a
@@ -204,7 +204,7 @@ void dma_upload_to_vram(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * dma_upload_to_cgram — $C0:A483
+ * dma_upload_to_cgram: $C0:A483
  *
  * Entry: A = source address in bank $C4, X = palette count (bytes = X * 8),
  * Y = CGRAM word address.
@@ -246,7 +246,7 @@ void dma_upload_to_cgram(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * set_bg_scroll_prep — $C0:A4A6, set_bg_scroll — $C0:A4A8
+ * set_bg_scroll_prep: $C0:A4A6, set_bg_scroll: $C0:A4A8
  *
  * The body writes both halves of every BG scroll register: the three H offsets
  * to 0 and the three V offsets to $FF (so the tilemap sits one line up). It runs

@@ -1,4 +1,4 @@
-/* font5x7 — the app's own 5x7 pixel font, drawn as ASCII art so it can be read and
+/* font5x7: the app's own 5x7 pixel font, drawn as ASCII art so it can be read and
  * corrected in the source. One line per glyph, seven five-character rows, '#' = ink.
  * Descenders (g j p q y) sit inside the seven-row cell rather than below it.
  */

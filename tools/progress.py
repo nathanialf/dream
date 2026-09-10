@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""progress.py — regenerate docs/PROGRESS.md and docs/progress.json (README.md carries no badges).
+"""progress.py: regenerate docs/PROGRESS.md and docs/progress.json (README.md carries no badges).
 
 The ROM has no ELF, so "sections" are the ROM's own regions as declared in
 config/regions.txt (class per byte range). Two kinds of progress:

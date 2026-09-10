@@ -1,4 +1,4 @@
-/* font5x7 — the app's own 5x7 pixel font.
+/* font5x7: the app's own 5x7 pixel font.
  *
  * Written for this program (no ROM data, no imported font file): the gallery draws it
  * into the 256x224 framebuffer and the menu bar draws it through SDL. Glyphs cover

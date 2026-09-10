@@ -106,11 +106,11 @@ static void t_push16(SnesState* ss, uint16_t v) {
  * fetched the opcode and the address bytes, so what is left is the internal
  * cycle, the return-address push and the transfer of control.
  *
- * The callee then runs on the reference CPU, which is what keeps a converted
- * callee converted: the hook installed on its entry address fires from inside
+ * The callee then runs on the reference CPU, which keeps a converted callee
+ * converted: the hook installed on its entry address fires from inside
  * this loop and its C body runs, exactly as if it had been called. Because the
  * frame pushed here is the routine's *real* return address, the callee can also
- * be left running when the machine moves on underneath the hook -- true is
+ * be left running when the machine moves on underneath the hook: true is
  * returned then, and the ROM finishes both the callee and the caller. */
 static bool t_call_sub(SnesState* ss, uint8_t bank, uint16_t target) {
   const uint16_t sp0 = ss_sp(ss);
@@ -133,13 +133,13 @@ static bool t_call_long(SnesState* ss, uint8_t bank, uint16_t target) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_init_from_table — $C0:9D6A
+ * entity_init_from_table: $C0:9D6A
  *
  * Walks the 18-byte records of data_C0B4A4 for the current game mode, filling
  * one entity slot per record until a record whose first word is negative ends
  * the list or all 16 slots are used, then zeroes every remaining slot. $A6 is
- * left holding the number of live entities, in slot * 2 units, which is what
- * the main loop's entity loop and anim_cb_hit_enemies compare against.
+ * left holding the number of live entities, in slot * 2 units, the value the
+ * main loop's entity loop and anim_cb_hit_enemies compare against.
  *
  * `pea $8000 ; plb` sets DB = $00, not $80: the pushed word's *low* byte is
  * what plb pulls. The entity columns are in bank 0 either way; the record reads
@@ -320,7 +320,7 @@ loc_C09E81:
 }
 
 /* ---------------------------------------------------------------------------
- * entity_update_tick — $C0:98DA
+ * entity_update_tick: $C0:98DA
  *
  * Entry: X = entity index (slot * 2). Called once per live entity per frame
  * from the main loop at $81C5.
@@ -337,7 +337,7 @@ void entity_update_tick(SnesState* ss) {
   ss_set_nz16(ss, a);
   SI(0x98DE); x = a; ss_set_x(ss, x); ss_set_nz16(ss, x);  /* C098DE tax */
 
-  /* C098DF jsr (jtbl_C099DD,X) — the AI handler for this entity type. jsr iax
+  /* C098DF jsr (jtbl_C099DD,X): the AI handler for this entity type. jsr iax
    * pushes the pc between the two operand-byte fetches, so the pushed word is
    * $98E1 and the rts that pops it lands on $98E2. */
   {
@@ -353,7 +353,7 @@ void entity_update_tick(SnesState* ss) {
     /* Four of the handlers end in `pla ; rts`: the pla drops the frame just
      * pushed, so the rts returns to *this* routine's caller and the rest of the
      * tick is skipped. Whether the ROM or a hook ran the handler, the test is
-     * the same -- did control come back to $98E2? If not, everything the 65816
+     * the same: did control come back to $98E2? If not, everything the 65816
      * would have left is already in place, so hand the machine over. */
     if(ss_pb(ss) != pb || ss_pc(ss) != 0x98E2) return;
     a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
@@ -574,7 +574,7 @@ void entity_update_tick(SnesState* ss) {
     SI(0x99B5); a = alu_inc16(ss, a);             /* C099B5 inc A */
   }
 
-  /* C099B6 jmp ($0004) — the animation-rate handler picked out of
+  /* C099B6 jmp ($0004): the animation-rate handler picked out of
    * anim_rate_fn_table. They are converted in recomp/src/anim.c and every one
    * of them is a tail: it falls through into anim_rate_store, whose rts ends
    * this routine. Pointing the pc at the handler is what the jmp does, and the
@@ -586,7 +586,7 @@ void entity_update_tick(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_ai_chase_player — $C0:99EF
+ * entity_ai_chase_player: $C0:99EF
  *
  * jtbl_C099DD's entry for type $0C. Entry: Y = entity index, X = entity type.
  * Turns the signed distance to the player (entity 0) into one of four states,
@@ -709,7 +709,7 @@ loc_C09A51:
 }
 
 /* ---------------------------------------------------------------------------
- * entity_animate_only — $C0:9AF6, entity_spawn_transform_a/b/c — $9AB8/$9B00/$9B89
+ * entity_animate_only: $C0:9AF6, entity_spawn_transform_a/b/c: $9AB8/$9B00/$9B89
  *
  * jtbl_C099DD's entries for types 0, 4, 6/8 and $0A. All four end the same way:
  * `jsl anim_update ; pla ; rts`, where the pla drops the return address
@@ -986,7 +986,7 @@ void entity_spawn_transform_c(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * anim_cb_reset_state — $C0:B1AE, set_entity_state — $C0:B1B1
+ * anim_cb_reset_state: $C0:B1AE, set_entity_state: $C0:B1B1
  *
  * anim_cb_reset_state is `lda #$0000` falling into set_entity_state, the way the
  * animation-rate handlers fall into their shared tail, so the two are one body
@@ -1079,7 +1079,7 @@ void anim_cb_reset_state(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_hit_react — $C0:B171
+ * entity_hit_react: $C0:B171
  *
  * The hit applied to one entity by anim_cb_hit_player / anim_cb_hit_enemies.
  * Entry: Y = the target's entity index, X = the attacker's (saved and restored).
@@ -1154,7 +1154,7 @@ void entity_hit_react(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * entity_clear_anim_unused — $C0:B1FE
+ * entity_clear_anim_unused: $C0:B1FE
  *
  * Ten bytes past set_entity_state's rts, and no word anywhere in the ROM points
  * at it (docs/handler_tables.md section 2). It decodes cleanly at m0x0 and

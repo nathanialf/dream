@@ -3,8 +3,8 @@
 ; mean cost per call, minus the mean the C body already pays for timed
 ; register access, DMA transfers and not-yet-converted callees.
 ;
-; A hook that does not always return -- one ending in a tail jmp, or one
-; that handed the rest of the routine back to the ROM at a frame boundary --
+; A hook that does not always return (one ending in a tail jmp, or one
+; that handed the rest of the routine back to the ROM at a frame boundary)
 ; still gets a line, but is never charged: the two figures then cover
 ; different work. Same for an address the ROM only reaches by falling
 ; through from the routine above it, which is never entered as a hook.

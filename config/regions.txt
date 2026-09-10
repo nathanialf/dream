@@ -1,4 +1,4 @@
-; regions.txt -- machine-readable region map for DREAM.sfc (2 MiB HiROM prototype)
+; regions.txt: machine-readable region map for DREAM.sfc (2 MiB HiROM prototype)
 ;
 ; Derived from docs/data_formats.md section "1. Region table" (start-end/format/
 ; conf./evidence columns), which was itself derived statically from the ROM bytes
@@ -20,7 +20,7 @@
 ;   sound_iface  65816 sound interface in bank $C1 (018000-01841A: spc_init,
 ;                spc_command, uploads; out/dream.asm)
 ;   spc700       the SPC700 loader+driver image (020000-020DBA; spc/spc_map.txt,
-;                spc/driver.asm -- driver is exactly 0x699 words from 020088)
+;                spc/driver.asm: driver is exactly 0x699 words from 020088)
 ;   sprites      sprite frame data and the frame table (both live and the
 ;                alternate/unreferenced frame format)
 ;   tiles        BG/title tilesets, fonts, and any raw tile data that is not
@@ -44,7 +44,7 @@
 ; 020000-020D5A for spc700). Checked against out/dream.asm and spc/driver.asm:
 ; spc_command runs through $C183F0 (rtl), C183F1-C18402 is a dead orphan
 ; routine, C18403-C18414 is a stale duplicate byte run, and C18415-C18419 is
-; a real code stub before raw data begins at C1841A -- so 018000-01841A is a
+; a real code stub before raw data begins at C1841A, so 018000-01841A is a
 ; single sound_iface block, matching the data_formats.md row exactly. The
 ; driver image is confirmed 0x699 words (0x20088 + 0xD32 = 0x20DBA) by
 ; spc/driver.asm line 113, matching the data_formats.md row (020088-020DBA)
@@ -120,7 +120,7 @@
 06fc26 06fffc stale       stale_dup_sprite_frames_ce_partial ; exact byte-for-byte match (982 bytes) of sprite_frames_ce data at file offset 12F8AA; not tile/frame aligned, so the precise provenance is unclear, but 982 consecutive identical bytes is not plausibly coincidental
 06fffc 070000 unknown     unknown_tail_6fffc           ; last 4 bytes of the old unknown_tail_6fc26 span; these diverge from the sprite_frames_ce match just above and have no duplicate of their own
 070000 070340 sprites     sprite_frames_c7a            ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-070340 070342 unknown     unknown_gap_70340            ; 2-byte unlabelled gap between a sprite-frame region and the next tileset; too short (2 bytes) for a duplicate search to mean anything -- every 2-byte value recurs by chance across a 2 MiB ROM
+070340 070342 unknown     unknown_gap_70340            ; 2-byte unlabelled gap between a sprite-frame region and the next tileset; too short (2 bytes) for a duplicate search to mean anything: every 2-byte value recurs by chance across a 2 MiB ROM
 070342 077302 tiles       bg1_tiles_mode2              ; 4bpp BG1 tiles, 894 tiles -> VRAM $2000 (game_mode 2)
 077302 07df82 tiles       mixed_tiles_c7_mid           ; unreferenced: mixed 4bpp tiles and tilemap/metatile word chunks; duplicated (as stale) at 047463
 07df82 07f962 tiles       bg2_tiles_mode2              ; 4bpp BG2 tiles, 207 tiles -> VRAM $6000 (game_mode 2)
@@ -130,7 +130,7 @@
 086ac0 08c980 tiles       bg1_tiles_mode1              ; 4bpp BG1 tiles -> VRAM $2000 (game_mode 1); DMA over-reads 0x140 bytes into the next set
 08c980 08ffa0 tiles       bg2_tiles_mode1              ; 4bpp BG2 tiles, 433 tiles -> VRAM $5000 (game_mode 1)
 08ffa0 08ffec sprites     sprite_frames_c8             ; sprite frames, live format (8-byte header + OAM records + 4bpp tiles; frame table 040000); 1 frame
-08ffec 090000 unknown     unknown_gap_8ffec            ; 20-byte unlabelled gap (19 zero bytes + one 0xF0 byte) between a sprite-frame region and the next tileset; the exact 20 bytes recur at 6 other offsets across unrelated live regions (tiles_strip1, title_tiles_8bpp, sprite_frames_cc, sprite_frames_ce) -- a generic near-all-zero pattern, not evidence of a specific shared origin
+08ffec 090000 unknown     unknown_gap_8ffec            ; 20-byte unlabelled gap (19 zero bytes + one 0xF0 byte) between a sprite-frame region and the next tileset; the exact 20 bytes recur at 6 other offsets across unrelated live regions (tiles_strip1, title_tiles_8bpp, sprite_frames_cc, sprite_frames_ce): a generic near-all-zero pattern, not evidence of a specific shared origin
 090000 095ac0 tiles       bg1_tiles_mode0              ; 4bpp BG1 tiles, 726 tiles -> VRAM $2000 (game_mode 0); B208 descriptor
 095ac0 098ac0 tiles       bg2_tiles_mode3              ; 4bpp BG2 tiles, 384 tiles -> VRAM $6000 (game_mode 3)
 098ac0 09b560 tiles       bg2_tiles_mode0              ; 4bpp BG2 tiles, 341 tiles -> VRAM $5000 (game_mode 0); B208 record

@@ -99,7 +99,7 @@ static bool t_jsr_c(SnesState* ss, uint8_t pb, uint16_t target, RecompFn fn) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_write_tile_row_planes — $C0:9C28
+ * vram_write_tile_row_planes: $C0:9C28
  *
  * Writes 4bpp tile rows to VMDATAL by shifting the 16-bit mask in $04/$05 out
  * one bit at a time: each pass rotates two bits out, builds a word from them
@@ -179,7 +179,7 @@ void vram_write_tile_row_planes(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_generate_particle_tile — $C0:9C16
+ * vram_generate_particle_tile: $C0:9C16
  *
  * Entry: A = VRAM word address (the callers pass $1F00). Sets VMAIN to
  * increment on the high byte, points VMADDL at A, writes row 0 through
@@ -215,7 +215,7 @@ void vram_generate_particle_tile(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_upload_shared_tileset_c5 — $C0:9234
+ * vram_upload_shared_tileset_c5: $C0:9234
  *
  * Uploads the 96 shared 4bpp OBJ tiles at $C5:02C0 (docs/data_formats.md,
  * region 0502C0) to VRAM word address 0, then falls through into
@@ -241,7 +241,7 @@ void vram_upload_shared_tileset_c5(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_stream_descriptor_dispatch — $C0:9C62
+ * vram_stream_descriptor_dispatch: $C0:9C62
  *
  * Entry: A = descriptor sub-index (the only caller, mode0_weather_zone_update,
  * passes 0), DB = $80.
@@ -446,7 +446,7 @@ void vram_stream_descriptor_dispatch(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * build_metatile_column_500 — $C0:9E83
+ * build_metatile_column_500: $C0:9E83
  *
  * Builds the 32-word column staged at $0500. The map pointer $18/$1A is
  * tilemap_a_addr/_bank plus the camera X (halved, or scaled by 1.5, according
@@ -458,7 +458,7 @@ void vram_stream_descriptor_dispatch(SnesState* ss) {
  *
  * The phk at $9ECD is what the plb at $9F0D restores: the loop pushes and pulls
  * the data bank on every iteration and the routine's own bank is the one it
- * ends with. A yield inside the loop is safe for the same reason — every push
+ * ends with. A yield inside the loop is safe for the same reason: every push
  * is balanced by the two pulls of the same iteration.
  * Exit: A = $0708 (the cmp that ended the loop), X = the copy cursor, Y = the
  * $0500 write cursor, C set, Z set from the closing cpx.
@@ -782,7 +782,7 @@ void build_metatile_column_500(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * build_metatile_column_580 — $C0:9FB7
+ * build_metatile_column_580: $C0:9FB7
  *
  * The same blitter for the $0580 column: the map pointer is keyed off the
  * camera X plus a screen ($100) when the parallax word at $98 is non-negative,
@@ -1115,7 +1115,7 @@ void build_metatile_column_580(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_upload_column_580 — $C0:A0F1
+ * vram_upload_column_580: $C0:A0F1
  *
  * DMAs the 64-byte $0580 column into the BG tilemap at VRAM $7800, at the
  * column the camera X (plus a screen when $98 says so) selects, with VMAIN set
@@ -1198,7 +1198,7 @@ void vram_upload_column_580(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * vram_upload_column_500 — $C0:A148
+ * vram_upload_column_500: $C0:A148
  *
  * DMAs the $0500 column as two 64-byte halves, to VRAM $7800 + the camera Y row
  * and to that address plus $400 (the second tilemap screen). The row comes from

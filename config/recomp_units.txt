@@ -29,8 +29,8 @@
 ;               16-bit address). Control has left the routine when the pc goes
 ;               outside [entry, end) from an instruction inside it with no frame
 ;               of its own still on the stack. Where a body runs on into a
-;               shared tail -- the animation-rate chain into anim_rate_store,
-;               orphan_slide_down2 into seq_advance5 -- `end` covers the tail
+;               shared tail (the animation-rate chain into anim_rate_store,
+;               orphan_slide_down2 into seq_advance5), `end` covers the tail
 ;               too, because that is what the ROM executes next as well.
 ;   ret=rts|rtl|rti|jmp|ret
 ;               which return frame to push before the routine starts. The

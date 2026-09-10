@@ -51,7 +51,7 @@ static uint8_t t_rol8_dp(SnesState* ss, uint16_t off) {
 }
 
 /* ---------------------------------------------------------------------------
- * random_next — $C0:A212
+ * random_next: $C0:A212
  *
  * Advances the four-byte state and leaves the fresh words in $9C and $9E for
  * the caller to mask; callers read $9D and $9F too.

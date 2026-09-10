@@ -9,7 +9,7 @@ name: ci
 #                coroutine backend pass its self-test
 #   windows      the same on windows-latest under MSYS2/UCRT64, which is where
 #                `dream_harness --test-coro` exercises the *fiber* backend of
-#                recomp/harness/coro.h -- the half of the port that cannot be
+#                recomp/harness/coro.h: the half of the port that cannot be
 #                run on the Linux box it is written on
 #   macos        the same on macos-latest, where the ucontext backend is the
 #                deprecated-but-present BSD one rather than glibc's
@@ -31,7 +31,7 @@ on:
 permissions:
   contents: read
 
-# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+# Force JS actions onto Node.js 24: Node 20 is deprecated on the runners.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -79,7 +79,7 @@ jobs:
         # MinGW is the supported Windows compiler for this port: every recomp/src
         # file registers its routines from a file-scope constructor
         # (RECOMP_REGISTER, recomp/include/snes_state.h), which needs
-        # __attribute__((constructor)) -- GCC, clang and MinGW have it, MSVC does
+        # __attribute__((constructor)): GCC, clang and MinGW have it, MSVC does
         # not, and the header says so in an #error rather than linking an empty
         # registry.
         with:
@@ -93,8 +93,8 @@ jobs:
       - name: configure and build
         shell: msys2 {0}
         # -static so the executables carry no libgcc or libwinpthread DLL, which
-        # is what makes the release zip self-contained (recomp/cmake/mingw-w64.cmake
-        # does the same for the cross build).
+        # keeps the release zip self-contained (recomp/cmake/mingw-w64.cmake does
+        # the same for the cross build).
         run: |
           cmake -S recomp -B build/recomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DDREAM_FETCH_SDL3=ON -DCMAKE_EXE_LINKER_FLAGS=-static

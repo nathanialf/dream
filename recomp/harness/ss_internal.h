@@ -43,17 +43,17 @@ typedef struct {
  * resolves every other pc through the registry, running the C body that owns
  * it.
  *
- * A body is not a resumable object -- it is straight-line C that `return`s when
- * ss_yield_wanted() says the machine has moved on underneath it, leaving the
- * ROM to finish the routine. With no ROM there is nothing to finish it, and the
- * address it stopped at is in the middle of a routine, which the registry does
- * not name. So a dispatched body chain runs on a stack of its own (Coro), and
- * a yield suspends that stack instead of unwinding it (harness/coro.h, whose
- * backend is ucontext on POSIX and Win32 fibers on Windows): the scheduler regains
- * control at exactly the instruction boundary the reference CPU stops on, and
- * resuming continues the body from inside ss_yield_wanted(), which then answers
- * false. One suspended context is the whole of the "resume at an interior
- * address" problem, and it needs no change to any body.
+ * A body is straight-line C that `return`s when ss_yield_wanted() says the
+ * machine has moved on underneath it, leaving the ROM to finish the routine.
+ * With no ROM there is nothing to finish it, and the address it stopped at is
+ * in the middle of a routine, which the registry does not name. So a dispatched
+ * body chain runs on a stack of its own (Coro), and a yield suspends that stack
+ * instead of unwinding it (harness/coro.h, whose backend is ucontext on POSIX
+ * and Win32 fibers on Windows): the scheduler regains control at exactly the
+ * instruction boundary the reference CPU stops on, and resuming continues the
+ * body from inside ss_yield_wanted(), which then answers false. One suspended
+ * context is the whole of the "resume at an interior address" problem, and it
+ * needs no change to any body.
  *
  * A suspension that an interrupt displaces is kept until the machine can no
  * longer return to it (an rti would land on its pc with its stack pointer);

@@ -13,8 +13,8 @@
  * The callbacks are the twelve routines the 96 scripts point at: nine sound
  * triggers, two hit tests and the state reset in recomp/src/entities_ai.c.
  *
- * Both dispatches here -- the `jmp ($0004)` and the `bra play_sound_effect`
- * tails of the sfx stubs -- are transfers of control, not calls, so the bodies
+ * Both dispatches here, the `jmp ($0004)` and the `bra play_sound_effect`
+ * tails of the sfx stubs, are transfers of control, not calls, so the bodies
  * model the instruction and then point the pc where the 65816 pointed it. The
  * hook installed on the destination fires next, which is how a converted
  * callback runs as C and an unconverted one runs on the reference CPU, with no
@@ -110,7 +110,7 @@ static bool t_call_long(SnesState* ss, uint8_t bank, uint16_t target) {
 }
 
 /* ---------------------------------------------------------------------------
- * anim_update — $C0:AEC8
+ * anim_update: $C0:AEC8
  *
  * Entry: X = entity index, entered with jsl (from the animation-rate tail at
  * $99D8 and from each spawn transform), exits with rtl. It re-enters itself
@@ -458,11 +458,11 @@ loc_C0B01A:
 }
 
 /* ---------------------------------------------------------------------------
- * anim_callback_dispatch — $C0:B022
+ * anim_callback_dispatch: $C0:B022
  *
  * One instruction: `jmp ($0004)`, the pointer being the callback address the
  * animation player read out of the script record. It is a transfer of control,
- * not a call -- the callback's own rts returns to anim_update -- so the body
+ * not a call (the callback's own rts returns to anim_update), so the body
  * models the jmp and leaves the pc on the callback. Whichever of the twelve
  * callbacks it is, the registry decides what runs next: a converted one enters
  * its hook (and is counted as entered by the gate), an unconverted one runs on
@@ -478,7 +478,7 @@ void anim_callback_dispatch(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * play_sound_effect — $C0:B0C5
+ * play_sound_effect: $C0:B0C5
  *
  * `phx ; phy ; jsl sfx_command_dispatch ; ply ; plx ; rts`: a sound command
  * with X and Y preserved, because every caller is an animation callback that
@@ -520,7 +520,7 @@ void play_sound_effect(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * The seven 5-byte sfx stubs — $C0:B052..$B074
+ * The seven 5-byte sfx stubs: $C0:B052..$B074
  *
  * `lda #<effect> ; bra play_sound_effect`. The bra is the routine's tail, so
  * the body models it and hands the pc over.
@@ -546,7 +546,7 @@ void anim_cb_sfx_0508(SnesState* ss) { anim_cb_sfx_stub(ss, 0xB06B, 0x0508); }
 void anim_cb_sfx_0709(SnesState* ss) { anim_cb_sfx_stub(ss, 0xB070, 0x0709); }
 
 /* ---------------------------------------------------------------------------
- * anim_cb_sfx_0704 — $C0:B025, anim_cb_sfx_060E — $C0:B08F
+ * anim_cb_sfx_0704: $C0:B025, anim_cb_sfx_060E: $C0:B08F
  *
  * The two callbacks that pick between a near and a far variant of the same
  * effect: in game mode 2 by whether the entity's X is inside the $0748..$07B0
@@ -649,7 +649,7 @@ emit:
 }
 
 /* ---------------------------------------------------------------------------
- * play_footstep_sound — $C0:B075, play_zone_transition_sound — $C0:B0BC
+ * play_footstep_sound: $C0:B075, play_zone_transition_sound: $C0:B0BC
  *
  * Two-effect pairs. play_footstep_sound picks its pair from the walk-cycle
  * parity flag and is called from the main loop's 60-frame counter, not from a
@@ -702,7 +702,7 @@ void play_zone_transition_sound(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * anim_cb_hit_player — $C0:B0CE
+ * anim_cb_hit_player: $C0:B0CE
  *
  * The attack frames of the type-$0C enemy: if the player (entity 0) is not
  * already in hitstun and is within $40 pixels on the side this entity faces
@@ -764,7 +764,7 @@ loc_C0B0EC:
 }
 
 /* ---------------------------------------------------------------------------
- * anim_cb_hit_enemies — $C0:B0FE
+ * anim_cb_hit_enemies: $C0:B0FE
  *
  * The player's attack frames: play effect $0703, then sweep every live entity
  * (Y = 4, 6, ... up to $A6) of type $0E..$11 and hand the ones within $48

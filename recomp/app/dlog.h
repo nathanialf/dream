@@ -1,9 +1,9 @@
-/* dlog — the app's own crash log (recomp/app/README.md, "When it crashes").
+/* dlog: the app's own crash log (recomp/app/README.md, "When it crashes").
  *
  * The Windows build is a console-subsystem program launched by double-click as
  * often as from a terminal, and a console that closes with the process carries
- * nothing away. So `dream` keeps a log of its own next to the executable —
- * dream.log, one timestamped line a stage — and installs a handler that writes
+ * nothing away. So `dream` keeps a log of its own next to the executable
+ * (dream.log, one timestamped line a stage) and installs a handler that writes
  * what it can about a fault into the same file before the process goes.
  *
  * Nothing here touches stdout: the frame line `--frames` prints has to stay
@@ -34,7 +34,7 @@
 #define DLOG_EXIT_SIGNAL 87   /* SIGSEGV/SIGABRT/SIGILL/SIGFPE */
 
 /* Open <dir of the executable>/dream.log on Windows, ./dream.log elsewhere.
- * Truncates: one run, one log. Never fails loudly — if the file cannot be
+ * Truncates: one run, one log. Never fails loudly; if the file cannot be
  * opened every call below becomes a no-op and the game still runs. */
 void dlog_open(void);
 

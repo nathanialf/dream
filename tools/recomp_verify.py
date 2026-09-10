@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""recomp_verify.py — the gate for the C port.
+"""recomp_verify.py: the gate for the C port.
 
 Runs `dream_harness --lockstep --hooks on --spc-hooks on` over every input
 script in `recomp/harness/inputs/`, one at a time, and reports per-script
@@ -41,7 +41,7 @@ used to re-enter a routine after a yield.
 
 `--update` writes config/recomp.txt (which tools/progress.py credits to the
 `recomp` badge) with the routines that passed by either method: the names are the
-labels in out/symbols.txt and spc/driver.asm, which is what progress.py looks
+labels in out/symbols.txt and spc/driver.asm, which progress.py looks
 routines up by. A routine credited by the routine-level gate rather than by a
 script carries a `; unit` suffix, so the file says which routines were proved
 against a seeded state instead of a played frame; progress.py reads the label
@@ -293,8 +293,8 @@ def main() -> int:
         ';',
         ';   plain    every script under recomp/harness/inputs/ passed and the routine',
         ';            was entered at least once while they ran.',
-        ';   ; unit   no script can reach the routine -- nothing in the ROM calls it, or',
-        ';            no song or sound effect emits the command that dispatches it -- so',
+        ';   ; unit   no script can reach the routine: nothing in the ROM calls it, or',
+        ';            no song or sound effect emits the command that dispatches it, so',
         ';            it was run from the seeded states in config/recomp_units.txt',
         ';            instead: at least four per routine, the ROM and the C body started',
         ';            from the identical machine and compared afterwards down to the',

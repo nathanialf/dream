@@ -1,4 +1,4 @@
-/* dream — the native application.
+/* dream: the native application.
  *
  * One window, one game. It loads the user's own DREAM.sfc, installs every
  * routine the recomp has registered (recomp/src), and runs the reference core
@@ -6,14 +6,14 @@
  *
  * There is no launcher and no settings file: docs/RECOMP.md fixes the controller
  * mapping and this file is where that mapping lives. The one piece of app UI is
- * the menu bar across the top of the window (menubar.c) — File, View and Gallery —
+ * the menu bar across the top of the window (menubar.c: File, View and Gallery)
  * and the gallery pages it opens (gallery.c), which pause the game and draw into
  * the same 256x224 framebuffer. Neither ever writes emulator state.
  *
  * The hidden flags exist so that this binary can be checked against dream_harness:
  * same ROM, same script, same hook table, and the frame line printed at the end is
- * byte-identical to the harness's. They are not features, they are the proof that
- * the platform layer changed nothing:
+ * byte-identical to the harness's. They exist as proof that the platform layer
+ * changed nothing:
  *
  *   --frames N --input FILE     run a harness script and print the frame line
  *   --screenshot FILE           dump the 256x224 framebuffer as a binary PPM
@@ -56,6 +56,7 @@
 #include "gallery.h"
 #include "menubar.h"
 #include "music.h"
+#include "scene.h"
 #include "coro.h"   /* coro_backend(), for the log line naming the backend */
 #include "dlog.h"   /* dream.log: the run, and the crash, written down */
 
@@ -184,7 +185,7 @@ static bool app_spc_hook(void* ctx, Spc* spc, uint16_t pc) {
   return false;
 }
 
-/* Force the cart to HiROM, 2 MiB, no SRAM — see the note in harness/main.c: this
+/* Force the cart to HiROM, 2 MiB, no SRAM. See the note in harness/main.c: this
  * ROM's internal header at $ffc0 is overwritten by tilemap data, so
  * snes_loadRom()'s header scoring has nothing to score. */
 static bool machine_load_rom(Machine* m, const uint8_t* rom, size_t len) {
@@ -609,7 +610,182 @@ static bool write_ppm(const char* path, const uint32_t* fb) {
   return true;
 }
 
-/* --gallery SEC:NAV — one gallery press per character. */
+
+/* --scene-dump MODE[,LAYERS][:FILE]: compose a scene and write it out.
+ *
+ * How the Scenes page is checked without a display. The image is the whole
+ * level, so it is written as a PPM of its own size rather than through the
+ * 256x224 framebuffer. */
+static bool write_ppm_size(const char* path, const uint32_t* px, int w, int h) {
+  FILE* f = fopen(path, "wb");
+  if(f == NULL) {
+    fprintf(stderr, "dream: cannot write %s: %s\n", path, strerror(errno));
+    return false;
+  }
+  fprintf(f, "P6\n%d %d\n255\n", w, h);
+  for(int i = 0; i < w * h; i++) {
+    uint32_t p = px[i];
+    fputc((int) ((p >> 24) & 0xFF), f);
+    fputc((int) ((p >> 16) & 0xFF), f);
+    fputc((int) ((p >> 8) & 0xFF), f);
+  }
+  fclose(f);
+  return true;
+}
+
+static int scene_dump(const uint8_t* rom, size_t romLen, const char* spec) {
+  char buf[256];
+  snprintf(buf, sizeof(buf), "%s", spec);
+  char* file = strchr(buf, ':');
+  if(file != NULL) *file++ = 0;
+  int view = SCENE_VIEW_ALL;
+  char* comma = strchr(buf, ',');
+  if(comma != NULL) { *comma = 0; view = atoi(comma + 1); }
+  int mode = atoi(buf);
+  Scenes* sc = scenes_create(rom, romLen);
+  if(sc == NULL) { fprintf(stderr, "dream: no scene machine\n"); return 2; }
+  scenes_request(sc, mode);
+  while(scenes_step(sc, 250)) {
+    printf("scene: %s (%d.%d%%)\n", scenes_status(sc),
+           scenes_progress(sc) / 10, scenes_progress(sc) % 10);
+    fflush(stdout);
+  }
+  int w = 0, h = 0;
+  const uint32_t* img = scenes_image(sc, view, &w, &h);
+  SceneInfo info;
+  if(img == NULL || !scenes_info(sc, &info)) {
+    fprintf(stderr, "dream: scene %d not composed: %s\n", mode, scenes_status(sc));
+    scenes_destroy(sc);
+    return 2;
+  }
+  printf("scene %d: %dx%d px, %d x %d metatiles, map %06X, meta %06X, "
+         "bgmode %d%s, tm %02X, level layer BG%d, %d screens, %d frames\n",
+         mode, w, h, info.cols, info.rows, info.mapAddr, info.metaAddr,
+         info.bgmode, info.bg3prio ? "+bg3prio" : "", info.tm, info.levelBg,
+         info.screens, info.frames);
+  for(int i = 0; i < 4; i++)
+    printf("  BG%d map $%04X chars $%04X%s\n", i + 1, info.bgMap[i], info.bgChr[i],
+           ((info.tm >> i) & 1u) ? "  (TM)" : "");
+  int rc = 0;
+  if(file != NULL && *file != 0) rc = write_ppm_size(file, img, w, h) ? 0 : 2;
+  scenes_destroy(sc);
+  return rc;
+}
+
+
+/* --scene-verify [DIR]: the Scenes page against the running game.
+ *
+ * For each scene: compose it the way the page does, then boot a second machine
+ * the ordinary way (the harness script, no walk, no camera hook), render its BG
+ * layers through the same PPU with the same masking, and compare that screen
+ * against the composed image cropped at the camera the second machine happens to
+ * be at. The layer the metatile blitter feeds is continuous across the whole
+ * composition, so it has to match pixel for pixel wherever the crop lands; a
+ * parallax layer only matches where the crop lands on a screen the composition
+ * took, and the second row of each pair measures that.
+ */
+static int scene_cmp(const uint32_t* a, const uint32_t* b, int n) {
+  int same = 0;
+  for(int i = 0; i < n; i++) if(a[i] == b[i]) same++;
+  return same;
+}
+
+static int scene_probe(const uint8_t* rom, size_t romLen, const char* spec) {
+  int mode = 0, cx = 0, cy = 0, view = SCENE_VIEW_ALL;
+  char path[256] = "";
+  if(sscanf(spec, "%d:%d:%d:%d:%255s", &mode, &cx, &cy, &view, path) < 5) return 2;
+  uint32_t* out = malloc((size_t) SCENE_SCREEN_W * SCENE_SCREEN_H * sizeof(uint32_t));
+  Scenes* sc = scenes_create(rom, romLen);
+  int gx = 0, gy = 0;
+  if(out == NULL || sc == NULL) return 2;
+  if(!scenes_screen_at(sc, mode, cx, cy, view, out, &gx, &gy)) return 2;
+  printf("probe mode %d asked (%d,%d) got (%d,%d) -> %s\n", mode, cx, cy, gx, gy, path);
+  write_ppm_size(path, out, SCENE_SCREEN_W, SCENE_SCREEN_H);
+  scenes_destroy(sc);
+  free(out);
+  return 0;
+}
+
+static int scene_verify(const uint8_t* rom, size_t romLen, const char* dir) {
+  const int N = SCENE_SCREEN_W * SCENE_SCREEN_H;
+  uint32_t* ref = malloc((size_t) N * sizeof(uint32_t));
+  uint32_t* crop = malloc((size_t) N * sizeof(uint32_t));
+  Scenes* a = scenes_create(rom, romLen);
+  Scenes* b = scenes_create(rom, romLen);
+  if(ref == NULL || crop == NULL || a == NULL || b == NULL) return 2;
+  int bad = 0;
+  printf("scene-verify: composed scene vs the running game, BG layers only,"
+         " sprites masked\n");
+  for(int mode = 0; mode < SCENE_MODE_COUNT; mode++) {
+    SceneInfo info;
+    /* pass 1: every layer the mode's TM enables; pass 2: the level layer alone */
+    for(int pass = 0; pass < 2; pass++) {
+      int view = SCENE_VIEW_ALL;
+      if(pass == 1) {
+        if(!scenes_info(a, &info) || info.levelBg < 1) {
+          printf("  %-14s level layer: no BG has its tilemap at VRAM $7800\n",
+                 scenes_mode_name(mode));
+          continue;
+        }
+        view = info.levelBg;
+      }
+      scenes_request(a, mode);
+      while(scenes_step(a, 1000)) { }
+      int w = 0, h = 0;
+      const uint32_t* img = scenes_image(a, view, &w, &h);
+      if(img == NULL || !scenes_info(a, &info)) {
+        printf("  %-14s FAILED to compose: %s\n", scenes_mode_name(mode), scenes_status(a));
+        bad++;
+        break;
+      }
+      int cx = 0, cy = 0;
+      if(!scenes_reference(b, mode, view, ref, &cx, &cy)) { bad++; break; }
+      for(int y = 0; y < SCENE_SCREEN_H; y++)
+        for(int x = 0; x < SCENE_SCREEN_W; x++) {
+          int sx = cx + x, sy = cy + y;
+          crop[y * SCENE_SCREEN_W + x] =
+            (sx >= 0 && sx < w && sy >= 0 && sy < h) ? img[(size_t) sy * w + sx] : 0;
+        }
+      int same = scene_cmp(ref, crop, N);
+      printf("  %-14s %-11s%s camera (%4d,%4d)  stitch %6d/%6d %s",
+             scenes_mode_name(mode),
+             pass == 0 ? "all layers" : "level layer",
+             pass == 0 ? "" : "",
+             cx, cy, same, N, same == N ? "exact  " : "DIFFERS");
+      if(mode != SCENE_MODE_TITLE) {
+        int gx = 0, gy = 0;
+        if(scenes_screen_at(b, mode, cx, cy, view, crop, &gx, &gy)) {
+          int s2 = scene_cmp(ref, crop, N);
+          printf("   one screen at (%4d,%4d) %6d/%6d %s",
+                 gx, gy, s2, N, s2 == N ? "exact" : "DIFFERS");
+          if(dir != NULL) {
+            char path[512];
+            snprintf(path, sizeof(path), "%s/verify_m%d_p%d_one.ppm", dir, mode, pass);
+            write_ppm_size(path, crop, SCENE_SCREEN_W, SCENE_SCREEN_H);
+          }
+        }
+      }
+      printf("\n");
+      if(pass == 1 && same != N) bad++;
+      if(dir != NULL) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/verify_m%d_p%d_ref.ppm", dir, mode, pass);
+        write_ppm_size(path, ref, SCENE_SCREEN_W, SCENE_SCREEN_H);
+        snprintf(path, sizeof(path), "%s/verify_m%d_p%d_crop.ppm", dir, mode, pass);
+        write_ppm_size(path, crop, SCENE_SCREEN_W, SCENE_SCREEN_H);
+      }
+      if(mode == SCENE_MODE_TITLE) break;   /* one screen, no level layer */
+    }
+  }
+  scenes_destroy(a);
+  scenes_destroy(b);
+  free(ref);
+  free(crop);
+  printf("scene-verify: %s\n", bad == 0 ? "all level layers exact" : "SOME DIFFER");
+  return bad == 0 ? 0 : 1;
+}
+
+/* --gallery SEC:NAV takes one gallery press per character. */
 static void gallery_nav(Gallery* gal, const char* moves) {
   for(const char* p = moves; *p != 0; p++) {
     switch(*p) {
@@ -627,7 +803,7 @@ static void gallery_nav(Gallery* gal, const char* moves) {
 }
 
 /* A decoded BRR sample, into the same stream the DSP feeds: mono 32000 Hz doubled to
- * stereo. The stream is declared at 32093 Hz, so a sample plays 0.3% sharp — far below
+ * stereo. The stream is declared at 32093 Hz, so a sample plays 0.3% sharp, far below
  * hearing, and it keeps the app to one audio path. */
 static void play_pcm(SDL_AudioStream* audio, const int16_t* pcm, int count) {
   if(audio == NULL || count <= 0) return;
@@ -645,7 +821,7 @@ static void play_pcm(SDL_AudioStream* audio, const int16_t* pcm, int count) {
  *
  * SDL3, unlike SDL2, does not include SDL_main.h from SDL.h and does not rename
  * main(): the entry point below is the real one, and SDL_MAIN_USE_CALLBACKS is
- * an opt-in this app has no use for -- it owns its frame loop, which is paced by
+ * an opt-in this app has no use for: it owns its frame loop, which is paced by
  * the SNES's 60.0988 Hz and not by the platform (recomp/app/README.md, "Rate").
  *
  * On Windows that leaves dream.exe a console-subsystem program (no -mwindows, no
@@ -665,6 +841,10 @@ int main(int argc, char** argv) {
   const char* inputPath = NULL;
   const char* shotPath = NULL;
   const char* gallerySpec = NULL;
+  const char* sceneSpec = NULL;
+  const char* sceneVerify = NULL;
+  const char* sceneProbe = NULL;
+  bool wantSceneVerify = false;
   int frames = 0;                 /* 0 = run until the user quits */
   int toggleFrame = -1, toggleIters = 0;
 
@@ -675,6 +855,12 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--input") == 0 && hasNext) inputPath = argv[++i];
     else if(strcmp(a, "--screenshot") == 0 && hasNext) shotPath = argv[++i];
     else if(strcmp(a, "--gallery") == 0 && hasNext) gallerySpec = argv[++i];
+    else if(strcmp(a, "--scene-dump") == 0 && hasNext) sceneSpec = argv[++i];
+    else if(strcmp(a, "--scene-probe") == 0 && hasNext) sceneProbe = argv[++i];
+    else if(strcmp(a, "--scene-verify") == 0) {
+      wantSceneVerify = true;
+      if(hasNext && argv[i + 1][0] != '-') sceneVerify = argv[++i];
+    }
     else if(strcmp(a, "--gallery-toggle") == 0 && hasNext) {
       if(sscanf(argv[++i], "%d,%d", &toggleFrame, &toggleIters) != 2) {
         fprintf(stderr, "dream: --gallery-toggle wants FRAME,ITERATIONS\n");
@@ -702,7 +888,7 @@ int main(int argc, char** argv) {
   dlog_stage("rom: reading %s", romPath);
   uint8_t* rom = read_file(romPath, &romLen);
   if(rom == NULL) {
-    dlog("rom: cannot read %s (%s) -- giving up", romPath, strerror(errno));
+    dlog("rom: cannot read %s (%s): giving up", romPath, strerror(errno));
     fprintf(stderr, "dream: cannot read %s: put your own DREAM.sfc there "
                     "(or pass its path)\n", romPath);
     return 2;
@@ -710,13 +896,34 @@ int main(int argc, char** argv) {
   dlog("rom: %zu bytes (expected %u)", romLen, ROM_SIZE);
   char hex[41];
   sha1_hex(rom, romLen, hex);
-  dlog_stage("rom: sha1 %s (expected %s) -- %s", hex, ROM_SHA1,
+  dlog_stage("rom: sha1 %s (expected %s): %s", hex, ROM_SHA1,
              strcmp(hex, ROM_SHA1) == 0 ? "match" : "MISMATCH");
   if(romLen != ROM_SIZE || strcmp(hex, ROM_SHA1) != 0) {
     fprintf(stderr, "dream: %s is not the supported ROM (sha1 %s, expected %s)\n",
             romPath, hex, ROM_SHA1);
     free(rom);
     return 2;
+  }
+
+  if(sceneProbe != NULL) {
+    int rc = scene_probe(rom, romLen, sceneProbe);
+    free(rom);
+    dlog_close();
+    return rc;
+  }
+
+  if(wantSceneVerify) {
+    int rc = scene_verify(rom, romLen, sceneVerify);
+    free(rom);
+    dlog_close();
+    return rc;
+  }
+
+  if(sceneSpec != NULL) {
+    int rc = scene_dump(rom, romLen, sceneSpec);
+    free(rom);
+    dlog_close();
+    return rc;
   }
 
   InputScript script = { NULL, 0 };
@@ -802,7 +1009,7 @@ int main(int argc, char** argv) {
     audioBuf = malloc((size_t) (AUDIO_SAMPLES_PER_FRAME + 64) * 4);
     SDL_ResumeAudioStreamDevice(audio);
   } else {
-    dlog("audio: no device (%s) -- the game runs silent, which is not an error",
+    dlog("audio: no device (%s): the game runs silent, which is not an error",
          SDL_GetError());
   }
 
@@ -846,13 +1053,14 @@ int main(int argc, char** argv) {
   }
 
   /* The app's own UI: a menu bar and the gallery pages it opens. The gallery reads
-   * the ROM image and the framebuffer and nothing else — no path from here reaches
+   * the ROM image and the framebuffer and nothing else; no path from here reaches
    * the machine above. */
   dlog_stage("ui: creating the gallery and the menu bar");
   uint32_t* fb = calloc((size_t) FB_W * FB_H, sizeof(uint32_t));
   Gallery* gal = gallery_create(rom, romLen);
   Menubar* bar = menubar_create(renderer);
   MusicPlayer* music = NULL;
+  Scenes* scenes = NULL;
   View view = { 0, 0, false };
 
   bool running = true;
@@ -935,8 +1143,8 @@ int main(int argc, char** argv) {
     if(!running) break;
 
     /* The hidden toggle test: open the gallery mid-run, walk every section, close
-     * it again. Nothing below runs the machine while it is open, which is the whole
-     * point — the frame line at the end has to be the one an untoggled run prints. */
+     * it again. Nothing below runs the machine while it is open: the frame line at
+     * the end has to be the one an untoggled run prints. */
     if(toggleFrame >= 0 && frame == toggleFrame && toggleIters > 0) {
       dlog_stage("gallery: opening at frame %d (--gallery-toggle, %d iterations)",
                  frame, toggleIters);
@@ -964,6 +1172,21 @@ int main(int argc, char** argv) {
           held = (uint16_t) (read_gamepad(pad) | read_keyboard());
         gallery_input(gal, held);
       }
+
+      /* The Scenes page (and the observed half of the sprite palettes) get a
+       * machine of their own too, and it is stepped a few milliseconds at a time
+       * so the page stays responsive while it composes. It is kept once built:
+       * the walk across a level is thousands of frames and nobody wants it
+       * repeated because a page was closed. */
+      if(gallery_wants_scenes(gal)) {
+        if(scenes == NULL) {
+          dlog_stage("gallery: creating the scene machine");
+          scenes = scenes_create(rom, romLen);
+          gallery_set_scenes(gal, scenes);
+        }
+        if(gallery_section(gal) == GALLERY_SEC_SPRITES) scenes_observe_request(scenes);
+      }
+      if(scenes != NULL) scenes_step(scenes, 12);
 
       /* The Music page gets a machine of its own, booted on first use and thrown
        * away when the page closes; its DSP output is what plays. */
@@ -1071,6 +1294,18 @@ int main(int argc, char** argv) {
       dlog_stage("gallery: opening section '%s' (--gallery)", spec);
       gallery_open(gal, sec);
       if(colon != NULL) gallery_nav(gal, colon + 1);
+      /* A page that needs the scene machine gets it run to completion here: the
+       * screenshot flag exists to look at a finished page, not at a progress
+       * bar. Interactively the same work is spread over the paused iterations. */
+      if(gallery_wants_scenes(gal)) {
+        if(scenes == NULL) {
+          scenes = scenes_create(rom, romLen);
+          gallery_set_scenes(gal, scenes);
+        }
+        if(gallery_section(gal) == GALLERY_SEC_SPRITES) scenes_observe_request(scenes);
+        gallery_render(gal, fb);      /* the page says which scene it wants */
+        while(scenes_step(scenes, 1000)) { }
+      }
       gallery_render(gal, fb);
     }
   }
@@ -1078,6 +1313,7 @@ int main(int argc, char** argv) {
 
   dlog_stage("run: leaving the frame loop after %d frame(s); tearing down", frame);
   if(music != NULL) music_destroy(music);
+  if(scenes != NULL) scenes_destroy(scenes);
   menubar_destroy(bar);
   gallery_destroy(gal);
   free(fb);

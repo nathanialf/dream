@@ -1,4 +1,4 @@
-/* dream_harness — headless lockstep verification harness for the Dream recomp.
+/* dream_harness: headless lockstep verification harness for the Dream recomp.
  *
  * Runs the original ROM in the vendored LakeSnes core, hashes WRAM/VRAM/CGRAM/OAM
  * after every frame, optionally records a PC coverage set, and can run two
@@ -293,7 +293,7 @@ static int machine_find_hook(const Machine* m, uint32_t pc24) {
  * the first shape its last instruction, and it cost anim_rate_store the entire
  * jsl: 69 master cycles were measured for a routine that costs 1709. The C body
  * models every one of those instructions, so the routine looked cheaper than the
- * hook that replaces it -- the exact opposite of the reading --profile exists to
+ * hook that replaces it, the exact opposite of the reading --profile exists to
  * give.
  *
  * So a frame closes on the *pc* instead: on the instruction the return that
@@ -453,7 +453,7 @@ static bool harness_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
 /* The SPC700 dispatcher, the twin of harness_hook above.
  *
  * It needs no entry snapshot and no snapshot stack. The 65816's yield condition
- * is a level -- "vblank has started" stays true for the rest of the frame -- so
+ * is a level ("vblank has started" stays true for the rest of the frame), so
  * a hook has to remember what the machine looked like when it began. The SPC's
  * is a threshold on a monotonically increasing cycle count (apu->sliceEnd), and
  * every dispatch happens strictly below it, so the same question has the same
@@ -794,13 +794,12 @@ static bool load_cycles(Installed* hooks, unsigned count, const char* path, bool
  * the C body spends on its own for timed register access, DMA transfers and
  * callees that are still emulated.
  *
- * The charge is the difference. Taking it this way is what makes a routine whose
- * cost is dominated by something the hook *does* pay for come out right: a DMA
- * upload's transfer time is in both means and cancels, leaving only the
- * instruction overhead the C body skipped, and that overhead is the part that is
- * the same on every call. Charging the ROM's total instead would bill the
- * transfer twice, and would bill the mean transfer to calls that moved a
- * hundredth of the data. */
+ * The charge is the difference, the correct figure for a routine whose cost is
+ * dominated by something the hook *does* pay for: a DMA upload's transfer time
+ * is in both means and cancels, leaving only the instruction overhead the C body
+ * skipped, and that overhead is the part that is the same on every call.
+ * Charging the ROM's total instead would bill the transfer twice, and would bill
+ * the mean transfer to calls that moved a hundredth of the data. */
 static bool profile_write(Machine* rom, Machine* hook, const char* path) {
   FILE* f = fopen(path, "w");
   if(f == NULL) {
@@ -812,8 +811,8 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
              "; mean cost per call, minus the mean the C body already pays for timed\n"
              "; register access, DMA transfers and not-yet-converted callees.\n"
              ";\n"
-             "; A hook that does not always return -- one ending in a tail jmp, or one\n"
-             "; that handed the rest of the routine back to the ROM at a frame boundary --\n"
+             "; A hook that does not always return (one ending in a tail jmp, or one\n"
+             "; that handed the rest of the routine back to the ROM at a frame boundary)\n"
              "; still gets a line, but is never charged: the two figures then cover\n"
              "; different work. Same for an address the ROM only reaches by falling\n"
              "; through from the routine above it, which is never entered as a hook.\n"
@@ -864,19 +863,19 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
  *
  * The --no-cpu scheduler rests on one primitive: a body chain runs on a stack
  * of its own and a yield suspends that stack instead of unwinding it
- * (harness/coro.h). There are two implementations of it -- ucontext on POSIX,
- * Win32 fibers on Windows -- and only one of them can be exercised by the
+ * (harness/coro.h). There are two implementations of it (ucontext on POSIX,
+ * Win32 fibers on Windows) and only one of them can be exercised by the
  * lockstep gate here, because the gate needs the ROM and the ROM never enters
  * CI. So the primitive gets a self-test of its own that needs no ROM, no
- * emulator and no data: it can run on any runner, which is the point.
+ * emulator and no data: it can run on any runner.
  *
- * It checks the four things the scheduler actually asks of a backend:
+ * It checks the four requirements the scheduler asks of a backend:
  *
  *   1. a body suspends and resumes where it stopped, and its stack survives
  *      (a 16 KiB local buffer is written before a yield and verified after);
- *   2. coroutines nest -- a coro started and resumed from inside another
- *      coro's stack comes back to *that* stack, which is what happens every
- *      time the SPC700's driver stack is resumed from inside a 65816 body;
+ *   2. coroutines nest: a coro started and resumed from inside another
+ *      coro's stack comes back to *that* stack, which happens every time the
+ *      SPC700's driver stack is resumed from inside a 65816 body;
  *   3. a body yields across a simulated frame boundary exactly as
  *      ss_yield_wanted() makes it: the scheduler gets control back between two
  *      steps, and resuming continues the same loop;
@@ -884,7 +883,7 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
  *      an interrupt abandons it, and ss_nocpu_free frees them all at exit), and
  *      a finished coroutine can be started again on the same stack, which is
  *      how a context slot is reused;
- *   5. coro_start on a coroutine still parked in coro_yield -- not finished --
+ *   5. coro_start on a coroutine still parked in coro_yield (not finished)
  *      discards the parked body instead of resuming it and runs the new fn from
  *      scratch (coro_fibers.c note 4; the ucontext backend gets this for free by
  *      re-makecontext-ing the same stack every coro_start), and the coroutine is
@@ -995,7 +994,7 @@ static void ct_park(void* arg) {
 }
 
 /* 5. coro_start on a coroutine parked mid-body must discard that body, not
- *    resume it -- 'Y' below must never reach the log. */
+ *    resume it: 'Y' below must never reach the log. */
 static void ct_restart_old(void* arg) {
   CoroTest* t = (CoroTest*) arg;
   ct_log(t, 'X');
@@ -1012,7 +1011,7 @@ static void ct_restart_new(void* arg) {
 }
 
 /* the same restart, but issued from inside another coroutine's stack instead
- * of main's -- ss_nocpu_reap() drops a driver's body chain this way every time
+ * of main's: ss_nocpu_reap() drops a driver's body chain this way every time
  * an NMI displaces it, from inside whatever body caught the APU up. */
 static void ct_restart_from_nested(void* arg) {
   CoroTest* t = (CoroTest*) arg;
@@ -1154,11 +1153,11 @@ static int run_coro_test(void) {
 
 /* ---- --test-nesting ----------------------------------------------------
  *
- * The one thing a hook cannot get from the machine itself: whether the machine
+ * The one fact a hook cannot get from the machine itself: whether the machine
  * has moved on since *this* hook was entered. The dispatcher snapshots
  * snes->frames and snes->inVblank, and ss_yield_wanted() compares against that
- * snapshot, which is how a body that models the instruction stream knows to hand
- * the rest of its routine back to the ROM at a frame boundary.
+ * snapshot, so a body that models the instruction stream knows to hand the rest
+ * of its routine back to the ROM at a frame boundary.
  *
  * Hooks nest: a converted routine reaches a converted callee through
  * ss_run_callee / ss_call_sub, which run the reference CPU, so the callee's own
@@ -1198,8 +1197,8 @@ static NestTest gNest;
 static void nest_inner(SnesState* ss) {
   gNest.ranInner = true;
   gNest.depthInInner = ss_hook_depth(ss);
-  /* Entered after the boundary the outer hook crossed, so this hook -- which has
-   * only just started -- must see nothing to hand back. */
+  /* Entered after the boundary the outer hook crossed, so this hook, which has
+   * only just started, must see nothing to hand back. */
   gNest.innerYieldAtEntry = ss_yield_wanted(ss);
   ss_rts(ss);
 }
@@ -1422,7 +1421,7 @@ static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
  * the one-row OAM emitters, the animation-rate entries no table word points
  * at, `unused_vec`, and the four 65816 orphans with no caller at all. They are
  * converted, and until now they were listed as unverified because "never
- * entered" is the honest thing to say about them.
+ * entered" was all there was to say about them.
  *
  * --unit gives them a gate of their own, at the granularity of one routine and
  * one seeded machine state. For each seed in config/recomp_units.txt it:
@@ -1430,7 +1429,7 @@ static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
  *   1. boots the ROM under a named input script to a named frame, so WRAM,
  *      VRAM, CGRAM, OAM, ARAM, the DSP and the SPC registers hold content the
  *      game itself produced rather than zeroes;
- *   2. loads that state into two fresh machines -- the reference, which runs no
+ *   2. loads that state into two fresh machines: the reference, which runs no
  *      hooks at all, and the candidate, which runs the whole table;
  *   3. overrides the registers and a few memory cells from the seed, pushes the
  *      return frame the routine expects, and points both machines at the
@@ -1442,27 +1441,27 @@ static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
  * Leaving the routine is one rule for all four shapes, and it needs no
  * per-routine return kind at the stopping end: control has left when the pc is
  * outside the routine's own byte range *and* the stack pointer is at or above
- * where it stood at the first instruction. The stack-pointer half is what lets
- * a routine call a subroutine (the pc leaves the range, but a frame is below)
- * and what distinguishes a tail `jmp` from it. The return frame the harness
- * pushes carries a sentinel address that is deliberately outside every
- * routine, so an `rts`, an `rtl` and an `rti` all satisfy the same rule and no
- * instruction at the sentinel is ever fetched. `ret=` in the seed says which
- * frame to push, because the shape of the frame is the routine's business:
- * `rts` pops a word, `rtl` a word and a bank, `rti` flags, a word and a bank,
- * and `jmp` pops nothing.
+ * where it stood at the first instruction. The stack-pointer half lets a
+ * routine call a subroutine (the pc leaves the range, but a frame is below) and
+ * distinguishes a tail `jmp` from it. The return frame the harness pushes
+ * carries a sentinel address that is deliberately outside every routine, so an
+ * `rts`, an `rtl` and an `rti` all satisfy the same rule and no instruction at
+ * the sentinel is ever fetched. `ret=` in the seed says which frame to push,
+ * because the shape of the frame is the routine's business: `rts` pops a word,
+ * `rtl` a word and a bank, `rti` flags, a word and a bank, and `jmp` pops
+ * nothing.
  *
- * Interrupts are the one thing that has to be taken out of the picture. A hook
- * is atomic where the routine it replaces is not, so an NMI landing inside the
+ * Interrupts are the one variable that has to be removed. A hook is atomic
+ * where the routine it replaces is not, so an NMI landing inside the
  * reference's run and inside a different instruction of the candidate's would
  * be a difference the routine is not responsible for. The boot therefore ends
  * with NMI and both timer IRQs disabled and the pending latch cleared, and
  * with the machine parked just after vblank ends, which leaves a whole active
- * frame -- some 300 000 master cycles -- before either the vblank flag or the
+ * frame (some 300 000 master cycles) before either the vblank flag or the
  * frame counter can move under the routine. Both machines get exactly the same
  * treatment, and the run report says how many cycles each seed actually spent.
  *
- * The seeds are data, not code: config/recomp_units.txt, one line per seed.
+ * The seeds are data: config/recomp_units.txt, one line per seed.
  */
 
 #define UNIT_SENT_PC    0xFFFFu   /* the return address the harness pushes: no */
@@ -1827,7 +1826,7 @@ static void unit_apply(Machine* m, const UnitSeed* sd) {
 
 /* Control has left the routine when the instruction about to run is outside its
  * byte range, the instruction *before* it was inside, and no frame the routine
- * pushed is still on the stack. All three conditions earn their place:
+ * pushed is still on the stack. All three conditions are needed:
  *
  *   the stack pointer alone cannot say, because the pc leaves the range on
  *   every call to a routine that is not converted yet, and comes back;
@@ -2266,7 +2265,7 @@ int main(int argc, char** argv) {
   if(frames <= 0) { fprintf(stderr, "dream_harness: --frames must be positive\n"); return 2; }
 
   /* Before the ROM is opened: --test-coro exercises the coroutine backend and
-   * nothing else, so it is the one mode that runs on a machine with no ROM --
+   * nothing else, so it is the one mode that runs on a machine with no ROM,
    * which is every CI runner (.github/workflows/ci.yml). */
   if(testCoro) return run_coro_test();
 
@@ -2294,8 +2293,8 @@ int main(int argc, char** argv) {
   if(noCpu) {
     /* The mode is "the C bodies are the program", so every body has to be
      * installed on both processors; a narrowed table would report a routine the
-     * port has as missing. --profile measures the ROM's own code, which is the
-     * one thing this mode does not run. */
+     * port has as missing. --profile measures the ROM's own code, which this
+     * mode does not run. */
     if(profilePath != NULL) {
       fprintf(stderr, "dream_harness: --no-cpu and --profile are exclusive\n");
       return 2;
@@ -2375,8 +2374,8 @@ int main(int argc, char** argv) {
     machine_init(&cand, rom, romLen, table, tableCount, true, false);
     machine_install_spc(&cand, spcTable, spcTableCount, lockstep ? spcHooksOn : false);
   }
-  /* --no-cpu applies to the candidate under --lockstep -- the reference is
-   * always the ROM running on both cores -- and to the single machine
+  /* --no-cpu applies to the candidate under --lockstep (the reference is
+   * always the ROM running on both cores) and to the single machine
    * otherwise. Enable it after the tables are installed: the SPC side steps in
    * front of the harness's own dispatcher. */
   if(noCpu) {
@@ -2539,7 +2538,7 @@ int main(int argc, char** argv) {
      * the number of instructions the emulated processors fetched and executed.
      * Every one of them would have been a hook that declined, and in this mode
      * a decline is a fatal error, so the only figure that can survive to here
-     * is zero -- except for the SPC700's IPL boot ROM, which is the console's
+     * is zero, except for the SPC700's IPL boot ROM, which is the console's
      * firmware and has no body (see recomp/README.md). */
     printf("no-cpu: %" PRIu64 " 65816 instructions and %" PRIu64 " SPC700 instructions"
            " executed by the emulated cores (%" PRIu64 " of them the IPL boot ROM)\n",

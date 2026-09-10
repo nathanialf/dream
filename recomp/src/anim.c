@@ -17,8 +17,8 @@
  * these entry addresses has to run the tail as well; that is what the ROM would
  * have executed next. The tail ends with jsl anim_update (recomp/src/
  * anim_scripts.c): the hook builds the jsl's own stack frame by hand so the
- * instruction costs what it costs, then hands the CPU the callee -- whose own
- * hook fires from there -- and picks up again when it returns.
+ * instruction costs what it costs, then hands the CPU the callee (whose own
+ * hook fires from there) and picks up again when it returns.
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -28,7 +28,7 @@
 #include "dream_alu.h"
 #include "dream_time.h"
 
-/* anim_rate_store — $C0:99D4, the shared tail. It is also an entry in its own
+/* anim_rate_store: $C0:99D4, the shared tail. It is also an entry in its own
  * right: the beq at $99A9 in entity_update_tick reaches it directly when the
  * type has no handler for its state, so a hook installed here fires for that
  * path while the fall-through paths below arrive as a plain C call. */
@@ -49,7 +49,7 @@ static void anim_rate_store_body(SnesState* ss, uint16_t a) {
 
   ss_set_a(ss, a);
 
-  /* C099D8 jsl anim_update — opcode and target word, push the program bank, an
+  /* C099D8 jsl anim_update: opcode and target word, push the program bank, an
    * internal cycle, the bank byte of the operand, then the return address. */
   const uint16_t sp0 = ss_sp(ss);
   S(0x99D8, 3);
@@ -66,7 +66,7 @@ static void anim_rate_store_body(SnesState* ss, uint16_t a) {
   /* anim_update leaves its own A, X and Y behind; the step below publishes the
    * registers this body is holding in locals, so they have to be the callee's
    * and not the ones from before the jsl. Without this the rts put the
-   * pre-call accumulator back -- invisible to the frame gate, because the
+   * pre-call accumulator back: invisible to the frame gate, because the
    * caller reloads before it reads A again, and caught by the unit gate, which
    * compares the registers the routine itself left. */
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);

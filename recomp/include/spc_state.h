@@ -1,4 +1,4 @@
-/* spc_state.h — the recomp's view of the reference SPC700.
+/* spc_state.h: the recomp's view of the reference SPC700.
  *
  * The 65816 half of the port is written against snes_state.h; this is the same
  * idea one processor down. An SPC recomp hook is a C function that stands in for
@@ -8,12 +8,12 @@
  * the routine would have left it (normally by calling sps_ret(), or by pointing
  * the pc at a tail jmp's target).
  *
- * Three things are different from the 65816 side, and they shape the whole API.
+ * Three differences from the 65816 side shape the whole API.
  *
  *   Cycles are the only clock. The SPC700 has no interrupts here; what the
  *   driver observes is its own timers, the DSP's 32-cycle tick and the four
  *   ports the 65816 writes. Every one of those moves on APU cycles, and an APU
- *   cycle is spent by exactly one thing: a read, a write or an idle
+ *   cycle is spent by exactly one operation: a read, a write or an idle
  *   (apu_spcRead / apu_spcWrite / apu_spcIdle each call apu_cycle once). So a
  *   body that replays a routine's access sequence in order costs the emulator
  *   exactly what the routine cost, to the cycle, and there is no separate
@@ -133,7 +133,7 @@ void sps_ret(SpcState* sp);
 /* ---- DSP -------------------------------------------------------------- */
 /* Untimed inspection of the emulated DSP's 128 registers, and of the $F2 latch.
  * A routine's own DSP traffic goes through sps_write8(SPS_DSPADDR/SPS_DSPDATA),
- * which is what makes the write land on the DSP at the cycle it landed before. */
+ * which makes the write land on the DSP at the cycle it landed before. */
 uint8_t sps_dsp_addr(const SpcState* sp);
 uint8_t sps_dsp_read(const SpcState* sp, uint8_t reg);   /* reg 0..$7F */
 void    sps_dsp_write(SpcState* sp, uint8_t reg, uint8_t v);
@@ -181,10 +181,10 @@ int sps_op_cycles(uint8_t opcode);
  * and then calling this.
  *
  * It does not stop at a slice boundary, so it is only for a callee short enough
- * that overrunning the catch-up budget cannot matter -- the SPC would otherwise
+ * that overrunning the catch-up budget cannot matter: the SPC would otherwise
  * get ahead of the 65816 for the length of the callee. Every body in recomp/spc
- * uses sps_run_callee below instead, which is the same thing built by hand and
- * able to stop. */
+ * uses sps_run_callee below instead, which builds the same frame by hand and
+ * can stop. */
 void sps_call(SpcState* sp, uint16_t retAddr, uint16_t callee);
 
 /* The primitive underneath, for a body that has already built the frame: run
@@ -207,16 +207,16 @@ bool sps_run_callee(SpcState* sp, uint8_t spBefore);
  * SPC stops between two instructions of a routine; a hook is atomic where the
  * routine it replaces is not, and the two runs would then be compared at
  * different points of the same routine. A body that models the instruction
- * stream can simply stop: every register, flag and byte of ARAM is already what
+ * stream can stop: every register, flag and byte of ARAM is already what
  * the SPC700 would have left at that boundary, so setting the pc to the address
  * of the next instruction and returning hands the rest of the routine to the
  * driver.
  *
- * It is false at a hook's first instruction by construction -- apu_runCycles()
- * only calls spc_runOpcode() while the budget is unspent -- so a body always
- * makes progress, which is what keeps that loop from spinning. recomp/spc's step
- * macros check it before *every* instruction, so a hook is never atomic over
- * more than one of them. */
+ * It is false at a hook's first instruction by construction (apu_runCycles()
+ * only calls spc_runOpcode() while the budget is unspent), so a body always
+ * makes progress and that loop cannot spin. recomp/spc's step macros check it
+ * before *every* instruction, so a hook is never atomic over more than one of
+ * them. */
 bool sps_yield_wanted(const SpcState* sp);
 
 /* ---- running with no CPU (--no-cpu) ------------------------------------- *

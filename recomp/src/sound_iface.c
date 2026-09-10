@@ -18,11 +18,11 @@
  * emulated port exactly as often as the ROM does, so the SPC700 sees the same
  * traffic at the same master cycles.
  *
- * The uploads are also the longest routines in the game -- the driver alone is
- * $699 words, each one a busy-wait -- so a hook that ran one atomically would
+ * The uploads are also the longest routines in the game (the driver alone is
+ * $699 words, each one a busy-wait), so a hook that ran one atomically would
  * move every NMI inside it. The step macros in dream_time.h offer the routine
- * back to the ROM before every single instruction, which is what keeps NMI
- * timing during an upload identical (--lockstep reports zero master-cycle
+ * back to the ROM before every single instruction, which keeps NMI timing
+ * during an upload identical (--lockstep reports zero master-cycle
  * drift).
  *
  * Direct page is 0 throughout (reset's tcd) and the data bank is $00 at reset
@@ -70,7 +70,7 @@
 #define APUIO1 0x2141
 #define APUIO2 0x2142
 
-/* ---- instruction shapes this bank needs that dream_time.h does not have -- */
+/* ---- instruction shapes this bank needs that dream_time.h lacks --------- */
 
 /* An immediate operand is not fetched by the addressing mode: the opcode's own
  * data read *is* the operand read, so the interrupt latch sits between the two
@@ -181,7 +181,7 @@ static void alu_cpx8(SnesState* ss, uint8_t xv, uint8_t v) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_spc_block — $C1:8324 (docs/dkc_crossref.md 3.2: .upload_spc_block)
+ * upload_spc_block: $C1:8324 (docs/dkc_crossref.md 3.2: .upload_spc_block)
  *
  * Entry: $07 = SPC destination, $09 = word count, ptr_04 = 24-bit source.
  * Sends destination and count through the $2140 handshake, then `count` words,
@@ -325,7 +325,7 @@ static void upload_spc_block(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_inline_spc_block — $C1:830A (.upload_inline_spc_block)
+ * upload_inline_spc_block: $C1:830A (.upload_inline_spc_block)
  *
  * Entry: ptr_04 points at a `{dest, count}` header followed by the words.
  * Reads the header into $07/$09, steps ptr_04 past it and falls through into
@@ -353,7 +353,7 @@ static void upload_inline_spc_block(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * spc_ipl_upload_loader — $C1:805A (.upload_spc_base_engine)
+ * spc_ipl_upload_loader: $C1:805A (.upload_spc_base_engine)
  *
  * The Nintendo IPL handshake: wait for $BBAA on $2140/$2141, answer with the
  * entry address $04D8 in $2142/$2143 and $CC in $2140, then feed the $88-byte
@@ -452,7 +452,7 @@ static void spc_ipl_upload_loader(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * spc_upload_driver — $C1:809F (.upload_spc_sound_engine)
+ * spc_upload_driver: $C1:809F (.upload_spc_sound_engine)
  *
  * Points ptr_04 at $C2:0088 and streams $699 words to SPC $0560 through
  * upload_spc_block. Exit is upload_spc_block's (A = $0D32).
@@ -476,7 +476,7 @@ static void spc_upload_driver(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_global_samples — $C1:80C1 (.upload_global_samples)
+ * upload_global_samples: $C1:80C1 (.upload_global_samples)
  *
  * Runs sample_uploader over the fixed global sample map at $C2:1109, building
  * the directory from ARAM $3100 and the sample data from $3400, then saves the
@@ -515,7 +515,7 @@ static void upload_global_samples(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * write_spc_command — $C1:80FF (.write_spc_command)
+ * write_spc_command: $C1:80FF (.write_spc_command)
  *
  * Entry: X = the packed param:cmd word. Waits for the SPC to echo the current
  * handshake count, drops the word into $2141/$2142 as one 16-bit store, then
@@ -559,7 +559,7 @@ static void write_spc_command(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_song_data — $C1:8119 (.upload_song_data)
+ * upload_song_data: $C1:8119 (.upload_song_data)
  *
  * Entry: $48 = song number. Indexes the song x 6 table at $C2:10B9 for the
  * song's sequence-data pointer and uploads the block it heads.
@@ -590,7 +590,7 @@ static void upload_song_data(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_song_sound_effects — $C1:813D (.upload_song_sound_effects)
+ * upload_song_sound_effects: $C1:813D (.upload_song_sound_effects)
  *
  * Entry: $48 = song number. Same shape as upload_song_data but the index is
  * song x 3 built out of two adc, into the table at $C2:10EE.
@@ -620,7 +620,7 @@ static void upload_song_sound_effects(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * sample_uploader — $C1:815F (.sample_uploader)
+ * sample_uploader: $C1:815F (.sample_uploader)
  *
  * Entry: $42/$44 = the sample map (a word list of sample ids, $FFFF terminated,
  * followed by a second $FFFF-terminated list of remap slots), $36 = the ARAM
@@ -872,7 +872,7 @@ static void sample_uploader(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * upload_song_sample_set — $C1:8392 (.upload_song_sample_set)
+ * upload_song_sample_set: $C1:8392 (.upload_song_sample_set)
  *
  * Entry: $48 = song number. Takes the song's sample-map pointer out of the
  * song x 6 table at $C2:10BC, restores the three cursors the global upload
@@ -913,7 +913,7 @@ static void upload_song_sample_set(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * execute_spc_sound_engine — $C1:803E (.execute_spc_sound_engine)
+ * execute_spc_sound_engine: $C1:803E (.execute_spc_sound_engine)
  *
  * A zero-length block whose destination is the driver entry $0672: the loader
  * on the SPC side reads a count of 0 as "jump there".
@@ -933,7 +933,7 @@ static void execute_spc_sound_engine(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * spc_init — $C1:8000 (.upload_spc_engine)
+ * spc_init: $C1:8000 (.upload_spc_engine)
  *
  * The whole reset-time sound bring-up: clear the sample/directory cursors and
  * the handshake count, run the IPL handshake, upload the driver and the global
@@ -974,12 +974,12 @@ static void spc_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * spc_command — $C1:83CE (closest DKC2 analogue: .play_song)
+ * spc_command: $C1:83CE (closest DKC2 analogue: .play_song)
  *
  * Entry: A = the song/command number. Splits it into $48 (the song number, low
- * byte) and the command word `param:$FF` -- $FF being the driver's "stop and
- * return to the loader" command, which is what puts the SPC back in a state
- * that accepts uploads. Then the three per-song uploads, a restart, and $FE
+ * byte) and the command word `param:$FF` ($FF is the driver's "stop and
+ * return to the loader" command, which puts the SPC back in a state that
+ * accepts uploads). Then the three per-song uploads, a restart, and $FE
  * ("play"). Reached by jsl from reset and from the mode-init path.
  * Exit: rtl, A/flags as the closing write_spc_command left them.
  * ------------------------------------------------------------------------- */
@@ -1007,23 +1007,23 @@ static void spc_command(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * unused_spc_set_e7_and_play — $C1:83F1, unused_spc_set_fb_and_play — $C1:8403
+ * unused_spc_set_e7_and_play: $C1:83F1, unused_spc_set_fb_and_play: $C1:8403
  *
  * Two dead siblings of spc_command's tail, eighteen bytes each and identical
  * apart from one immediate byte. Each builds a command word out of the
- * accumulator's *high* byte -- the xba is what makes the caller's high byte the
- * parameter -- sends it, then sends $FE ("play"), skipping every upload step
+ * accumulator's *high* byte (the xba puts the caller's high byte in the
+ * parameter), sends it, then sends $FE ("play"), skipping every upload step
  * spc_command does first.
  *
  * The commands are $F9 and $FB: the driver takes `cmd & 7` as the index into
  * cmd_table, so $F9 is cmd1_set_E7 (parameter into $E7, which nothing else in
- * the traced driver reads -- spc/spc_map.txt) and $FB is cmd3_fade_and_song.
+ * the traced driver reads, per spc/spc_map.txt) and $FB is cmd3_fade_and_song.
  * Nothing calls either: no jsr, jsl or table word anywhere in out/dream.asm
- * names either address, and config/recomp_order.txt marks them cold. Only one of the two is
- * traced as code at a time -- the tracer's orphan sweep reaches whichever the
- * label file forces -- so both are converted and both are credited by the unit
- * gate rather than by a script (config/recomp_units.txt, `dream_harness
- * --unit`).
+ * names either address, and config/recomp_order.txt marks them cold. Only one
+ * of the two is traced as code at a time (the tracer's orphan sweep reaches
+ * whichever the label file forces), so both are converted and both are
+ * credited by the unit gate rather than by a script (config/recomp_units.txt,
+ * `dream_harness --unit`).
  *
  * Entry: A high byte = the parameter. Exit: rtl, A/flags as the closing
  * write_spc_command left them.
@@ -1061,7 +1061,7 @@ static void unused_spc_set_fb_and_play(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * sfx_command_dispatch — $C1:8415
+ * sfx_command_dispatch: $C1:8415
  *
  * Entry: A = the packed channel:sfx_id word, from play_sound_effect
  * ($C0:B0C5). A raw pass-through to write_spc_command; DKC2 kept the same

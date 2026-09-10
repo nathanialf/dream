@@ -1,4 +1,4 @@
-/* Minimal SHA-1, for the one thing `dream` needs it for: proving the ROM the
+/* Minimal SHA-1, for the one job `dream` needs it for: proving the ROM the
  * user pointed us at is the prototype this port was verified against. */
 #ifndef DREAM_SHA1_H
 #define DREAM_SHA1_H

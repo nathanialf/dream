@@ -6,7 +6,7 @@
  * parameter from port2, echoes the counter and dispatches. A command below $80
  * is a sound effect; $80 and up selects one of the eight cmd_table handlers by
  * `cmd & 7`. Every handler ends by jumping into tick_wait ($0781), the timer-0
- * wait that drives the sequencer -- the handlers hand the pc back there, so
+ * wait that drives the sequencer. The handlers hand the pc back there, so
  * tick_wait's own hook (sequencer.c) picks the driver up exactly as the ROM's
  * `jmp tick_wait` would have.
  *
@@ -27,7 +27,7 @@
 #define SFX_START   0x112A   /* sequencer.c, likewise */
 
 /* ---------------------------------------------------------------------------
- * start_song — $0660
+ * start_song: $0660
  *
  * Command 3's tail: the song number in cmd_param indexes song_table ($1312) for
  * a 16-bit sequence pointer, which goes into $E5/$E6 for dsp_init to read the
@@ -50,7 +50,7 @@ static void start_song(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * driver_entry — $0672
+ * driver_entry: $0672
  *
  * Where the loader's `jmp ($0539+x)` lands after the 65816 sends destination
  * $0672 with a word count of zero. Points the song pointer at $1300, the block
@@ -65,7 +65,7 @@ static void driver_entry(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * driver_init — $0678
+ * driver_init: $0678
  *
  * dsp_init, then clear the play flag, the mono flag and CONTROL (all timers
  * off), and fall into main_loop. The call is run on the emulator so that
@@ -95,7 +95,7 @@ static void driver_init(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * main_loop — $0683
+ * main_loop: $0683
  *
  * The poll. Four instructions, entered again on every pass of the driver's outer
  * loop, so this is by far the most-called routine in the driver.
@@ -114,7 +114,7 @@ static void main_loop(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd_receive — $068C
+ * cmd_receive: $068C
  *
  * A command has arrived: parameter from port2 into cmd_param, command byte from
  * port1, the counter echoed back and bumped. Commands below $80 are sound
@@ -139,7 +139,7 @@ static void cmd_receive(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd_dispatch — $06A0
+ * cmd_dispatch: $06A0
  *
  * `cmd & 7` doubled indexes cmd_table ($06A7); `jmp (cmd_table+x)` reads the
  * handler address out of the table in ARAM.
@@ -156,7 +156,7 @@ static void cmd_dispatch(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd3_fade_and_song — $06B7
+ * cmd3_fade_and_song: $06B7
  *
  * $7F passes over every DSP volume register, each pass moving it two steps
  * toward zero, then start_song. Roughly a hundred thousand APU cycles, so the
@@ -217,7 +217,7 @@ static void cmd3_fade_and_song(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * dsp_step_toward_zero — $06EB
+ * dsp_step_toward_zero: $06EB
  *
  * Read the DSP register $F2 selects, move it two steps toward zero, write it
  * back. cmd3's fade calls it six times a pass.
@@ -261,7 +261,7 @@ static void cmd1_set_E7(SpcState* sp)   { cmd_param_to_dp(sp, 0x0702, 0xE7); }
 static void cmd0_set_E8(SpcState* sp)   { cmd_param_to_dp(sp, 0x070A, 0xE8); }
 
 /* ---------------------------------------------------------------------------
- * cmd5_voice5_volume — $0712
+ * cmd5_voice5_volume: $0712
  *
  * Rescale voice 5's two DSP volume registers by the parameter, as a percentage,
  * with the old master percentage saved on the stack around it. scale_volume
@@ -300,7 +300,7 @@ static void cmd5_voice5_volume(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd4_pitch_offset — $0739
+ * cmd4_pitch_offset: $0739
  *
  * Sign-extend the parameter, multiply it by eight with eight 16-bit adds, and
  * park it in $EC/$ED for channel_update to apply to the sfx voice; then clear
@@ -344,7 +344,7 @@ static void cmd4_pitch_offset(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * play_sfx — $0773
+ * play_sfx: $0773
  *
  * A command below $80: the command byte is the sound-effect id (already in A),
  * the parameter is the channel. sfx_start ($112A) is reached through
@@ -364,7 +364,7 @@ static void play_sfx(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd6_play — $077B
+ * cmd6_play: $077B
  *
  * Set the play flag and stop the timers; tick_wait restarts timer 0. This is the
  * command write_spc_command ends every song change with.
@@ -378,7 +378,7 @@ static void cmd6_play(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * cmd7_stop_to_loader — $07DB
+ * cmd7_stop_to_loader: $07DB
  *
  * The command that gives the loader back control so the 65816 can upload a new
  * song. A non-zero parameter jumps straight there; a zero one keys every voice

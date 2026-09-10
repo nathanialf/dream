@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""roundtrip_check.py -- decode every asset whose kind has a codec in tools/assetcodec.py,
+"""roundtrip_check.py: decode every asset whose kind has a codec in tools/assetcodec.py,
 re-encode the editable form, and compare the bytes with the extracted asset.
 
     python3 tools/roundtrip_check.py                 # report per-kind pass/total
@@ -29,7 +29,7 @@ ROUNDTRIP = os.path.join(ROOT, 'config', 'roundtrip.txt')
 OUTROOT = os.path.join(ROOT, 'build', 'assets')
 
 HEADER = """\
-; config/roundtrip.txt -- asset kinds (from config/assets.txt) whose decoder + encoder pair
+; config/roundtrip.txt: asset kinds (from config/assets.txt) whose decoder + encoder pair
 ; in tools/assetcodec.py is verified byte-exact: the decoded, human-editable form
 ; re-encodes to the exact ROM bytes for every asset of that kind.  Regenerate with
 ;

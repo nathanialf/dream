@@ -23,11 +23,11 @@
  * mode0_level_init has no rts of its own: its last instruction is the
  * `ldx #$0050` at $8489 and it falls straight into dma_setup_channel_step at
  * $848C, which supplies the return. The hook therefore just leaves the pc at
- * $848C, and the ROM -- or that routine's own hook -- picks it up.
+ * $848C, and the ROM (or that routine's own hook) picks it up.
  *
  * The two per-frame routines are the other half of the file. mode0_camera_zone_update is
  * jtbl_C0827A[0], the mode-0 entry of the per-mode update nmi_handler_gameplay
- * runs once a frame at $815B -- that handler resets the stack at $80F4 and
+ * runs once a frame at $815B. That handler resets the stack at $80F4 and
  * drives the whole frame, so the game's main loop *is* the NMI path. It is the
  * head of the camera-X-driven zone state machine that continues past $8BDB, so
  * every one of its exits is a jmp or a fall-through into that continuation
@@ -124,8 +124,8 @@ static void t_push16(SnesState* ss, uint16_t v) {
 /* The second half of `jsr abs`: the caller's S() has already fetched the opcode
  * and the two address bytes (cpu_adrAbs takes no latch between them), so what
  * is left is the internal cycle, the return-address push and the transfer of
- * control. The callee then runs on the reference CPU, which is what keeps a
- * converted callee converted -- its own hook fires from inside this loop. The
+ * control. The callee then runs on the reference CPU, which keeps a converted
+ * callee converted: its own hook fires from inside this loop. The
  * frame pushed here is the routine's real return address, so the callee can be
  * left running when the machine moves on underneath the hook: true is returned
  * then and the ROM finishes both the callee and the caller. */
@@ -169,7 +169,7 @@ static bool t_jmp_abs(SnesState* ss, uint8_t pb, uint16_t addr, uint16_t target,
   } while(0)
 
 /* ---------------------------------------------------------------------------
- * mode0_level_init — $C0:8292
+ * mode0_level_init: $C0:8292
  *
  * game_mode_table[0]. BGMODE 1, TM $1417, CGWSEL $8202; the map lives at
  * $CA:4860 with its definitions at $C9:DCE0, the level is $0DFF by $011F, and
@@ -421,7 +421,7 @@ void mode0_level_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * mode1_level_init — $C0:84D7
+ * mode1_level_init: $C0:84D7
  *
  * game_mode_table[1], the one mode that runs with $0BAC = $0018 (the row offset
  * entity_update_tick adds to entity_state, docs/handler_tables.md). CGWSEL
@@ -780,11 +780,11 @@ void mode1_level_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * mode2_level_init — $C0:8798
+ * mode2_level_init: $C0:8798
  *
  * game_mode_table[2]. TM $0413 (no BG3 on the main screen), CGWSEL $B402 and a
- * single COLDATA write; the map is at $CA:5760 with definitions at $C9:B560 --
- * the pointer pair docs/data_formats.md cites for game mode 2 -- and the camera
+ * single COLDATA write; the map is at $CA:5760 with definitions at $C9:B560
+ * (the pointer pair docs/data_formats.md cites for game mode 2), and the camera
  * walks $0600..$06F8. $82 = $FFFF turns the layer-2 parallax off. The tail
  * seeds the particle field with particle_spawn_random and programs one HDMA
  * channel from the five bytes at $88A6.
@@ -938,7 +938,7 @@ void mode2_level_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * title_screen_init — $C0:88AB
+ * title_screen_init: $C0:88AB
  *
  * game_mode_table[3]. The only mode with BGMODE 9 (mode 1 with BG3 priority),
  * TM $0013 and the map at $CE:8714 / $CA:37A0; the camera walks $0000..$00F8.
@@ -1156,7 +1156,7 @@ void title_screen_init(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * mode0_camera_zone_update — $C0:8A74   (proposed: mode0_camera_zone_update)
+ * mode0_camera_zone_update: $C0:8A74   (proposed: mode0_camera_zone_update)
  *
  * jtbl_C0827A[0], so the mode-0 arm of the per-mode update nmi_handler_gameplay
  * calls once a frame at $815B (the other three modes get
@@ -1167,14 +1167,14 @@ void title_screen_init(SnesState* ss) {
  *
  *  - It runs a free-running 180-frame cycle in $0C1F. Each time the counter
  *    reaches zero it re-arms it and re-seeds the six-word effect record at
- *    $0C21..$0C2B with kind 3, $FF/$FF, $0070, the current camera_x and 0 --
+ *    $0C21..$0C2B with kind 3, $FF/$FF, $0070, the current camera_x and 0:
  *    the same record nmi_handler_gameplay re-seeds with kind 4 at $816A when the
- *    walk cycle fires, which is what ties the record to a spawned effect rather
- *    than to the weather alone.
+ *    walk cycle fires, tying the record to a spawned effect rather than to the
+ *    weather alone.
  *  - Below camera_x $0100 it clears the settle timer $78 outright; past it, and
  *    only while $78 and $0C0C are both idle, it turns the distance from
  *    camera_x $0400 into a new $78 ( (0x400-x)>>2 + 0x78, clamped to $5A when
- *    more than a screen past ) -- a countdown that scales with how far the
+ *    more than a screen past ), a countdown that scales with how far the
  *    camera still is from the boundary.
  *  - It publishes camera_x >> 2 and camera_y >> 2 to $0BF0/$0BF2 (the layer
  *    offsets nmi_scroll_mode0 consumes) and then runs a nine-way ladder on
@@ -1473,18 +1473,18 @@ void mode0_camera_zone_update(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * cgram_palette_ramp_step — $C0:91BB   (proposed: cgram_palette_ramp_step)
+ * cgram_palette_ramp_step: $C0:91BB   (proposed: cgram_palette_ramp_step)
  *
  * Called from nmi_handler_gameplay at $81B7 whenever $0C1B is non-zero, with
- * that word still in A -- which is why the routine's first instruction is a bare `bmi`:
+ * that word still in A, so the routine's first instruction is a bare `bmi`:
  * the sign of $0C1B is the ramp's direction, set to $FFFF by the zone bodies at
  * $8B3D and $8D19 and to a positive value at $8D45.
  *
  * One step is $0080 of $0C1D, up or down; the ramp ends (and clears $0C1B) when
  * the counter passes $0800 going up or reaches zero going down. The step's high
- * byte then picks a 64-byte palette out of bank $C4 -- ($0C1D & $FF00) >> 2 plus
- * $7103, i.e. one 32-colour bank per $0100 of the counter -- and appends it to
- * the CGRAM upload queue as an 8-byte record ({$0040 bytes, CGADD $80, that
+ * byte then picks a 64-byte palette out of bank $C4, at ($0C1D & $FF00) >> 2
+ * plus $7103, i.e. one 32-colour bank per $0100 of the counter, and appends it
+ * to the CGRAM upload queue as an 8-byte record ({$0040 bytes, CGADD $80, that
  * source, bank $C4}) at $0B8C..$0B92 + $0B8A, bumping $0B8A by 8.
  * cgram_upload_queue_flush performs the DMA later in the frame.
  *

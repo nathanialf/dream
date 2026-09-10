@@ -1,6 +1,6 @@
 # dream
 
-**[Live progress dashboard](https://nathanialf.github.io/dream/)** — per-section, per-routine and per-region status, updated on every push.
+**[Live progress dashboard](https://nathanialf.github.io/dream/)**: per-section, per-routine and per-region status, updated on every push.
 
 A matching disassembly of the **Dream: Land of Giants** prototype (codename Project Dream), the SNES game Rare built around 1995
 that later became *Banjo-Kazooie*. `make` rebuilds the 2 MiB ROM byte-for-byte from
@@ -54,9 +54,9 @@ once: the pre-commit hook runs `tools/check_no_rom.sh`, the byte-identical gate,
 
 ### Playing it
 
-The port is not the disassembly: `dream` is a native build of the game that reads
-your own ROM. Builds for Linux, Windows and macOS are attached to each tagged
-[release](https://github.com/nathanialf/dream/releases) — a zip holding the
+The port is separate from the disassembly: `dream` is a native build of the game
+that reads your own ROM. Builds for Linux, Windows and macOS are attached to each tagged
+[release](https://github.com/nathanialf/dream/releases): a zip holding the
 executable, this README and the LICENSE, and no game data of any kind. Unpack it,
 put your own `DREAM.sfc` next to the executable (on Windows also `%APPDATA%\dream\`;
 on Linux and macOS `./baserom/` or `~/.local/share/dream/`) and run it. Windows

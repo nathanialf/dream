@@ -286,7 +286,7 @@ bool sps_yield_wanted(const SpcState* sp) {
   if(!sp->nocpu) return want;
   /* --no-cpu: there is no driver to hand the rest of the routine to. The slice
    * boundary still has to stop the body exactly where the reference SPC700
-   * stops -- apu_runCycles() returns there and the 65816 gets its turn -- so
+   * stops (apu_runCycles() returns there and the 65816 gets its turn), so
    * suspend the stack the body runs on and answer false; the next catch-up
    * step resumes it on this instruction. */
   if(want && sp->running) sps_nocpu_suspend((SpcState*) sp);
@@ -345,8 +345,8 @@ static void sps_nocpu_no_body(SpcState* sp, uint16_t pc) {
   exit(3);
 }
 
-/* Run the one body that owns this pc, through the harness's own dispatcher --
- * the same callback the SPC700 core calls -- so a body is entered and counted
+/* Run the one body that owns this pc, through the harness's own dispatcher,
+ * the same callback the SPC700 core calls, so a body is entered and counted
  * exactly as it is with the core running. */
 static void sps_nocpu_call_body(SpcState* sp, uint16_t pc) {
   sp->dispatches++;

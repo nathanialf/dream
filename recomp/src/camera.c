@@ -8,7 +8,7 @@
 #include "dream_time.h"
 
 /* ---------------------------------------------------------------------------
- * camera_follow_player — $C0:A1B0
+ * camera_follow_player: $C0:A1B0
  *
  * Puts the camera $80 pixels left of and $20 pixels above the player, clamped to
  * [0, level_width_mask] and [0, level_height_mask]. The no-index forms of

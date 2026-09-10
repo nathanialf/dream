@@ -8,9 +8,9 @@
  * word: port0 ($F4) carries a counter, the SPC waits for the 65816 to write the
  * value it expects, reads port1/port2, echoes the counter back and increments.
  * The 65816's side of it (spc_send_words, $C1:8324, converted in
- * recomp/src/sound_iface.c) is a busy-wait against this one, so the two clocks
- * are load-bearing in both directions -- which is the reason every instruction
- * here is modelled rather than computed.
+ * recomp/src/sound_iface.c) is a busy-wait against this one, so each clock
+ * depends on the other. Every instruction here is modelled rather than
+ * computed.
  *
  * The block loop patches the destination address into the operands of its own
  * two `mov abs+y,a` instructions and then jumps through `jmp ($0539+x)`, so the
@@ -29,11 +29,11 @@
 #define LOADER_DEST2  0x0542
 
 /* ---------------------------------------------------------------------------
- * spc_loader — $04D8
+ * spc_loader: $04D8
  *
  * Entered by the IPL's jump. Sets the stack up, clears port0, seeds the
- * handshake counter at 1 ($E9) and clears $D000-$FFFF -- the top of ARAM, where
- * the echo buffer will live -- with a 12 KB store loop, then falls into
+ * handshake counter at 1 ($E9) and clears $D000-$FFFF (the top of ARAM, where
+ * the echo buffer will live) with a 12 KB store loop, then falls into
  * loader_reset_dsp.
  * ------------------------------------------------------------------------- */
 static void spc_loader(SpcState* sp) {
@@ -67,7 +67,7 @@ static void spc_loader(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * loader_reset_dsp — $04F3
+ * loader_reset_dsp: $04F3
  *
  * DSP FLG = $FF (mute, echo write off, noise reset), EDL = 0, ESA = $FF, and
  * $04B7 remembers the ESA. Driver command 7 jumps straight here, which is how a
@@ -90,7 +90,7 @@ static void loader_reset_dsp(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * loader_block_loop — $050A
+ * loader_block_loop: $050A
  *
  * One upload block: two handshakes read a 16-bit destination and a 16-bit word
  * count, then `count` handshakes deliver one word each (port1 = low byte,
@@ -152,7 +152,7 @@ static void loader_block_loop(SpcState* sp) {
         if(!wait) break;
       }
       S(0x0536, 2); a = s_load(sp, sps_dp(sp, SPS_CPUIO1)); /* 0536 mov a,!CPUIO1 */
-      /* 0538 mov $0000+y,a -- the operand the block loop patched, read back out
+      /* 0538 mov $0000+y,a: the operand the block loop patched, read back out
        * of ARAM at the instant the step above fetched those two bytes. */
       S(0x0538, 3);
       s_idx(sp);
@@ -182,7 +182,7 @@ static void loader_block_loop(SpcState* sp) {
 }
 
 /* ---------------------------------------------------------------------------
- * loader_jump — $0556
+ * loader_jump: $0556
  *
  * Word count zero: save the handshake counter and jump to the destination the
  * block header carried. `jmp ($0539+x)` with X = 0 reads the vector out of the

@@ -1,9 +1,9 @@
 ; Dream: Land of Giants (Rare, 1995, SNES prototype) SPC700 sound driver, traced by tools/trace_spc700.py
 ; Source: DREAM.sfc file 0x20000 (loader, 0x88 bytes -> $04D8) and 0x20088
 ;         (driver, 0x699 words -> $0560).  Data runs (tables, the sample remap
-;         block, unreached bytes) are not inlined: they are incbin ranges into
-;         data/04.bin (file 0x020000-0x027FFF, produced by tools/extract.py from
-;         your own ROM; ranges are relative to that file, end exclusive).
+;         block, unreached bytes) are incbin ranges into data/04.bin (file
+;         0x020000-0x027FFF, produced by tools/extract.py from your own ROM;
+;         ranges are relative to that file, end exclusive).
 ; Assemble-as-image: `asar` with norom + org writes each block at its SPC address.
 norom
 arch spc700

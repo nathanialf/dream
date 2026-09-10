@@ -3,9 +3,9 @@
 This repository is a **disassembly** of the SNES prototype *Dream: Land of Giants* (codename Project Dream; Rare, c. 1995),
 the build that later became *Banjo-Kazooie*. It is not a clean-room reimplementation: the
 source here was produced by tracing the machine code of a leaked prototype ROM and is
-therefore derived from that ROM. What we commit is the *structure* we recovered: symbol
-names, control flow, data-region boundaries, and analysis documents. What we never commit
-is the game's own bytes.
+therefore derived from that ROM. The repository holds the recovered *structure*: symbol
+names, control flow, data-region boundaries, and analysis documents. The game's own bytes
+are never committed.
 
 ## Rules
 
@@ -19,8 +19,8 @@ is the game's own bytes.
    stay inside the user-supplied ROM. Analysis documents may quote short byte sequences as
    evidence.
 4. **No leaked source, SDK, or debug symbols as inputs.** Public disassemblies of related
-   titles (the Yoshifanatic1 and p4plus2 DKC projects) are used the way one uses a paper:
-   read, cross-referenced, re-derived. Symbol names adopted from them are credited in
+   titles (the Yoshifanatic1 and p4plus2 DKC projects) are used as references: read,
+   cross-referenced, re-derived. Symbol names adopted from them are credited in
    `docs/dkc_crossref.md`.
 
 ## Provenance of the ROM

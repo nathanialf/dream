@@ -17,7 +17,7 @@ Strategy
 --------
 1. Baseline: press Start at frame 120 to leave the title (this alone reaches
    game_mode 0). `game_mode` ($A4) turns out to auto-advance (0->1->2->3->0...)
-   whenever Select is pressed while no fade is in progress -- this is the
+   whenever Select is pressed while no fade is in progress. This is the
    prototype's mode-cycling/debug feature mentioned in the task. `mode_cycle`
    below presses Select every 120 frames to walk through all four modes.
 2. Probe a library of movement/action macros (hold a direction, jump with each
@@ -105,7 +105,7 @@ def mode_prefix(target_mode, start_frame=240, gap=120):
     ~114 frames to settle before the *first* Select is accepted, which is why
     start_frame is 240 (matches the existing title_start_right.txt timing),
     not the 126 where Start is released. A shorter gap than ~120 frames
-    routinely drops presses -- confirmed with --dump-wram against $A4."""
+    routinely drops presses, confirmed with --dump-wram against $A4."""
     lines = []
     f = start_frame
     for _ in range(target_mode):
@@ -157,7 +157,7 @@ def build_probes():
         probes.append(probe_alternate('updown', ['Up', 'Down'], mode, step=45, reps=8))
 
     # Long single-direction traverses to reach level-progression triggers
-    # (weather/particle spawns keyed to camera position -- see docs/handler_tables.md
+    # (weather/particle spawns keyed to camera position; see docs/handler_tables.md
     # and the entity_flags / $0C1B state-machine notes in out/dream.asm).
     for mode in (0, 1, 2):
         prefix, after = mode_prefix(mode)
