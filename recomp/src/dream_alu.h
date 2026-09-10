@@ -82,6 +82,14 @@ static inline uint16_t alu_ror16(SnesState* ss, uint16_t a) {
   return a;
 }
 
+static inline uint16_t alu_rol16(SnesState* ss, uint16_t a) {
+  bool cin = ss_c(ss);
+  ss_set_c(ss, (a & 0x8000) != 0);
+  a = (uint16_t) ((a << 1) | (cin ? 1u : 0u));
+  ss_set_nz16(ss, a);
+  return a;
+}
+
 static inline uint16_t alu_inc16(SnesState* ss, uint16_t a) {
   a = (uint16_t) (a + 1);
   ss_set_nz16(ss, a);

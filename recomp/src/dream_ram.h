@@ -13,13 +13,19 @@
 #define nmi_handler_ptr      0x0000
 #define dma_pending_mask     0x0002
 #define ptr_04               0x0004
+#define spc_dest_addr        0x0007
 #define scratch_18           0x0018
+#define sprite_frame_bank    0x0028
 #define entity_screen_x      0x004C
 #define entity_screen_y      0x004E
 #define depth_sort_key       0x0052   /* $52: scratch in entity_sort_draw_order */
 #define camera_x             0x0062
 #define camera_y             0x0068
 #define camera_y_bias        0x0074
+#define tilemap_a_addr       0x007A   /* $7A/$7C: metatile map pointer and bank */
+#define tilemap_a_bank       0x007C
+#define tilemap_b_addr       0x007E   /* $7E: metatile definition table base */
+#define metatile_data_bank   0x0080
 #define level_width_mask     0x0086
 #define level_height_mask    0x0088
 #define joy1_held            0x008A   /* $8A/$8C, $8E/$90: held / newly pressed */
@@ -30,6 +36,11 @@
 #define entity_render_index  0x0096
 #define layer_parallax_mode  0x0098
 #define camera_y_lookahead   0x009A
+/* random_next's four state bytes. $9C and $9E carry the names tools/names.txt
+ * gives them (the magic words the reset code seeds them with); $9D and $9F are
+ * unnamed there and stay raw in the bodies, as they are in out/dream.asm. */
+#define init_magic_AA55      0x009C
+#define init_magic_FFFF      0x009E
 #define game_mode            0x00A4
 
 /* ---- low WRAM ---------------------------------------------------------- */
@@ -64,7 +75,9 @@
 #define INIDISP   0x2100
 #define VMAIN     0x2115
 #define VMADDL    0x2116
+#define VMDATAL   0x2118
 #define CGADD     0x2121
+#define CGDATA    0x2122
 #define BG1HOFS   0x210D
 #define BG1VOFS   0x210E
 #define BG2HOFS   0x210F

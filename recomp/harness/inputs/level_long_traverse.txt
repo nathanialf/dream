@@ -1,3 +1,4 @@
+# frames 3840
 # Enter the game and hold Right for a long traverse (3600 frames) through
 # game_mode 0, adding a jump partway through. Distance/camera-position
 # triggered events -- the mode0 weather particle spawn, a zone-transition
