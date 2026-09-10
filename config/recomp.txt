@@ -1,0 +1,2 @@
+; Routines reimplemented in C and verified in lockstep against the ROM (one label per line).
+; tools/progress.py credits their traced byte size to the `recomp` section. Empty at init.

@@ -1,6 +1,7 @@
 # dream
 
 <!-- progress:begin -->
+![recomp progress](https://img.shields.io/badge/recomp-0.00%20%25-red.svg)
 ![code progress](https://img.shields.io/badge/code-24.32%20%25-orange.svg)
 ![sound_iface progress](https://img.shields.io/badge/sound%20iface-55.43%20%25-yellowgreen.svg)
 ![spc700 progress](https://img.shields.io/badge/spc700-82.93%20%25-green.svg)
@@ -28,20 +29,29 @@ the sources here plus data extracted from your own copy of the ROM.
 > This is a disassembly, not a clean-room reimplementation. Read
 > [`docs/LEGAL.md`](docs/LEGAL.md) before contributing.
 
-## Status
+## Target
 
-| target | state |
+The end goal is a **recomp**: a C reimplementation of the game that runs natively and
+is verified by executing it in lockstep with the original ROM in an emulator, comparing
+WRAM, VRAM and OAM every frame under scripted input (the approach that produced native
+ports of other SNES titles). There was no compiler in 1995, so byte-matching C is not a
+meaningful goal on this platform; a byte-identical *disassembly* is the foundation, and
+behaviour-matching C is the target.
+
+| phase | state |
 |---|---|
-| 65816 program (`src/`, bank `$C0` high half + sound interface in `$C1`) | byte-identical rebuild, 119 subroutines labelled, 6 jump tables + 2 RAM-dispatch tables resolved |
-| SPC700 sound driver (`spc/driver.asm`) | byte-identical rebuild, command/port protocol and sequence format documented |
-| data (`data/`, 98% of the ROM) | region map with formats in `docs/data_formats.md`; still `incbin` ranges, not yet split into assets |
+| 1. Disassembly with byte-identical rebuild | done: 65816 program and SPC700 driver both rebuild exactly (`make check`) |
+| 2. Understanding: named routines, RAM map, data formats | in progress (badges above: `code`, `sound_iface`, `spc700`) |
+| 3. Asset extraction with round-trip gates (sprites, tiles, maps, palettes, BRR, music) | not started (`docs/data_formats.md` has the region map) |
+| 4. C reimplementation with per-frame lockstep verification | not started (`recomp` badge, fed by `config/recomp.txt`) |
 
 The ROM is HiROM with an intact vector table but a header overwritten by tilemap data,
 no checksum, and a stale older build of the same program sitting in the first 32 KB.
 The sound driver is the DKC2/DKC3 driver (96% identical) and ten library routines are
 verbatim from the DKC games. Details and evidence: [`docs/NOTES.md`](docs/NOTES.md),
 [`docs/toolchain_evidence.md`](docs/toolchain_evidence.md),
-[`docs/data_formats.md`](docs/data_formats.md), [`docs/handler_tables.md`](docs/handler_tables.md).
+[`docs/data_formats.md`](docs/data_formats.md), [`docs/handler_tables.md`](docs/handler_tables.md),
+[`docs/dkc_crossref.md`](docs/dkc_crossref.md).
 
 ## Quickstart
 

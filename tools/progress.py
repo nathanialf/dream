@@ -8,6 +8,10 @@ config/regions.txt (class per byte range). Two kinds of progress:
       matched = bytes that belong to a routine carrying a human-chosen name, plus
       data tables inside the region that start at a human-named label.
       Auto names (sub_/loc_/orphan_/nmi_handler_/jtbl_/data_ + hex) do not count.
+  recomp
+      matched = traced bytes of 65816/SPC700 routines listed in config/recomp.txt, i.e.
+      reimplemented in C and passing the lockstep check against the ROM. Total = all
+      traced code bytes. This is the project's end target.
   data sections (sprites, tiles, maps, palettes, brr, music, anim, stale, filler, unknown)
       matched = bytes of regions whose start carries a human-named label in the
       generated source, i.e. the region is identified *in the code*, not only in docs.
@@ -36,9 +40,10 @@ PROGRESS_JSON = ROOT / 'docs' / 'progress.json'
 SPC_ASM = ROOT / 'spc' / 'driver.asm'
 SHA1 = '2675d7afe886f20462337aa1ee3aa5c3135fff3a'
 
-SECTION_ORDER = ['code', 'sound_iface', 'spc700', 'sprites', 'tiles', 'maps', 'palettes',
+SECTION_ORDER = ['recomp', 'code', 'sound_iface', 'spc700', 'sprites', 'tiles', 'maps', 'palettes',
                  'brr', 'music', 'anim', 'stale', 'filler', 'unknown']
 CODE_KIND = {'code', 'sound_iface', 'spc700'}
+RECOMP = ROOT / 'config' / 'recomp.txt'
 AUTO = re.compile(r'^(sub|loc|orphan|nmi_handler|jtbl|data|handlers|null|unk)_[0-9A-Fa-f]{4,6}$')
 
 def is_named(label: str | None) -> bool:
@@ -157,6 +162,15 @@ def compute():
                     'count_total': 0, 'count_matched': 0} for s in SECTION_ORDER}
     for r in regions:
         sections[r['class']]['total'] += r['end'] - r['start']
+    done = set()
+    if RECOMP.exists():
+        done = {ln.split(';')[0].strip() for ln in RECOMP.read_text().splitlines() if ln.split(';')[0].strip()}
+    rc = sections['recomp']
+    for rt in routines + spc_routines:
+        rc['total'] += rt['size']; rc['count_total'] += 1
+        if rt['name'] in done:
+            rc['matched'] += rt['size']; rc['count_matched'] += 1
+    sections['recomp']['kind'] = 'code'
     for rt in routines:
         s = sections[rt['section']] if rt['section'] in CODE_KIND else None
         if s is None: continue
