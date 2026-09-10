@@ -1,0 +1,38 @@
+LakeSnes — SNES emulator core by elzo-d (Elzo Doeleman)
+https://github.com/elzo-d/LakeSnes
+License: MIT (see LICENSE.txt)
+
+Vendored commit: 9db90b86e46a377609305e298dd92d71cd1d4c8a  (2023-12-02)
+Vendored on:     2026-09-10
+
+Why a copy and not a submodule
+------------------------------
+The two changes below have to live inside the emulator core (a hook callback in the
+CPU instruction loop), which a submodule cannot carry. The core is otherwise
+self-contained: only snes/ is copied, and it pulls in nothing but libc.
+
+What was copied
+---------------
+  snes/{apu,cart,cpu,dma,dsp,input,ppu,snes,snes_other,spc,statehandler}.c
+  snes/{apu,cart,cpu,dma,dsp,input,ppu,snes,spc,statehandler}.h
+  LICENSE.txt
+
+Not copied: main.c (SDL frontend), tracing.[ch], zip/, resources/, Makefile.
+
+Local modifications (all marked with a "// dream:" comment)
+-----------------------------------------------------------
+1. cpu.h  — added the CpuHookHandler typedef, the `hook` / `hookCtx` fields on
+            struct Cpu, and the cpu_checkIntPublic() declaration.
+2. cpu.c  — cpu_init() clears hook/hookCtx; cpu_runOpcode() calls the hook with the
+            24-bit PC before fetching an opcode and returns early if it reports the
+            instruction handled; added cpu_checkIntPublic(), a public wrapper around
+            the static cpu_checkInt() so a hook can end a replaced routine with the
+            same interrupt latch the real last cycle performs.
+3. apu.c, snes.c, cart.c, snes_other.c — five upstream -Wall -Wextra warnings
+            silenced ((void) on two unused `waiting` parameters and one unused
+            `cart`, two sign-compare casts). No behaviour change.
+
+Cart type forcing is NOT a source modification: the harness bypasses
+snes_loadRom()'s header scoring by calling cart_load(cart, 2 /* HiROM */, rom,
+0x200000, 0 /* no SRAM */) directly and then snes_reset(snes, true).
+See recomp/README.md and recomp/harness/main.c (harness_load_rom).

@@ -33,3 +33,21 @@ takes shape.
 
 - Emulator-style features (save states, rewind, cheats, shader menus).
 - Reading assets from anything but the user's own ROM at first run.
+
+## Harness
+
+The reference emulator described above exists: `recomp/` holds `dream_harness`, a
+headless C11 program built on a vendored copy of the LakeSnes core (MIT). It runs the
+ROM under a scripted input, hashes WRAM/VRAM/CGRAM/OAM after every frame, records the
+executed-PC set for comparison against `out/codemap.txt`, and implements the lockstep
+protocol: two instances of the same ROM, one with the recomp's `recomp_hooks[]` table
+installed and one without, compared byte for byte after every frame.
+
+    make harness
+    ./build/recomp/dream_harness --lockstep --hooks on --frames 600 \
+        --input recomp/harness/inputs/title_start_right.txt
+
+Build, CLI, the hook API (`recomp/include/snes_state.h`) and the lockstep protocol
+are documented in `recomp/README.md`. The first routine to pass the check is
+`clear_sprite_table` (`$C0:A500`), 412 hooked calls over 600 frames with no
+mismatches.

@@ -1,0 +1,5 @@
+# Press Start at frame 120, release it, then hold Right from frame 240.
+0    none
+120  Start
+126  none
+240  Right
