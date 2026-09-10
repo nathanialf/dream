@@ -1,0 +1,4 @@
+; Asset kinds (from config/assets.txt) that have a verified decoder + encoder pair: the
+; decoded, human-editable form re-encodes to the exact ROM bytes (checked by make check
+; once the build consumes the editable form). Bytes of these kinds count as matched in the
+; data sections of tools/progress.py. Empty at init.

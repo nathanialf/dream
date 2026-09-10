@@ -11,9 +11,9 @@
 ![palettes progress](https://img.shields.io/badge/palettes-0.00%20%25-red.svg)
 ![brr progress](https://img.shields.io/badge/brr-0.00%20%25-red.svg)
 ![music progress](https://img.shields.io/badge/music-0.00%20%25-red.svg)
-![anim progress](https://img.shields.io/badge/anim-1.76%20%25-orange.svg)
-![stale progress](https://img.shields.io/badge/stale-6.00%20%25-orange.svg)
-![filler progress](https://img.shields.io/badge/filler-0.00%20%25-red.svg)
+![anim progress](https://img.shields.io/badge/anim-0.00%20%25-red.svg)
+![stale progress](https://img.shields.io/badge/stale-100.00%20%25-brightgreen.svg)
+![filler progress](https://img.shields.io/badge/filler-100.00%20%25-brightgreen.svg)
 ![unknown progress](https://img.shields.io/badge/unknown-0.00%20%25-red.svg)
 <!-- progress:end -->
 

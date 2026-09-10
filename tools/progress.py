@@ -13,8 +13,12 @@ config/regions.txt (class per byte range). Two kinds of progress:
       reimplemented in C and passing the lockstep check against the ROM. Total = all
       traced code bytes. This is the project's end target.
   data sections (sprites, tiles, maps, palettes, brr, music, anim, stale, filler, unknown)
-      matched = bytes of regions whose start carries a human-named label in the
-      generated source, i.e. the region is identified *in the code*, not only in docs.
+      Three levels per byte, from config/assets.txt (named per-asset extraction) and
+      config/roundtrip.txt (asset kinds whose editable form re-encodes to the ROM bytes):
+        identified  = in a region with a known class (config/regions.txt)
+        extracted   = inside a named asset of a real kind (not unknown)   -> reported as `extracted`
+        round-trips = the asset kind is listed in config/roundtrip.txt     -> reported as `matched`
+      stale, filler and unknown have nothing to round-trip, so for them matched = extracted.
 
 The round trip is byte-identical by construction (make check), so this measures
 understanding, not reproduction.
@@ -44,10 +48,26 @@ SECTION_ORDER = ['recomp', 'code', 'sound_iface', 'spc700', 'sprites', 'tiles', 
                  'brr', 'music', 'anim', 'stale', 'filler', 'unknown']
 CODE_KIND = {'code', 'sound_iface', 'spc700'}
 RECOMP = ROOT / 'config' / 'recomp.txt'
+ASSETS = ROOT / 'config' / 'assets.txt'
+ROUNDTRIP = ROOT / 'config' / 'roundtrip.txt'
+KIND_CLASS = {'sprite_frame': 'sprites', 'sprite_table': 'sprites', 'tileset_4bpp': 'tiles', 'tileset_8bpp': 'tiles',
+              'tileset_2bpp': 'tiles', 'tilemap': 'maps', 'metatiles': 'maps', 'map': 'maps', 'hdma': 'maps',
+              'palette': 'palettes', 'brr': 'brr', 'song': 'music', 'sfx_bank': 'music', 'spc_table': 'music',
+              'anim_script': 'anim', 'anim_table': 'anim', 'stale': 'stale', 'filler': 'filler', 'unknown': 'unknown'}
+LEVEL2_ONLY = {'stale', 'filler', 'unknown'}
 AUTO = re.compile(r'^(sub|loc|orphan|nmi_handler|jtbl|data|handlers|null|unk)_[0-9A-Fa-f]{4,6}$')
 
 def is_named(label: str | None) -> bool:
     return bool(label) and not AUTO.match(label)
+
+def read_manifest(path):
+    rows = []
+    if not path.exists(): return rows
+    for line in path.read_text().splitlines():
+        body = line.split(';', 1)[0].strip()
+        if not body: continue
+        rows.append(body.split())
+    return rows
 
 def read_regions():
     regions = []
@@ -185,14 +205,22 @@ def compute():
         s['count_total'] += 1
         if rt['named']:
             s['count_matched'] += 1; s['matched'] += rt['size']
+    for sec in sections.values(): sec.setdefault('extracted', 0)
+    roundtrip = {row[0] for row in read_manifest(ROUNDTRIP)}
+    for row in read_manifest(ASSETS):
+        a, b, kind = int(row[0], 16), int(row[1], 16), row[2]
+        cls = KIND_CLASS.get(kind)
+        if cls is None: continue
+        sec = sections[cls]
+        sec['count_total'] += 1
+        if kind != 'unknown':
+            sec['extracted'] += b - a
+        if kind in roundtrip or (cls in LEVEL2_ONLY and kind != 'unknown'):
+            sec['matched'] += b - a; sec['count_matched'] += 1
     region_rows = []
     for r in regions:
         if r['class'] in CODE_KIND: continue
         named = is_named(t.labels.get(r['start']))
-        sec = sections[r['class']]
-        sec['count_total'] += 1
-        if named:
-            sec['count_matched'] += 1; sec['matched'] += r['end'] - r['start']
         region_rows.append({'name': r['name'], 'start': f'{r["start"]:06X}', 'end': f'{r["end"]:06X}',
                             'size': r['end'] - r['start'], 'class': r['class'], 'named': named, 'desc': r['desc']})
     for sec in sections.values():
@@ -225,9 +253,10 @@ def badges(data):
     return '\n'.join(out)
 
 def table(data):
-    rows = ['| Section | Kind | Matched bytes | Total bytes | % | Items |', '| --- | --- | ---: | ---: | ---: | ---: |']
+    rows = ['| Section | Kind | Matched bytes | Total bytes | % | Items | Extracted bytes |', '| --- | --- | ---: | ---: | ---: | ---: | ---: |']
     for s in data['sections']:
-        rows.append(f'| `{s["name"]}` | {s["kind"]} | {s["matched"]} | {s["total"]} | {pct(s["matched"], s["total"]):.2f} % | {s["count_matched"]}/{s["count_total"]} |')
+        ex = s.get('extracted', '')
+        rows.append(f'| `{s["name"]}` | {s["kind"]} | {s["matched"]} | {s["total"]} | {pct(s["matched"], s["total"]):.2f} % | {s["count_matched"]}/{s["count_total"]} | {ex} |')
     return '\n'.join(rows)
 
 def splice(path: Path, block: str):
@@ -247,8 +276,12 @@ def main():
         sys.exit('progress.py: baserom/DREAM.sfc missing; cannot compute progress')
     data = compute()
     readme_new = splice(README, badges(data))
-    explain = ('Code sections count bytes inside routines that carry a human-chosen name; data '
-               'sections count bytes of regions labelled in the generated source. The rebuild itself '
+    explain = ('`recomp` counts traced code bytes reimplemented in C and passing the lockstep gate. Code '
+               'sections count bytes inside routines that carry a human-chosen name. Data sections count '
+               'bytes of assets whose kind round-trips through an editable form (`config/roundtrip.txt`); '
+               '"Extracted" is the weaker level, bytes split into a named asset file by `tools/extract.py`. '
+               '`stale`, `filler` and `unknown` have nothing to round-trip, so their matched figure is the '
+               'extracted one. The rebuild itself '
                'is byte-identical on every commit (`make check`), so these figures measure how much of '
                'the ROM is understood, not reproduced.')
     progress_new = splice(PROGRESS_MD, table(data) + '\n\n' + explain)
