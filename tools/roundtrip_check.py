@@ -62,6 +62,7 @@ def main():
     rows = read_assets()
     stats = {}
     failures = []
+    raw_assets = []
     editable_bytes = 0
     editable_files = 0
     missing = 0
@@ -88,6 +89,16 @@ def main():
                 want = fp.read()
             with open(tmp, 'rb') as fp:
                 got = fp.read()
+            raw_form = False
+            try:
+                import json as _json
+                with open(primary) as _fp:
+                    _meta = _json.load(_fp) if primary.endswith('.json') else {}
+                raw_form = _meta.get('format') == 'raw'
+            except Exception:                                      # noqa: BLE001
+                raw_form = False
+            if want == got and raw_form:
+                raw_assets.append(path)                             # exact, but not an editable form
             if want == got:
                 st['pass'] += 1
             else:
@@ -122,6 +133,8 @@ def main():
     print('-' * 70)
     print(f'{"TOTAL":14s} {tot_p:6d} {tot_t:6d}  {100.0*tot_p/tot_t if tot_t else 0:5.1f}%  '
           f'{editable_files:14d} {editable_bytes:15d}')
+    if raw_assets:
+        print(f'note: {len(raw_assets)} assets decode to a raw form (exact but not editable): ' + ', '.join(raw_assets))
     if missing:
         print(f'note: {missing} asset files missing under data/ (run `make extract` first)')
     print(f'elapsed {time.time() - t0:.1f}s')
@@ -142,6 +155,10 @@ def main():
             fp.write(HEADER)
             for kind in perfect:
                 fp.write(kind + '\n')
+            if raw_assets:
+                fp.write('; assets whose editable form is a raw byte dump: exact, but not counted as round-tripping\n')
+                for path in raw_assets:
+                    fp.write(f'raw {path}\n')
         print(f'\nwrote {ROUNDTRIP}: {len(perfect)} kinds at 100% '
               f'({", ".join(perfect) if perfect else "none"})')
     return 1 if failures else 0

@@ -206,9 +206,15 @@ def compute():
         if rt['named']:
             s['count_matched'] += 1; s['matched'] += rt['size']
     for sec in sections.values(): sec.setdefault('extracted', 0)
-    roundtrip = {row[0] for row in read_manifest(ROUNDTRIP)}
+    rt_rows = read_manifest(ROUNDTRIP)
+    roundtrip = {row[0] for row in rt_rows if row[0] != 'raw'}
+    raw_paths = {row[1] for row in rt_rows if row[0] == 'raw' and len(row) > 1}
     for row in read_manifest(ASSETS):
         a, b, kind = int(row[0], 16), int(row[1], 16), row[2]
+        if len(row) > 3 and row[3] in raw_paths:
+            cls = KIND_CLASS.get(kind)
+            if cls: sections[cls]['count_total'] += 1; sections[cls]['extracted'] += b - a
+            continue
         cls = KIND_CLASS.get(kind)
         if cls is None: continue
         sec = sections[cls]
