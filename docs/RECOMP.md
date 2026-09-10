@@ -11,6 +11,15 @@ takes shape.
   and the APU's own state (the SPC700's 64 KB of ARAM, the 128 DSP registers and the SPC
   registers) are compared. A routine is "recomped" only when its C body passes that check
   across the test scripts; `config/recomp.txt` lists them and feeds the `recomp` badge.
+- Some routines no script can reach: the port commands no live 65816 code sends, the
+  sequence opcodes no song emits, the stale jump-table slots, the one-row OAM emitters,
+  the animation-rate entries no table word points at, and the routines with no caller
+  anywhere in the ROM. They get the same comparison one routine at a time instead:
+  `dream_harness --unit` boots the ROM to a frame of a script, seeds the registers and a
+  few memory cells from `config/recomp_units.txt`, runs the ROM's routine and the C body
+  from that identical state, and compares the seven regions, every register and the cycle
+  counts. At least four seeds each, all of which must pass. `config/recomp.txt` marks a
+  routine credited this way `; unit`, so the badge stays readable as what it is.
 - The disassembly (`src/`) is the source of truth for behaviour; the C mirrors its
   routine boundaries and names so the two can be read side by side.
 
@@ -83,12 +92,14 @@ are documented in `recomp/README.md`.
 
 `recomp/app/` holds `dream`: the game itself, an SDL3 program that loads the
 user's own ROM (command line, `./baserom/DREAM.sfc`, `~/.local/share/dream/`, in
-that order; refused unless the SHA-1 matches), installs every routine the recomp
+that order — on Windows, next to `dream.exe` and then `%APPDATA%\dream\` first;
+refused unless the SHA-1 matches), installs every routine the recomp
 has registered, and runs at 60.0988 Hz with picture, sound and a gamepad. No
 launcher, no menu, no settings, no config file — the mapping above is compiled in,
 and Escape quits.
 
     make app        # builds SDL3 into build/sdl3 first if the system has none
+    make app-win    # the same two executables for Windows, cross-built with mingw-w64
 
 `dream` and `dream_harness` are deliberately the same machine: the same core, the
 same hook dispatcher, the same accessors and the same cycle charge, with SDL as
@@ -146,6 +157,11 @@ there is no ROM: a dispatched body chain runs on a stack of its own and a yield
 suspends that stack instead of unwinding it, so the scheduler stops exactly where
 the reference CPU stops and resumes the routine from inside the yield.
 
+That stack is the port's one platform split: `recomp/harness/coro.h` is create,
+switch and destroy with an explicit stack size, implemented over
+`makecontext`/`swapcontext` on POSIX and Win32 fibers on Windows, chosen by CMake
+and exercised without a ROM by `dream_harness --test-coro`.
+
 `recomp/README.md` ("Running without the CPUs") documents the scheduler, the
 interrupt rules, the SPC700 side and the one exception — the SPC700's IPL boot ROM,
 the console's firmware rather than this ROM's program, which has no body and still
@@ -167,5 +183,6 @@ And the yield boundary is the APU catch-up slice rather than the frame — the S
 runs in steps against the CPU's clock, so the reference stops mid-routine at an
 instant a hooked run would otherwise have to run past.
 
-`config/recomp.txt` lists what has passed; `make recomp-check` is the gate, and
-`tools/hooks/pre-commit` runs it when a commit touches `recomp/`.
+`config/recomp.txt` lists what has passed; `make recomp-check` is the gate,
+`make recomp-check-units` the routine-level one for what no script reaches, and
+`tools/hooks/pre-commit` runs the first when a commit touches `recomp/`.

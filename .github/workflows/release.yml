@@ -1,0 +1,162 @@
+name: release
+
+# Tag v* -> one zip per platform on the GitHub release.
+#
+# A zip holds three files and nothing else: the game, the README and the LICENSE.
+# No ROM, no extracted data, no build of the ROM (docs/LEGAL.md) -- the player
+# supplies their own DREAM.sfc and puts it next to the executable
+# (recomp/app/README.md, "Windows"). The staging step counts the files before
+# zipping, so "no data" is a gate rather than a promise.
+#
+# The Windows build is MSYS2/UCRT64 with -static, so dream.exe imports only
+# Windows' own DLLs and the zip needs no runtime next to it; the same build is
+# reproducible from Linux with `make app-win` (recomp/cmake/mingw-w64.cmake).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'existing tag to build and upload'
+        required: true
+
+permissions:
+  contents: write
+
+# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: the tag being released
+        id: tag
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      - name: create the release if it does not exist yet
+        # One job creates it, so the three build jobs only ever upload: three
+        # concurrent `release create` calls would race.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 && exit 0
+          gh release create "$TAG" --title "$TAG" --generate-notes
+
+  linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: SDL3's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev
+      - name: build
+        run: |
+          cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release -DDREAM_FETCH_SDL3=ON
+          cmake --build build/recomp -j4 --target dream
+      - name: 'self-test: the coroutine backend (no ROM)'
+        run: |
+          cmake --build build/recomp -j4 --target dream_harness
+          ./build/recomp/dream_harness --test-coro
+      - name: stage and zip
+        env:
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          set -e
+          name="dream-$TAG-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp build/recomp/dream README.md LICENSE "dist/$name/"
+          test "$(ls -A "dist/$name" | wc -l)" -eq 3
+          (cd dist && zip -r "$name.zip" "$name")
+      - name: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: gh release upload "$TAG" "dist/dream-$TAG-linux-x86_64.zip" --clobber
+
+  windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+            zip:p
+      - name: build
+        shell: msys2 {0}
+        run: |
+          cmake -S recomp -B build/recomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DDREAM_FETCH_SDL3=ON -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build build/recomp -j4
+      - name: 'self-test: the coroutine backend, on the fiber backend (no ROM)'
+        shell: msys2 {0}
+        run: ./build/recomp/dream_harness.exe --test-coro
+      - name: the game imports only system DLLs
+        shell: msys2 {0}
+        run: |
+          set -e
+          objdump -p build/recomp/dream.exe | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u
+          if objdump -p build/recomp/dream.exe | grep -Eiq 'DLL Name: *(lib|SDL3\.dll)'; then
+            echo "dream.exe imports a non-system DLL; the zip ships no runtime"
+            exit 1
+          fi
+      - name: stage and zip
+        shell: msys2 {0}
+        env:
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          set -e
+          name="dream-$TAG-windows-x86_64"
+          mkdir -p "dist/$name"
+          cp build/recomp/dream.exe README.md LICENSE "dist/$name/"
+          test "$(ls -A "dist/$name" | wc -l)" -eq 3
+          (cd dist && zip -r "$name.zip" "$name")
+      - name: upload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: gh release upload "$env:TAG" "dist/dream-$env:TAG-windows-x86_64.zip" --clobber
+
+  macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: build
+        run: |
+          cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release -DDREAM_FETCH_SDL3=ON
+          cmake --build build/recomp -j4
+      - name: 'self-test: the coroutine backend (no ROM)'
+        run: ./build/recomp/dream_harness --test-coro
+      - name: stage and zip
+        env:
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          set -e
+          name="dream-$TAG-macos-$(uname -m)"
+          mkdir -p "dist/$name"
+          cp build/recomp/dream README.md LICENSE "dist/$name/"
+          test "$(ls -A "dist/$name" | wc -l)" -eq 3
+          (cd dist && zip -r "$name.zip" "$name")
+      - name: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: gh release upload "$TAG" "dist/dream-$TAG-macos-$(uname -m).zip" --clobber

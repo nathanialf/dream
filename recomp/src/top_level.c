@@ -314,6 +314,92 @@ static uint16_t t_xba(SnesState* ss, uint16_t a) {
     return;                                                                   \
   } while(0)
 
+/* sta / stz dp,X, 16-bit: the operand byte is fetched by the step, then
+ * cpu_adrDpx spends one internal cycle and the store writes low byte first
+ * with the latch in between. The extra cycle the core charges when D's low
+ * byte is not zero never applies here: the routine's own tcd sets D to zero
+ * two instructions in, and it is zero everywhere else in this game. */
+static void t_dpx_w16(SnesState* ss, uint16_t off, uint16_t x, uint16_t v) {
+  const uint16_t adr = (uint16_t) (ss_dp(ss) + off + x);
+  t_index(ss);
+  ss_bus_w8(ss, adr, (uint8_t) v);
+  ss_check_int(ss);
+  ss_bus_w8(ss, (uint16_t) (adr + 1), (uint8_t) (v >> 8));
+}
+
+/* ---------------------------------------------------------------------------
+ * unused_wram_clear_full — $C0:A35C
+ *
+ * An unreferenced duplicate of the WRAM clear `reset` runs at loc_C08012:
+ * three loops that zero the direct page ($0000-$00FE, downwards), low WRAM
+ * ($0200-$1FFE, upwards) and the whole of bank $7E from $2000 ($7E:2000-
+ * $7E:7FFE -- the bpl ends the loop when the cpx result goes negative, which
+ * is X = $6000, not at the $E000 the compare names). The stack page is the gap
+ * between the first two loops and is left alone, which is what lets the
+ * routine return at all.
+ *
+ * Nothing calls it: no jsr, jsl or table word anywhere in out/dream.asm names
+ * the address, and config/recomp_order.txt marks it cold. It is credited by the
+ * unit gate rather than by a script (config/recomp_units.txt,
+ * `dream_harness --unit`).
+ *
+ * Entry: nothing, and it takes the direct page with it -- tcd loads D from the
+ * zero it has just put in A. Exit: rts with A = 0, X = $6000, D = 0.
+ * ------------------------------------------------------------------------- */
+static void unused_wram_clear_full(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+
+  SIMM16(0xA35C); x = 0x00FE; ss_set_nz16(ss, x);      /* C0A35C ldx #$00FE */
+  SIMM16(0xA35F); a = 0x0000; ss_set_nz16(ss, a);      /* C0A35F lda #$0000 */
+  SI(0xA362);                                          /* C0A362 tcd */
+  ss_set_dp(ss, a);
+  ss_set_nz16(ss, a);
+
+  for(;;) {
+    S(0xA363, 2);                                      /* C0A363 sta nmi_handler_ptr,X */
+    t_dpx_w16(ss, nmi_handler_ptr, x, a);
+    SI(0xA365); x = alu_dec16(ss, x);                  /* C0A365 dex */
+    SI(0xA366); x = alu_dec16(ss, x);                  /* C0A366 dex */
+    S(0xA367, 1);                                      /* C0A367 bpl loc_C0A363 */
+    const bool taken = !ss_n(ss);
+    t_branch(ss, taken);
+    if(!taken) break;
+  }
+
+  SIMM16(0xA369); x = 0x0200; ss_set_nz16(ss, x);      /* C0A369 ldx #$0200 */
+  for(;;) {
+    S(0xA36C, 2);                                      /* C0A36C stz nmi_handler_ptr,X */
+    t_dpx_w16(ss, nmi_handler_ptr, x, 0x0000);
+    SI(0xA36E); x = alu_inc16(ss, x);                  /* C0A36E inx */
+    SI(0xA36F); x = alu_inc16(ss, x);                  /* C0A36F inx */
+    SIMM16(0xA370); alu_cpx16(ss, x, 0x2000);          /* C0A370 cpx #$2000 */
+    S(0xA373, 1);                                      /* C0A373 bne loc_C0A36C */
+    const bool taken = !ss_z(ss);
+    t_branch(ss, taken);
+    if(!taken) break;
+  }
+
+  SIMM16(0xA375); a = 0x0000; ss_set_nz16(ss, a);      /* C0A375 lda #$0000 */
+  SI(0xA378); x = a; ss_set_nz16(ss, x);               /* C0A378 tax */
+  for(;;) {
+    S(0xA379, 4);                                      /* C0A379 sta $7E2000,X */
+    t_write16(ss, (0x7E2000u + x) & 0xffffff, a);
+    SI(0xA37D); x = alu_inc16(ss, x);                  /* C0A37D inx */
+    SI(0xA37E); x = alu_inc16(ss, x);                  /* C0A37E inx */
+    SIMM16(0xA37F); alu_cpx16(ss, x, 0xE000);          /* C0A37F cpx #$E000 */
+    S(0xA382, 1);                                      /* C0A382 bpl loc_C0A379 */
+    const bool taken = !ss_n(ss);
+    t_branch(ss, taken);
+    if(!taken) break;
+  }
+
+  ss_set_a(ss, a);
+  ss_set_x(ss, x);
+  S(0xA384, 1);                                        /* C0A384 rts */
+  ss_rts(ss);
+}
+
 /* ---------------------------------------------------------------------------
  * ppu_init — $C0:A385
  *
@@ -2547,6 +2633,7 @@ static const RecompEntry kTopLevel[] = {
   { 0xc08e2b, "loc_C08E2B",             ppu_regs_default_8E2B },
   { 0xc08e39, "loc_C08E39",             ppu_regs_default_8E39 },
   { 0xc08e7f, "loc_C08E7F",             ppu_regs_default_8E7F },
+  { 0xc0a35c, "unused_wram_clear_full", unused_wram_clear_full },
   { 0xc0a385, "ppu_init",               ppu_init },
   { 0xc0a442, "unused_vec",             unused_vec },
   { 0xc0a4d1, "nmi",                    nmi },

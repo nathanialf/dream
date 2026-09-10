@@ -1,0 +1,244 @@
+; Seed states for the routine-level lockstep gate, `dream_harness --unit`
+; (tools/recomp_verify.py --units runs it; recomp/README.md documents the mode).
+;
+; Some routines in this port are reachable by nothing at all: command handlers no
+; live 65816 code sends, sequence opcodes no song or sound-effect bank uses, stale
+; jump-table slots, the one-row OAM emitters no sprite frame is short enough for,
+; the animation-rate entries no table word points at, the `rti` at the unused
+; vectors, and the five 65816 routines with no caller anywhere in the ROM. No
+; input script can enter them, so the frame gate cannot credit them, and
+; config/recomp.txt used to list them as unverified.
+;
+; A seed line puts a routine in a plausible machine state and has the ROM's own
+; code and the C body run it from there. Every seven compared regions, every
+; register and the cycle counts must agree afterwards, exactly as in the frame
+; gate but at the granularity of one routine.
+;
+;   name  script  frame  key=value ...  ; note
+;
+; `name` is the routine, on either processor (the two registries are searched in
+; turn). `script` is an input script under recomp/harness/inputs and `frame` how
+; many frames to run it for: the harness boots the ROM that far, so WRAM, VRAM,
+; CGRAM, OAM, ARAM, the DSP and the SPC registers hold content the game itself
+; produced. It then parks the machine just past the end of vblank with NMI and
+; both timer IRQs off, loads that state into two machines, applies the keys
+; below to both, and runs.
+;
+;   end=ADDR    one past the last byte the routine occupies, in the same form as
+;               the entry address ($C0:0000+offset for the 65816, the SPC's own
+;               16-bit address). Control has left the routine when the pc goes
+;               outside [entry, end) from an instruction inside it with no frame
+;               of its own still on the stack. Where a body runs on into a
+;               shared tail -- the animation-rate chain into anim_rate_store,
+;               orphan_slide_down2 into seq_advance5 -- `end` covers the tail
+;               too, because that is what the ROM executes next as well.
+;   ret=rts|rtl|rti|jmp|ret
+;               which return frame to push before the routine starts. The
+;               address pushed is a sentinel no routine owns, so returning
+;               always leaves the range and no instruction at it is ever
+;               fetched. `jmp` pushes nothing, for a routine that leaves through
+;               a tail jump. `ret` is the SPC700's return.
+;   stack=HH..  extra bytes pushed on top of the return frame, first byte
+;               pushed first. Two callers in this ROM leave something there:
+;               the animation-rate handlers' caller leaves one $80 byte for the
+;               tail's `plb`, and seq_fetch pushes the slot index before it
+;               dispatches a sequence-opcode handler.
+;   a= x= y= p= db= dp= sp=      65816 registers (p is the flag byte)
+;   a= x= y= psw= sp=            SPC700 registers
+;   ram:ADDR=VV or VVVV          a byte or a little-endian word into the 65816
+;                                bus address space
+;   aram:ADDR=VV or VVVV         the same into the SPC700's ARAM
+;   port:N=VV                    an APU input port ($F4-$F7 as the SPC sees it)
+;   dsp:RR=VV                    a DSP register
+;   dspadr=VV                    what $F2 points at
+;
+; Everything a line does not name keeps the value the booted machine had, which
+; is the point: the seeds vary what the routine reads and leave the rest of the
+; console alone. Four seeds per routine at least, including the edge values the
+; routine's own bounds allow.
+
+; --- 65816: the animation-rate entries no table word points at ---
+anim_rate_1_16  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0000  x=0000  y=0000   ; zero velocity, slot 0
+anim_rate_1_16  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0001  x=0002  y=0002   ; one, slot 1
+anim_rate_1_16  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=FFFF  x=001E  y=001E   ; every bit set, last slot
+anim_rate_1_16  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=8000  x=000A  y=000A   ; the sign bit alone
+anim_rate_3_8  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0000  x=0000  y=0000   ; zero velocity, slot 0
+anim_rate_3_8  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0001  x=0002  y=0002   ; one, slot 1
+anim_rate_3_8  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=FFFF  x=001E  y=001E   ; every bit set, last slot
+anim_rate_3_8  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=8000  x=000A  y=000A   ; the sign bit alone
+anim_rate_3_32  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0000  x=0000  y=0000   ; zero velocity, slot 0
+anim_rate_3_32  recomp/harness/inputs/title_start_right.txt  400  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=0001  x=0002  y=0002   ; one, slot 1
+anim_rate_3_32  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=FFFF  x=001E  y=001E   ; every bit set, last slot
+anim_rate_3_32  recomp/harness/inputs/level_walk_jump.txt  700  end=C099DD  ret=rts  stack=80  db=80  dp=0000  a=8000  x=000A  y=000A   ; the sign bit alone
+
+; --- 65816: the entity field clear nothing calls ---
+entity_clear_anim_unused  recomp/harness/inputs/title_start_right.txt  400  end=C0B208  ret=rts  db=80  dp=0000  x=0000   ; slot 0
+entity_clear_anim_unused  recomp/harness/inputs/title_start_right.txt  400  end=C0B208  ret=rts  db=80  dp=0000  x=0002   ; slot 1
+entity_clear_anim_unused  recomp/harness/inputs/level_walk_jump.txt  700  end=C0B208  ret=rts  db=80  dp=0000  x=001E   ; slot 15, the last the arrays hold
+entity_clear_anim_unused  recomp/harness/inputs/level_walk_jump.txt  700  end=C0B208  ret=rts  db=80  dp=0000  x=0010   ; slot 8
+
+; --- 65816: the park loop branch, and the vector rti ---
+loc_C0A4FE  recomp/harness/inputs/title_start_right.txt  400  end=C0A4FF  ret=jmp  p=34   ; in a level
+loc_C0A4FE  recomp/harness/inputs/title_start_right.txt  200  end=C0A4FF  ret=jmp  p=34   ; on the title screen
+loc_C0A4FE  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A4FF  ret=jmp  p=B4   ; flags set the other way
+loc_C0A4FE  recomp/harness/inputs/mode_cycle.txt  700  end=C0A4FF  ret=jmp  p=34   ; after a mode change
+unused_vec  recomp/harness/inputs/title_start_right.txt  400  end=C0A443  ret=rti  p=34   ; the frame an interrupt would have pushed
+unused_vec  recomp/harness/inputs/title_start_right.txt  200  end=C0A443  ret=rti  p=04   ; decimal and index flags clear
+unused_vec  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A443  ret=rti  p=B4   ; n and v set
+unused_vec  recomp/harness/inputs/mode_cycle.txt  700  end=C0A443  ret=rti  p=FF   ; every flag set
+
+; --- 65816: the one-row OAM emitters (no frame in the ROM is short enough) ---
+oam_emit_frame_1row  recomp/harness/inputs/title_start_right.txt  400  end=C0A8F6  ret=rts  db=80  dp=0000  ram:0094=0200   ; the OAM buffer empty
+oam_emit_frame_1row  recomp/harness/inputs/title_start_right.txt  400  end=C0A8F6  ret=rts  db=80  dp=0000  ram:0094=0300   ; half full
+oam_emit_frame_1row  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A8F6  ret=rts  db=80  dp=0000  ram:0094=03F8   ; one sprite left
+oam_emit_frame_1row  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A8F6  ret=rts  db=80  dp=0000  ram:0094=0400   ; full: the emitter takes its pla/jmp exit
+oam_emit_frame_1row_flip  recomp/harness/inputs/title_start_right.txt  400  end=C0AAAA  ret=rts  db=80  dp=0000  ram:0094=0200   ; the OAM buffer empty
+oam_emit_frame_1row_flip  recomp/harness/inputs/title_start_right.txt  400  end=C0AAAA  ret=rts  db=80  dp=0000  ram:0094=0300   ; half full
+oam_emit_frame_1row_flip  recomp/harness/inputs/level_walk_jump.txt  700  end=C0AAAA  ret=rts  db=80  dp=0000  ram:0094=03F8   ; one sprite left
+oam_emit_frame_1row_flip  recomp/harness/inputs/level_walk_jump.txt  700  end=C0AAAA  ret=rts  db=80  dp=0000  ram:0094=0400   ; full: the emitter takes its pla/jmp exit
+
+; --- 65816: the four routines with no caller at all ---
+unused_stream_desc_dispatch  recomp/harness/inputs/title_start_right.txt  400  end=C0921D  ret=rts  db=80  dp=0000  a=0000  ram:0BB8=0000   ; table entry 0: leaves through jmp ($0004)
+unused_stream_desc_dispatch  recomp/harness/inputs/title_start_right.txt  400  end=C0921D  ret=rts  db=80  dp=0000  a=0024  ram:0BB8=0000   ; a zero entry: takes the rts
+unused_stream_desc_dispatch  recomp/harness/inputs/level_walk_jump.txt  700  end=C0921D  ret=rts  db=80  dp=0000  a=FFFE  ram:0BB8=0002   ; the index wraps through the carry
+unused_stream_desc_dispatch  recomp/harness/inputs/level_walk_jump.txt  700  end=C0921D  ret=rts  db=80  dp=0000  a=0000  ram:0BB8=004A   ; a second zero entry, from the counter
+unused_entity_apply_velocity_z  recomp/harness/inputs/title_start_right.txt  400  end=C0A2B9  ret=rts  db=80  dp=0000  x=0000  ram:0928=0000   ; slot 0, zero velocity
+unused_entity_apply_velocity_z  recomp/harness/inputs/title_start_right.txt  400  end=C0A2B9  ret=rts  db=80  dp=0000  x=0002  ram:092A=0100   ; a whole pixel per tick
+unused_entity_apply_velocity_z  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A2B9  ret=rts  db=80  dp=0000  x=001E  ram:0946=80FF   ; last slot, negative, fraction carries
+unused_entity_apply_velocity_z  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A2B9  ret=rts  db=80  dp=0000  x=0010  ram:0938=FF7F   ; the largest fraction with a negative integer
+unused_wram_clear_full  recomp/harness/inputs/title_start_right.txt  400  end=C0A385  ret=rts  db=80  dp=0100  a=1234  x=5678  y=9ABC   ; D is loaded from A by the tcd
+unused_wram_clear_full  recomp/harness/inputs/title_start_right.txt  200  end=C0A385  ret=rts  db=80  dp=0000  a=FFFF  x=5678  y=9ABC   ; from the title screen
+unused_wram_clear_full  recomp/harness/inputs/level_walk_jump.txt  700  end=C0A385  ret=rts  db=80  dp=0080  a=0000  x=5678  y=9ABC   ; a half-page direct page
+unused_wram_clear_full  recomp/harness/inputs/mode_cycle.txt  700  end=C0A385  ret=rts  db=80  dp=0000  a=8000  x=5678  y=9ABC   ; after a mode change
+unused_spc_set_e7_and_play  recomp/harness/inputs/title_start_right.txt  400  end=C18403  ret=rtl  db=80  dp=0000  a=0000   ; parameter 0
+unused_spc_set_e7_and_play  recomp/harness/inputs/title_start_right.txt  400  end=C18403  ret=rtl  db=80  dp=0000  a=0100   ; parameter 1
+unused_spc_set_e7_and_play  recomp/harness/inputs/level_walk_jump.txt  700  end=C18403  ret=rtl  db=80  dp=0000  a=7F00   ; parameter 7F
+unused_spc_set_e7_and_play  recomp/harness/inputs/level_walk_jump.txt  700  end=C18403  ret=rtl  db=80  dp=0000  a=FF00   ; parameter FF
+unused_spc_set_fb_and_play  recomp/harness/inputs/title_start_right.txt  400  end=C18415  ret=rtl  db=80  dp=0000  a=0000   ; parameter 0
+unused_spc_set_fb_and_play  recomp/harness/inputs/title_start_right.txt  400  end=C18415  ret=rtl  db=80  dp=0000  a=0100   ; parameter 1
+unused_spc_set_fb_and_play  recomp/harness/inputs/level_walk_jump.txt  700  end=C18415  ret=rtl  db=80  dp=0000  a=7F00   ; parameter 7F
+unused_spc_set_fb_and_play  recomp/harness/inputs/level_walk_jump.txt  700  end=C18415  ret=rtl  db=80  dp=0000  a=FF00   ; parameter FF
+
+; --- SPC700: the six port commands the 65816 never sends ---
+cmd0_set_E8  recomp/harness/inputs/title_start_right.txt  400  end=0712  ret=jmp  a=00  x=00  aram:055D=00   ; $E8, parameter 00
+cmd0_set_E8  recomp/harness/inputs/title_start_right.txt  400  end=0712  ret=jmp  a=00  x=00  aram:055D=01   ; $E8, parameter 01
+cmd0_set_E8  recomp/harness/inputs/level_walk_jump.txt  700  end=0712  ret=jmp  a=00  x=00  aram:055D=7F   ; $E8, parameter 7F
+cmd0_set_E8  recomp/harness/inputs/level_walk_jump.txt  700  end=0712  ret=jmp  a=00  x=00  aram:055D=FF   ; $E8, parameter FF
+cmd1_set_E7  recomp/harness/inputs/title_start_right.txt  400  end=070A  ret=jmp  a=02  x=02  aram:055D=00   ; $E7, parameter 00
+cmd1_set_E7  recomp/harness/inputs/title_start_right.txt  400  end=070A  ret=jmp  a=02  x=02  aram:055D=01   ; $E7, parameter 01
+cmd1_set_E7  recomp/harness/inputs/level_walk_jump.txt  700  end=070A  ret=jmp  a=02  x=02  aram:055D=7F   ; $E7, parameter 7F
+cmd1_set_E7  recomp/harness/inputs/level_walk_jump.txt  700  end=070A  ret=jmp  a=02  x=02  aram:055D=FF   ; $E7, parameter FF
+cmd2_set_mono  recomp/harness/inputs/title_start_right.txt  400  end=0702  ret=jmp  a=04  x=04  aram:055D=00   ; mono flag, parameter 00
+cmd2_set_mono  recomp/harness/inputs/title_start_right.txt  400  end=0702  ret=jmp  a=04  x=04  aram:055D=01   ; mono flag, parameter 01
+cmd2_set_mono  recomp/harness/inputs/level_walk_jump.txt  700  end=0702  ret=jmp  a=04  x=04  aram:055D=80   ; mono flag, parameter 80
+cmd2_set_mono  recomp/harness/inputs/level_walk_jump.txt  700  end=0702  ret=jmp  a=04  x=04  aram:055D=FF   ; mono flag, parameter FF
+cmd3_fade_and_song  recomp/harness/inputs/title_start_right.txt  400  end=06EB  ret=jmp  a=06  x=06  aram:055D=00   ; fade then song, parameter 00
+cmd3_fade_and_song  recomp/harness/inputs/title_start_right.txt  400  end=06EB  ret=jmp  a=06  x=06  aram:055D=01   ; fade then song, parameter 01
+cmd3_fade_and_song  recomp/harness/inputs/level_walk_jump.txt  700  end=06EB  ret=jmp  a=06  x=06  aram:055D=02   ; fade then song, parameter 02
+cmd3_fade_and_song  recomp/harness/inputs/level_walk_jump.txt  700  end=06EB  ret=jmp  a=06  x=06  aram:055D=03   ; fade then song, parameter 03
+cmd4_pitch_offset  recomp/harness/inputs/title_start_right.txt  400  end=0773  ret=jmp  a=08  x=08  aram:055D=00   ; pitch offset, parameter 00
+cmd4_pitch_offset  recomp/harness/inputs/title_start_right.txt  400  end=0773  ret=jmp  a=08  x=08  aram:055D=01   ; pitch offset, parameter 01
+cmd4_pitch_offset  recomp/harness/inputs/level_walk_jump.txt  700  end=0773  ret=jmp  a=08  x=08  aram:055D=7F   ; pitch offset, parameter 7F
+cmd4_pitch_offset  recomp/harness/inputs/level_walk_jump.txt  700  end=0773  ret=jmp  a=08  x=08  aram:055D=80   ; pitch offset, parameter 80
+cmd4_pitch_offset  recomp/harness/inputs/level_walk_jump.txt  700  end=0773  ret=jmp  a=08  x=08  aram:055D=FF   ; pitch offset, parameter FF
+cmd5_voice5_volume  recomp/harness/inputs/title_start_right.txt  400  end=0739  ret=jmp  a=0A  x=0A  aram:055D=00   ; voice 5 volume, parameter 00
+cmd5_voice5_volume  recomp/harness/inputs/title_start_right.txt  400  end=0739  ret=jmp  a=0A  x=0A  aram:055D=40   ; voice 5 volume, parameter 40
+cmd5_voice5_volume  recomp/harness/inputs/level_walk_jump.txt  700  end=0739  ret=jmp  a=0A  x=0A  aram:055D=80   ; voice 5 volume, parameter 80
+cmd5_voice5_volume  recomp/harness/inputs/level_walk_jump.txt  700  end=0739  ret=jmp  a=0A  x=0A  aram:055D=FF   ; voice 5 volume, parameter FF
+start_song  recomp/harness/inputs/title_start_right.txt  400  end=0672  ret=jmp  a=06  x=06  aram:055D=00   ; song 0
+start_song  recomp/harness/inputs/title_start_right.txt  400  end=0672  ret=jmp  a=06  x=06  aram:055D=01   ; song 1
+start_song  recomp/harness/inputs/level_walk_jump.txt  700  end=0672  ret=jmp  a=06  x=06  aram:055D=02   ; song 2
+start_song  recomp/harness/inputs/level_walk_jump.txt  700  end=0672  ret=jmp  a=06  x=06  aram:055D=03   ; song 3
+
+; --- SPC700: the DSP volume step cmd3 calls ---
+dsp_step_toward_zero  recomp/harness/inputs/title_start_right.txt  400  end=06FA  ret=ret  dspadr=0C  dsp:0C=00   ; already zero
+dsp_step_toward_zero  recomp/harness/inputs/title_start_right.txt  400  end=06FA  ret=ret  dspadr=0C  dsp:0C=7F   ; the maximum, positive
+dsp_step_toward_zero  recomp/harness/inputs/level_walk_jump.txt  700  end=06FA  ret=ret  dspadr=1C  dsp:1C=80   ; the minimum, negative
+dsp_step_toward_zero  recomp/harness/inputs/level_walk_jump.txt  700  end=06FA  ret=ret  dspadr=2C  dsp:2C=01   ; one step from zero
+dsp_step_toward_zero  recomp/harness/inputs/level_walk_jump.txt  700  end=06FA  ret=ret  dspadr=3C  dsp:3C=FF   ; minus one
+
+; --- SPC700: the sequence opcodes no song or sound-effect bank uses ---
+seq_instr_full  recomp/harness/inputs/title_start_right.txt  400  end=0BB6  ret=ret  stack=00  a=22  x=44  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_instr_full  recomp/harness/inputs/title_start_right.txt  400  end=0BB6  ret=ret  stack=07  a=22  x=44  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_instr_full  recomp/harness/inputs/level_walk_jump.txt  700  end=0BB6  ret=ret  stack=08  a=22  x=44  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_instr_full  recomp/harness/inputs/level_walk_jump.txt  700  end=0BB6  ret=ret  stack=0F  a=22  x=44  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_volume_preset  recomp/harness/inputs/title_start_right.txt  400  end=0C4E  ret=ret  stack=00  a=20  x=40  y=00  aram:0000=1350  aram:0044=50  aram:0054=13  aram:001D=00   ; slot 0, sequence pointer 1350, $001D=00
+seq_volume_preset  recomp/harness/inputs/title_start_right.txt  400  end=0C4E  ret=ret  stack=07  a=20  x=40  y=00  aram:0000=1400  aram:004B=00  aram:005B=14  aram:001D=01   ; slot 7, sequence pointer 1400, $001D=01
+seq_volume_preset  recomp/harness/inputs/level_walk_jump.txt  700  end=0C4E  ret=ret  stack=08  a=20  x=40  y=00  aram:0000=1450  aram:004C=50  aram:005C=14  aram:001D=00   ; slot 8, sequence pointer 1450, $001D=00
+seq_volume_preset  recomp/harness/inputs/level_walk_jump.txt  700  end=0C4E  ret=ret  stack=0F  a=20  x=40  y=00  aram:0000=1500  aram:0053=00  aram:0063=15  aram:001D=01   ; slot 15, sequence pointer 1500, $001D=01
+orphan_volume_preset2  recomp/harness/inputs/title_start_right.txt  400  end=0C4E  ret=ret  stack=00  a=25  x=4A  y=00  aram:0000=1350  aram:0044=50  aram:0054=13  aram:001D=00   ; slot 0, sequence pointer 1350, $001D=00
+orphan_volume_preset2  recomp/harness/inputs/title_start_right.txt  400  end=0C4E  ret=ret  stack=07  a=25  x=4A  y=00  aram:0000=1400  aram:004B=00  aram:005B=14  aram:001D=01   ; slot 7, sequence pointer 1400, $001D=01
+orphan_volume_preset2  recomp/harness/inputs/level_walk_jump.txt  700  end=0C4E  ret=ret  stack=08  a=25  x=4A  y=00  aram:0000=1450  aram:004C=50  aram:005C=14  aram:001D=00   ; slot 8, sequence pointer 1450, $001D=00
+orphan_volume_preset2  recomp/harness/inputs/level_walk_jump.txt  700  end=0C4E  ret=ret  stack=0F  a=25  x=4A  y=00  aram:0000=1500  aram:0053=00  aram:0063=15  aram:001D=01   ; slot 15, sequence pointer 1500, $001D=01
+seq_volume_presets  recomp/harness/inputs/title_start_right.txt  400  end=0CA0  ret=ret  stack=00  a=1E  x=3C  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_volume_presets  recomp/harness/inputs/title_start_right.txt  400  end=0CA0  ret=ret  stack=07  a=1E  x=3C  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_volume_presets  recomp/harness/inputs/level_walk_jump.txt  700  end=0CA0  ret=ret  stack=08  a=1E  x=3C  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_volume_presets  recomp/harness/inputs/level_walk_jump.txt  700  end=0CA0  ret=ret  stack=0F  a=1E  x=3C  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_master_percent  recomp/harness/inputs/title_start_right.txt  400  end=0C59  ret=ret  stack=00  a=24  x=48  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_master_percent  recomp/harness/inputs/title_start_right.txt  400  end=0C59  ret=ret  stack=07  a=24  x=48  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_master_percent  recomp/harness/inputs/level_walk_jump.txt  700  end=0C59  ret=ret  stack=08  a=24  x=48  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_master_percent  recomp/harness/inputs/level_walk_jump.txt  700  end=0C59  ret=ret  stack=0F  a=24  x=48  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_set_length  recomp/harness/inputs/title_start_right.txt  400  end=0D8F  ret=ret  stack=00  a=06  x=0C  y=00  aram:0000=1350  aram:0044=50  aram:0054=13  aram:01D0=00   ; slot 0, sequence pointer 1350, $01D0=00
+seq_set_length  recomp/harness/inputs/title_start_right.txt  400  end=0D8F  ret=ret  stack=07  a=06  x=0C  y=00  aram:0000=1400  aram:004B=00  aram:005B=14  aram:01D7=01   ; slot 7, sequence pointer 1400, $01D7=01
+seq_set_length  recomp/harness/inputs/level_walk_jump.txt  700  end=0D8F  ret=ret  stack=08  a=06  x=0C  y=00  aram:0000=1450  aram:004C=50  aram:005C=14  aram:01D8=00   ; slot 8, sequence pointer 1450, $01D8=00
+seq_set_length  recomp/harness/inputs/level_walk_jump.txt  700  end=0D8F  ret=ret  stack=0F  a=06  x=0C  y=00  aram:0000=1500  aram:0053=00  aram:0063=15  aram:01DF=01   ; slot 15, sequence pointer 1500, $01DF=01
+seq_clear_length  recomp/harness/inputs/title_start_right.txt  400  end=0D9B  ret=ret  stack=00  a=28  x=50  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_clear_length  recomp/harness/inputs/title_start_right.txt  400  end=0D9B  ret=ret  stack=07  a=28  x=50  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_clear_length  recomp/harness/inputs/level_walk_jump.txt  700  end=0D9B  ret=ret  stack=08  a=28  x=50  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_clear_length  recomp/harness/inputs/level_walk_jump.txt  700  end=0D9B  ret=ret  stack=0F  a=28  x=50  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_tempo_add  recomp/harness/inputs/title_start_right.txt  400  end=0E05  ret=ret  stack=00  a=0C  x=18  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_tempo_add  recomp/harness/inputs/title_start_right.txt  400  end=0E05  ret=ret  stack=07  a=0C  x=18  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_tempo_add  recomp/harness/inputs/level_walk_jump.txt  700  end=0E05  ret=ret  stack=08  a=0C  x=18  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_tempo_add  recomp/harness/inputs/level_walk_jump.txt  700  end=0E05  ret=ret  stack=0F  a=0C  x=18  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+loc_0DF2  recomp/harness/inputs/title_start_right.txt  400  end=0DF8  ret=ret  stack=00  a=0B  x=16  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+loc_0DF2  recomp/harness/inputs/title_start_right.txt  400  end=0DF8  ret=ret  stack=07  a=0B  x=16  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+loc_0DF2  recomp/harness/inputs/level_walk_jump.txt  700  end=0DF8  ret=ret  stack=08  a=0B  x=16  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+loc_0DF2  recomp/harness/inputs/level_walk_jump.txt  700  end=0DF8  ret=ret  stack=0F  a=0B  x=16  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_vibrato  recomp/harness/inputs/title_start_right.txt  400  end=0E1A  ret=ret  stack=00  a=0D  x=1A  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_vibrato  recomp/harness/inputs/title_start_right.txt  400  end=0E1A  ret=ret  stack=07  a=0D  x=1A  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_vibrato  recomp/harness/inputs/level_walk_jump.txt  700  end=0E1A  ret=ret  stack=08  a=0D  x=1A  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_vibrato  recomp/harness/inputs/level_walk_jump.txt  700  end=0E1A  ret=ret  stack=0F  a=0D  x=1A  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_set_note_E0  recomp/harness/inputs/title_start_right.txt  400  end=0E97  ret=ret  stack=00  a=1C  x=38  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_set_note_E0  recomp/harness/inputs/title_start_right.txt  400  end=0E97  ret=ret  stack=07  a=1C  x=38  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_set_note_E0  recomp/harness/inputs/level_walk_jump.txt  700  end=0E97  ret=ret  stack=08  a=1C  x=38  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_set_note_E0  recomp/harness/inputs/level_walk_jump.txt  700  end=0E97  ret=ret  stack=0F  a=1C  x=38  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_set_note_E1  recomp/harness/inputs/title_start_right.txt  400  end=0EA4  ret=ret  stack=00  a=1D  x=3A  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_set_note_E1  recomp/harness/inputs/title_start_right.txt  400  end=0EA4  ret=ret  stack=07  a=1D  x=3A  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_set_note_E1  recomp/harness/inputs/level_walk_jump.txt  700  end=0EA4  ret=ret  stack=08  a=1D  x=3A  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_set_note_E1  recomp/harness/inputs/level_walk_jump.txt  700  end=0EA4  ret=ret  stack=0F  a=1D  x=3A  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+loc_0E9E  recomp/harness/inputs/title_start_right.txt  400  end=0EA4  ret=ret  stack=00  a=1D  x=3A  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+loc_0E9E  recomp/harness/inputs/title_start_right.txt  400  end=0EA4  ret=ret  stack=07  a=1D  x=3A  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+loc_0E9E  recomp/harness/inputs/level_walk_jump.txt  700  end=0EA4  ret=ret  stack=08  a=1D  x=3A  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+loc_0E9E  recomp/harness/inputs/level_walk_jump.txt  700  end=0EA4  ret=ret  stack=0F  a=1D  x=3A  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_transpose_add  recomp/harness/inputs/title_start_right.txt  400  end=0ECA  ret=ret  stack=00  a=14  x=28  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_transpose_add  recomp/harness/inputs/title_start_right.txt  400  end=0ECA  ret=ret  stack=07  a=14  x=28  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_transpose_add  recomp/harness/inputs/level_walk_jump.txt  700  end=0ECA  ret=ret  stack=08  a=14  x=28  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_transpose_add  recomp/harness/inputs/level_walk_jump.txt  700  end=0ECA  ret=ret  stack=0F  a=14  x=28  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_noise_clock  recomp/harness/inputs/title_start_right.txt  400  end=0F56  ret=ret  stack=00  a=19  x=32  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_noise_clock  recomp/harness/inputs/title_start_right.txt  400  end=0F56  ret=ret  stack=07  a=19  x=32  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_noise_clock  recomp/harness/inputs/level_walk_jump.txt  700  end=0F56  ret=ret  stack=08  a=19  x=32  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_noise_clock  recomp/harness/inputs/level_walk_jump.txt  700  end=0F56  ret=ret  stack=0F  a=19  x=32  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_noise_on  recomp/harness/inputs/title_start_right.txt  400  end=0F67  ret=ret  stack=00  a=1A  x=34  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_noise_on  recomp/harness/inputs/title_start_right.txt  400  end=0F67  ret=ret  stack=07  a=1A  x=34  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_noise_on  recomp/harness/inputs/level_walk_jump.txt  700  end=0F67  ret=ret  stack=08  a=1A  x=34  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_noise_on  recomp/harness/inputs/level_walk_jump.txt  700  end=0F67  ret=ret  stack=0F  a=1A  x=34  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+loc_0F61  recomp/harness/inputs/title_start_right.txt  400  end=0F67  ret=ret  stack=00  a=1A  x=34  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+loc_0F61  recomp/harness/inputs/title_start_right.txt  400  end=0F67  ret=ret  stack=07  a=1A  x=34  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+loc_0F61  recomp/harness/inputs/level_walk_jump.txt  700  end=0F67  ret=ret  stack=08  a=1A  x=34  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+loc_0F61  recomp/harness/inputs/level_walk_jump.txt  700  end=0F67  ret=ret  stack=0F  a=1A  x=34  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+seq_noise_off  recomp/harness/inputs/title_start_right.txt  400  end=0F77  ret=ret  stack=00  a=1B  x=36  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+seq_noise_off  recomp/harness/inputs/title_start_right.txt  400  end=0F77  ret=ret  stack=07  a=1B  x=36  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+seq_noise_off  recomp/harness/inputs/level_walk_jump.txt  700  end=0F77  ret=ret  stack=08  a=1B  x=36  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+seq_noise_off  recomp/harness/inputs/level_walk_jump.txt  700  end=0F77  ret=ret  stack=0F  a=1B  x=36  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+orphan_slide_up2  recomp/harness/inputs/title_start_right.txt  400  end=0F81  ret=ret  stack=00  a=26  x=4C  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+orphan_slide_up2  recomp/harness/inputs/title_start_right.txt  400  end=0F81  ret=ret  stack=07  a=26  x=4C  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+orphan_slide_up2  recomp/harness/inputs/level_walk_jump.txt  700  end=0F81  ret=ret  stack=08  a=26  x=4C  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+orphan_slide_up2  recomp/harness/inputs/level_walk_jump.txt  700  end=0F81  ret=ret  stack=0F  a=26  x=4C  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+orphan_slide_down2  recomp/harness/inputs/title_start_right.txt  400  end=0FA9  ret=ret  stack=00  a=27  x=4E  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+orphan_slide_down2  recomp/harness/inputs/title_start_right.txt  400  end=0FA9  ret=ret  stack=07  a=27  x=4E  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+orphan_slide_down2  recomp/harness/inputs/level_walk_jump.txt  700  end=0FA9  ret=ret  stack=08  a=27  x=4E  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+orphan_slide_down2  recomp/harness/inputs/level_walk_jump.txt  700  end=0FA9  ret=ret  stack=0F  a=27  x=4E  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500
+loc_0F86  recomp/harness/inputs/title_start_right.txt  400  end=0FA9  ret=ret  stack=00  a=27  x=4E  y=00  aram:0000=1350  aram:0044=50  aram:0054=13   ; slot 0, sequence pointer 1350
+loc_0F86  recomp/harness/inputs/title_start_right.txt  400  end=0FA9  ret=ret  stack=07  a=27  x=4E  y=00  aram:0000=1400  aram:004B=00  aram:005B=14   ; slot 7, sequence pointer 1400
+loc_0F86  recomp/harness/inputs/level_walk_jump.txt  700  end=0FA9  ret=ret  stack=08  a=27  x=4E  y=00  aram:0000=1450  aram:004C=50  aram:005C=14   ; slot 8, sequence pointer 1450
+loc_0F86  recomp/harness/inputs/level_walk_jump.txt  700  end=0FA9  ret=ret  stack=0F  a=27  x=4E  y=00  aram:0000=1500  aram:0053=00  aram:0063=15   ; slot 15, sequence pointer 1500

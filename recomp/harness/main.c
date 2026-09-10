@@ -22,6 +22,7 @@
 #include "cpu.h"
 #include "ppu.h"
 
+#include "coro.h"
 #include "ss_internal.h"
 #include "sps_internal.h"
 #include "xxh64.h"
@@ -655,10 +656,17 @@ static void usage(void) {
     "                     instruction: the registry resolves every pc hand-off and\n"
     "                     a pc with no body is a fatal error. Implies --hooks on\n"
     "                     --spc-hooks on; with --lockstep it is the candidate\n"
+    "  --test-coro        self-test: the coroutine backend the --no-cpu scheduler\n"
+    "                     runs bodies on (needs no ROM; exits 0 on pass, 1 on fail)\n"
     "  --test-nesting     self-test: a hook entered inside another hook's callee\n"
     "                     keeps its own yield snapshot (exits 0 on pass, 1 on fail)\n"
     "  --test-spc-timing  self-test: sps_op_cycles() against the SPC700 core's own\n"
     "                     opcode timing (exits 0 on pass, 1 on fail)\n"
+    "  --unit FILE        routine-level lockstep over a seed spec, normally\n"
+    "                     config/recomp_units.txt: boot to a script's frame, seed\n"
+    "                     the registers and a few cells, then run the ROM's routine\n"
+    "                     and the C body from the same state and compare\n"
+    "  --unit-only A,B    restrict --unit to these routines, by name\n"
     "  --quiet            suppress the per-frame lines\n"
     "  --help\n"
     "buttons: A B X Y L R Start Select Up Down Left Right\n");
@@ -848,6 +856,218 @@ static bool profile_write(Machine* rom, Machine* hook, const char* path) {
   fclose(f);
   printf("profile: %u of %u routines were called -> %s\n", written, rom->hookCount, path);
   return true;
+}
+
+/* ---- --test-coro --------------------------------------------------------
+ *
+ * The --no-cpu scheduler rests on one primitive: a body chain runs on a stack
+ * of its own and a yield suspends that stack instead of unwinding it
+ * (harness/coro.h). There are two implementations of it -- ucontext on POSIX,
+ * Win32 fibers on Windows -- and only one of them can be exercised by the
+ * lockstep gate here, because the gate needs the ROM and the ROM never enters
+ * CI. So the primitive gets a self-test of its own that needs no ROM, no
+ * emulator and no data: it can run on any runner, which is the point.
+ *
+ * It checks the four things the scheduler actually asks of a backend:
+ *
+ *   1. a body suspends and resumes where it stopped, and its stack survives
+ *      (a 16 KiB local buffer is written before a yield and verified after);
+ *   2. coroutines nest -- a coro started and resumed from inside another
+ *      coro's stack comes back to *that* stack, which is what happens every
+ *      time the SPC700's driver stack is resumed from inside a 65816 body;
+ *   3. a body yields across a simulated frame boundary exactly as
+ *      ss_yield_wanted() makes it: the scheduler gets control back between two
+ *      steps, and resuming continues the same loop;
+ *   4. a suspended coroutine can be torn down (the scheduler drops one whenever
+ *      an interrupt abandons it, and ss_nocpu_free frees them all at exit), and
+ *      a finished coroutine can be started again on the same stack, which is
+ *      how a context slot is reused.
+ */
+#define CORO_TEST_LOG   64
+#define CORO_TEST_BLOB  16384u
+#define CORO_TEST_STACK (256u * 1024u)
+#define CORO_TEST_STEPS 10
+#define CORO_TEST_CYCLES_PER_FRAME 4
+#define CORO_TEST_TEARDOWNS 64
+
+typedef struct {
+  char log[CORO_TEST_LOG];
+  unsigned logN;
+  /* nesting */
+  Coro* outer;
+  Coro* inner;
+  /* stack survival */
+  Coro* deep;
+  unsigned blobBad;
+  bool deepFinished;
+  /* the simulated frame boundary */
+  Coro* body;
+  int frame;
+  int cycles;
+  int steps;
+  int yields;
+  int resumes;
+  int yieldedAt[CORO_TEST_STEPS];
+  bool bodyFinished;
+  /* teardown of a suspended coroutine */
+  Coro* parked;
+  int parkedEntered;
+  int parkedFinished;
+} CoroTest;
+
+static void ct_log(CoroTest* t, char c) {
+  if(t->logN + 1 < sizeof(t->log)) t->log[t->logN++] = c;
+}
+
+/* 1. a stack that survives a suspension */
+static void ct_deep(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  volatile unsigned char blob[CORO_TEST_BLOB];
+  for(unsigned i = 0; i < CORO_TEST_BLOB; i++) blob[i] = (unsigned char) (i * 31u + 7u);
+  ct_log(t, 'd');
+  coro_yield(t->deep);
+  unsigned bad = 0;
+  for(unsigned i = 0; i < CORO_TEST_BLOB; i++) {
+    if(blob[i] != (unsigned char) (i * 31u + 7u)) bad++;
+  }
+  t->blobBad = bad;
+  t->deepFinished = true;
+  ct_log(t, 'e');
+}
+
+/* 2. nesting: the inner coro is started and resumed from the outer's stack */
+static void ct_inner(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  ct_log(t, 'i');
+  coro_yield(t->inner);
+  ct_log(t, 'j');
+}
+
+static void ct_outer(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  ct_log(t, 'o');
+  coro_start(t->inner, ct_inner, t);   /* runs 'i', yields back here, not to main */
+  ct_log(t, 'p');
+  coro_yield(t->outer);                /* now to main */
+  ct_log(t, 'q');
+  coro_resume(t->inner);               /* runs 'j' and returns, back here */
+  ct_log(t, 'r');
+}
+
+/* 3. a body that yields whenever the machine has moved on underneath it, which
+ *    is ss_yield_wanted()'s shape with the machine replaced by a counter: a
+ *    body's own work advances the clock, and every fourth step ends a frame. */
+static void ct_body(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  int entryFrame = t->frame;
+  for(int i = 0; i < CORO_TEST_STEPS; i++) {
+    t->steps++;
+    if(++t->cycles % CORO_TEST_CYCLES_PER_FRAME == 0) t->frame++;
+    if(t->frame != entryFrame) {
+      if(t->yields < CORO_TEST_STEPS) t->yieldedAt[t->yields] = t->cycles;
+      t->yields++;
+      coro_yield(t->body);             /* the scheduler runs here */
+      entryFrame = t->frame;           /* resumed inside the same loop */
+    }
+  }
+  t->bodyFinished = true;
+}
+
+/* 4. a coroutine that parks and is never resumed */
+static void ct_park(void* arg) {
+  CoroTest* t = (CoroTest*) arg;
+  t->parkedEntered++;
+  coro_yield(t->parked);
+  t->parkedFinished++;                 /* must never happen: it is torn down */
+}
+
+static bool ct_check(const char* what, bool ok) {
+  printf("  %-58s %s\n", what, ok ? "ok" : "FAIL");
+  return ok;
+}
+
+static int run_coro_test(void) {
+  CoroTest t;
+  memset(&t, 0, sizeof(t));
+  int bad = 0;
+
+  printf("test-coro: backend %s\n", coro_backend());
+
+  /* 1. suspend, resume, and a stack that is still there afterwards */
+  t.deep = coro_new(CORO_TEST_STACK);
+  bad += !ct_check("a fresh coroutine is done before it is started", coro_done(t.deep));
+  coro_start(t.deep, ct_deep, &t);
+  bad += !ct_check("a started coroutine that yielded is not done", !coro_done(t.deep));
+  bad += !ct_check("it did not run past its yield", !t.deepFinished);
+  coro_resume(t.deep);
+  bad += !ct_check("it ran to its end after one resume", coro_done(t.deep));
+  bad += !ct_check("16 KiB of its stack survived the suspension", t.blobBad == 0);
+
+  /* the same object, started again: a context slot is reused, not reallocated */
+  t.blobBad = 1;
+  t.deepFinished = false;
+  coro_start(t.deep, ct_deep, &t);
+  coro_resume(t.deep);
+  bad += !ct_check("a finished coroutine restarts on the same stack",
+                   coro_done(t.deep) && t.deepFinished && t.blobBad == 0);
+  bad += !ct_check("both runs logged their two halves", strcmp(t.log, "dede") == 0);
+  coro_free(t.deep);
+  t.deep = NULL;
+
+  /* 2. nesting */
+  t.logN = 0;
+  memset(t.log, 0, sizeof(t.log));
+  t.outer = coro_new(CORO_TEST_STACK);
+  t.inner = coro_new(CORO_TEST_STACK);
+  ct_log(&t, 'A');
+  coro_start(t.outer, ct_outer, &t);
+  bad += !ct_check("the outer coro yielded to main, not the inner one",
+                   !coro_done(t.outer) && !coro_done(t.inner));
+  ct_log(&t, 'B');
+  coro_resume(t.outer);
+  ct_log(&t, 'C');
+  bad += !ct_check("a nested switch returned to the stack that made it",
+                   strcmp(t.log, "AoipBqjrC") == 0);
+  bad += !ct_check("both coroutines ran to their end",
+                   coro_done(t.outer) && coro_done(t.inner));
+  if(strcmp(t.log, "AoipBqjrC") != 0) printf("    log was \"%s\"\n", t.log);
+  coro_free(t.inner);
+  coro_free(t.outer);
+  t.inner = t.outer = NULL;
+
+  /* 3. yields across a simulated frame boundary */
+  t.body = coro_new(CORO_TEST_STACK);
+  coro_start(t.body, ct_body, &t);
+  while(!coro_done(t.body)) {
+    t.resumes++;
+    if(t.resumes > CORO_TEST_STEPS) break;    /* a backend that never comes back */
+    coro_resume(t.body);
+  }
+  bad += !ct_check("the body ran every one of its steps",
+                   t.bodyFinished && t.steps == CORO_TEST_STEPS);
+  bad += !ct_check("it stopped at both frame boundaries and nowhere else",
+                   t.yields == CORO_TEST_STEPS / CORO_TEST_CYCLES_PER_FRAME &&
+                   t.resumes == t.yields);
+  bad += !ct_check("each stop was on the step that ended a frame",
+                   t.yieldedAt[0] == CORO_TEST_CYCLES_PER_FRAME &&
+                   t.yieldedAt[1] == 2 * CORO_TEST_CYCLES_PER_FRAME);
+  coro_free(t.body);
+  t.body = NULL;
+
+  /* 4. teardown of a coroutine suspended halfway through a body */
+  for(int i = 0; i < CORO_TEST_TEARDOWNS; i++) {
+    t.parked = coro_new(CORO_TEST_STACK);
+    coro_start(t.parked, ct_park, &t);
+    if(coro_done(t.parked)) break;
+    coro_free(t.parked);                     /* dropped where it stands */
+    t.parked = NULL;
+  }
+  bad += !ct_check("every suspended coroutine was entered and torn down",
+                   t.parkedEntered == CORO_TEST_TEARDOWNS && t.parked == NULL);
+  bad += !ct_check("none of them ran on after the teardown", t.parkedFinished == 0);
+
+  printf("test-coro: %s\n", bad == 0 ? "PASS" : "FAIL");
+  return bad == 0 ? 0 : 1;
 }
 
 /* ---- --test-nesting ----------------------------------------------------
@@ -1112,6 +1332,771 @@ static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
   return bad == 0 ? 0 : 1;
 }
 
+/* ---- --unit: the routine-level lockstep gate ----------------------------
+ *
+ * The frame-level gate can only credit a routine some input script reaches.
+ * Thirty-odd routines in this port are reachable by nothing: command handlers
+ * the 65816 never sends, sequence opcodes no song uses, stale table slots,
+ * the one-row OAM emitters, the animation-rate entries no table word points
+ * at, `unused_vec`, and the four 65816 orphans with no caller at all. They are
+ * converted, and until now they were listed as unverified because "never
+ * entered" is the honest thing to say about them.
+ *
+ * --unit gives them a gate of their own, at the granularity of one routine and
+ * one seeded machine state. For each seed in config/recomp_units.txt it:
+ *
+ *   1. boots the ROM under a named input script to a named frame, so WRAM,
+ *      VRAM, CGRAM, OAM, ARAM, the DSP and the SPC registers hold content the
+ *      game itself produced rather than zeroes;
+ *   2. loads that state into two fresh machines -- the reference, which runs no
+ *      hooks at all, and the candidate, which runs the whole table;
+ *   3. overrides the registers and a few memory cells from the seed, pushes the
+ *      return frame the routine expects, and points both machines at the
+ *      routine's entry address;
+ *   4. runs the ROM's own code on the reference until control leaves the
+ *      routine, and the C body on the candidate from the identical state;
+ *   5. compares all seven regions, every register, and the cycle counts.
+ *
+ * Leaving the routine is one rule for all four shapes, and it needs no
+ * per-routine return kind at the stopping end: control has left when the pc is
+ * outside the routine's own byte range *and* the stack pointer is at or above
+ * where it stood at the first instruction. The stack-pointer half is what lets
+ * a routine call a subroutine (the pc leaves the range, but a frame is below)
+ * and what distinguishes a tail `jmp` from it. The return frame the harness
+ * pushes carries a sentinel address that is deliberately outside every
+ * routine, so an `rts`, an `rtl` and an `rti` all satisfy the same rule and no
+ * instruction at the sentinel is ever fetched. `ret=` in the seed says which
+ * frame to push, because the shape of the frame is the routine's business:
+ * `rts` pops a word, `rtl` a word and a bank, `rti` flags, a word and a bank,
+ * and `jmp` pops nothing.
+ *
+ * Interrupts are the one thing that has to be taken out of the picture. A hook
+ * is atomic where the routine it replaces is not, so an NMI landing inside the
+ * reference's run and inside a different instruction of the candidate's would
+ * be a difference the routine is not responsible for. The boot therefore ends
+ * with NMI and both timer IRQs disabled and the pending latch cleared, and
+ * with the machine parked just after vblank ends, which leaves a whole active
+ * frame -- some 300 000 master cycles -- before either the vblank flag or the
+ * frame counter can move under the routine. Both machines get exactly the same
+ * treatment, and the run report says how many cycles each seed actually spent.
+ *
+ * The seeds are data, not code: config/recomp_units.txt, one line per seed.
+ */
+
+#define UNIT_SENT_PC    0xFFFFu   /* the return address the harness pushes: no */
+#define UNIT_SENT_BANK  0x00u     /* routine owns it, so returning leaves them all */
+#define UNIT_MAX_CELLS  24
+#define UNIT_MAX_STACK  8
+#define UNIT_GUARD      40000000ul
+
+typedef enum { UNIT_RET_RTS, UNIT_RET_RTL, UNIT_RET_RTI, UNIT_RET_JMP } UnitRet;
+
+typedef struct {
+  uint32_t addr;
+  uint16_t val;
+  int width;                 /* 1 or 2 bytes, little-endian */
+} UnitCell;
+
+typedef struct {
+  char name[64];
+  char script[192];
+  int frame;
+  int line;
+  bool spc;                  /* which processor, resolved from the registries */
+  uint32_t entry;            /* 65816: canonical $C0:0000+offset. SPC: 16-bit */
+  uint32_t end;              /* exclusive, same form */
+  bool hasEnd, hasRet;
+  UnitRet ret;
+  /* register overrides; only the ones the line names are applied */
+  bool hasA, hasX, hasY, hasP, hasDB, hasDP, hasSP, hasDspAdr;
+  uint16_t a, x, y, sp, dp;
+  uint8_t p, db, dspAdr;
+  UnitCell cell[UNIT_MAX_CELLS];   /* ram:/aram: writes */
+  int cellCount;
+  UnitCell port[4];                /* port:N=v  (SPC only) */
+  int portCount;
+  UnitCell dsp[8];                 /* dsp:RR=v  (SPC only) */
+  int dspCount;
+  uint8_t stack[UNIT_MAX_STACK];   /* stack=HH.. pushed after the return frame */
+  int stackCount;
+  char note[160];
+} UnitSeed;
+
+/* The bank the ROM itself runs this routine in. Every routine here is reached
+ * through the $80/$81 mirror, and the mirror is the fast half of the map, so
+ * running the reference at the canonical $C0 address would charge the wrong
+ * access time for every fetch. */
+static uint32_t unit_run_pc(uint32_t canon) {
+  uint32_t off = canon - 0xc00000u;
+  uint16_t adr = (uint16_t) off;
+  if(off < ROM_SIZE && adr >= 0x8000) return (uint32_t) (((0x80u + (off >> 16)) << 16) | adr);
+  return canon;
+}
+
+/* An untimed push, for the frame the harness builds before the routine starts:
+ * it is setup, not part of what the routine costs. */
+static void unit_push8(Snes* s, uint8_t v) {
+  Cpu* c = s->cpu;
+  snes_write(s, c->sp, v);
+  c->sp--;
+  if(c->e) c->sp = (uint16_t) ((c->sp & 0xff) | 0x100);
+}
+
+static void unit_push16(Snes* s, uint16_t v) {
+  unit_push8(s, (uint8_t) (v >> 8));
+  unit_push8(s, (uint8_t) v);
+}
+
+static void unit_spc_push8(Apu* apu, uint8_t v) {
+  Spc* s = apu->spc;
+  apu->ram[0x100 | s->sp] = v;
+  s->sp--;
+}
+
+/* ---- the seed file ----------------------------------------------------- */
+
+static bool unit_hex(const char* s, uint32_t* out, int* digits) {
+  uint32_t v = 0;
+  int n = 0;
+  if(s[0] == '$') s++;
+  if(s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+  for(; *s != 0; s++) {
+    int d;
+    if(*s >= '0' && *s <= '9') d = *s - '0';
+    else if(*s >= 'a' && *s <= 'f') d = *s - 'a' + 10;
+    else if(*s >= 'A' && *s <= 'F') d = *s - 'A' + 10;
+    else return false;
+    v = (v << 4) | (uint32_t) d;
+    n++;
+  }
+  if(n == 0 || n > 8) return false;
+  *out = v;
+  *digits = n;
+  return true;
+}
+
+static bool unit_seed_key(UnitSeed* sd, char* key, char* val, const char* path) {
+  uint32_t v = 0;
+  int digits = 0;
+  if(strncmp(key, "ram:", 4) == 0 || strncmp(key, "aram:", 5) == 0) {
+    uint32_t adr = 0;
+    int adigits = 0;
+    if(!unit_hex(strchr(key, ':') + 1, &adr, &adigits) || !unit_hex(val, &v, &digits)) return false;
+    if(sd->cellCount == UNIT_MAX_CELLS) return false;
+    sd->cell[sd->cellCount].addr = adr;
+    sd->cell[sd->cellCount].val = (uint16_t) v;
+    sd->cell[sd->cellCount].width = digits > 2 ? 2 : 1;
+    sd->cellCount++;
+    return true;
+  }
+  if(strncmp(key, "port:", 5) == 0) {
+    uint32_t idx = 0;
+    int adigits = 0;
+    if(!unit_hex(key + 5, &idx, &adigits) || !unit_hex(val, &v, &digits) || idx > 3) return false;
+    if(sd->portCount == 4) return false;
+    sd->port[sd->portCount].addr = idx;
+    sd->port[sd->portCount].val = (uint16_t) v;
+    sd->port[sd->portCount].width = 1;
+    sd->portCount++;
+    return true;
+  }
+  if(strncmp(key, "dsp:", 4) == 0) {
+    uint32_t reg = 0;
+    int adigits = 0;
+    if(!unit_hex(key + 4, &reg, &adigits) || !unit_hex(val, &v, &digits) || reg > 0x7f) return false;
+    if(sd->dspCount == 8) return false;
+    sd->dsp[sd->dspCount].addr = reg;
+    sd->dsp[sd->dspCount].val = (uint16_t) v;
+    sd->dsp[sd->dspCount].width = 1;
+    sd->dspCount++;
+    return true;
+  }
+  if(strcmp(key, "ret") == 0) {
+    sd->hasRet = true;
+    if(strcmp(val, "rts") == 0 || strcmp(val, "ret") == 0) sd->ret = UNIT_RET_RTS;
+    else if(strcmp(val, "rtl") == 0) sd->ret = UNIT_RET_RTL;
+    else if(strcmp(val, "rti") == 0) sd->ret = UNIT_RET_RTI;
+    else if(strcmp(val, "jmp") == 0) sd->ret = UNIT_RET_JMP;
+    else return false;
+    return true;
+  }
+  if(strcmp(key, "stack") == 0) {
+    size_t n = strlen(val);
+    if(n == 0 || (n & 1) != 0 || n / 2 > UNIT_MAX_STACK) return false;
+    for(size_t i = 0; i < n; i += 2) {
+      char b[3] = { val[i], val[i + 1], 0 };
+      if(!unit_hex(b, &v, &digits)) return false;
+      sd->stack[sd->stackCount++] = (uint8_t) v;
+    }
+    return true;
+  }
+  if(!unit_hex(val, &v, &digits)) return false;
+  if(strcmp(key, "end") == 0)      { sd->end = v; sd->hasEnd = true; }
+  else if(strcmp(key, "a") == 0)   { sd->a = (uint16_t) v; sd->hasA = true; }
+  else if(strcmp(key, "x") == 0)   { sd->x = (uint16_t) v; sd->hasX = true; }
+  else if(strcmp(key, "y") == 0)   { sd->y = (uint16_t) v; sd->hasY = true; }
+  else if(strcmp(key, "p") == 0)   { sd->p = (uint8_t) v; sd->hasP = true; }
+  else if(strcmp(key, "psw") == 0) { sd->p = (uint8_t) v; sd->hasP = true; }
+  else if(strcmp(key, "db") == 0)  { sd->db = (uint8_t) v; sd->hasDB = true; }
+  else if(strcmp(key, "dp") == 0)  { sd->dp = (uint16_t) v; sd->hasDP = true; }
+  else if(strcmp(key, "sp") == 0)  { sd->sp = (uint16_t) v; sd->hasSP = true; }
+  /* the SPC700's DSPADDR latch is a register of the APU, not a byte of ARAM,
+   * so it needs a key of its own: dsp:RR= sets what a register holds, this
+   * sets which one $F3 is pointing at */
+  else if(strcmp(key, "dspadr") == 0) { sd->dspAdr = (uint8_t) v; sd->hasDspAdr = true; }
+  else {
+    fprintf(stderr, "dream_harness: %s:%d: unknown seed key '%s'\n", path, sd->line, key);
+    return false;
+  }
+  return true;
+}
+
+/* "name script frame key=val ... ; note" */
+static bool unit_load(const char* path, UnitSeed** out, int* countOut) {
+  FILE* f = fopen(path, "r");
+  if(f == NULL) {
+    fprintf(stderr, "dream_harness: cannot open %s: %s\n", path, strerror(errno));
+    return false;
+  }
+  int cap = 32, count = 0;
+  UnitSeed* seeds = calloc((size_t) cap, sizeof(UnitSeed));
+  char line[1024];
+  int lineno = 0;
+  bool ok = true;
+  while(fgets(line, sizeof(line), f) != NULL) {
+    lineno++;
+    char* note = strchr(line, ';');
+    char* notep = NULL;
+    if(note != NULL) { *note = 0; notep = note + 1; }
+    char* p = line;
+    while(*p == ' ' || *p == '\t') p++;
+    if(*p == 0 || *p == '\n' || *p == '\r') continue;
+    if(count == cap) {
+      cap *= 2;
+      seeds = realloc(seeds, (size_t) cap * sizeof(UnitSeed));
+      memset(seeds + count, 0, (size_t) (cap - count) * sizeof(UnitSeed));
+    }
+    UnitSeed* sd = &seeds[count];
+    memset(sd, 0, sizeof(*sd));
+    sd->line = lineno;
+    if(notep != NULL) {
+      while(*notep == ' ' || *notep == '\t') notep++;
+      size_t n = strlen(notep);
+      while(n > 0 && (notep[n - 1] == '\n' || notep[n - 1] == '\r' || notep[n - 1] == ' ')) n--;
+      if(n >= sizeof(sd->note)) n = sizeof(sd->note) - 1;
+      memcpy(sd->note, notep, n);
+      sd->note[n] = 0;
+    }
+    char* tok = strtok(p, " \t\r\n");
+    if(tok == NULL) continue;
+    snprintf(sd->name, sizeof(sd->name), "%s", tok);
+    tok = strtok(NULL, " \t\r\n");
+    if(tok == NULL) {
+      fprintf(stderr, "dream_harness: %s:%d: expected a script name\n", path, lineno);
+      ok = false; break;
+    }
+    snprintf(sd->script, sizeof(sd->script), "%s", tok);
+    tok = strtok(NULL, " \t\r\n");
+    if(tok == NULL) {
+      fprintf(stderr, "dream_harness: %s:%d: expected a frame number\n", path, lineno);
+      ok = false; break;
+    }
+    sd->frame = atoi(tok);
+    while((tok = strtok(NULL, " \t\r\n")) != NULL) {
+      char* eq = strchr(tok, '=');
+      if(eq == NULL) {
+        fprintf(stderr, "dream_harness: %s:%d: expected key=value, got '%s'\n", path, lineno, tok);
+        ok = false; break;
+      }
+      *eq = 0;
+      if(!unit_seed_key(sd, tok, eq + 1, path)) {
+        fprintf(stderr, "dream_harness: %s:%d: bad seed field '%s=%s'\n", path, lineno, tok, eq + 1);
+        ok = false; break;
+      }
+    }
+    if(!ok) break;
+    if(!sd->hasEnd || !sd->hasRet) {
+      fprintf(stderr, "dream_harness: %s:%d: %s needs both end= and ret=\n",
+              path, lineno, sd->name);
+      ok = false; break;
+    }
+    count++;
+  }
+  fclose(f);
+  if(!ok) { free(seeds); return false; }
+  *out = seeds;
+  *countOut = count;
+  return true;
+}
+
+/* ---- one seed --------------------------------------------------------- */
+
+typedef struct {
+  uint8_t* data;
+  int size;
+  char script[192];
+  int frame;
+} UnitBoot;
+
+/* Boot the ROM under one script to one frame, then park the machine where a
+ * routine can run without an interrupt or a frame boundary landing inside it:
+ * NMI and both timer IRQs off, the pending latch cleared, and the beam just
+ * past the end of vblank. The state is saved once and loaded into both
+ * machines of every seed that names this (script, frame). */
+static bool unit_boot(const uint8_t* rom, size_t romLen, const char* script, int frame,
+                      UnitBoot* out) {
+  InputScript in = { NULL, 0 };
+  if(script[0] != '-' && !input_load(&in, script)) return false;
+  Machine m;
+  machine_init(&m, rom, romLen, NULL, 0, false, false);
+  machine_install_spc(&m, NULL, 0, false);
+  for(int f = 0; f < frame; f++) {
+    uint16_t s1, s2;
+    input_state_at(&in, f, &s1, &s2);
+    machine_set_input(&m, s1, s2);
+    snes_runFrame(m.snes);
+  }
+  /* out of vblank, at the top of the next active frame */
+  int guard = 0;
+  while(m.snes->inVblank && guard++ < 200000) snes_runCycles(m.snes, 8);
+  m.snes->nmiEnabled = false;
+  m.snes->hIrqEnabled = false;
+  m.snes->vIrqEnabled = false;
+  m.snes->cpu->nmiWanted = false;
+  m.snes->cpu->irqWanted = false;
+  m.snes->cpu->intWanted = false;
+  m.snes->cpu->waiting = false;
+  m.snes->cpu->stopped = false;
+  out->size = snes_saveState(m.snes, NULL);
+  out->data = malloc((size_t) out->size);
+  snes_saveState(m.snes, out->data);
+  snprintf(out->script, sizeof(out->script), "%s", script);
+  out->frame = frame;
+  machine_free(&m);
+  free(in.ev);
+  return true;
+}
+
+static void unit_apply(Machine* m, const UnitSeed* sd) {
+  Snes* s = m->snes;
+  Cpu* c = s->cpu;
+  s->nmiEnabled = false;
+  s->hIrqEnabled = false;
+  s->vIrqEnabled = false;
+  c->nmiWanted = false;
+  c->irqWanted = false;
+  c->intWanted = false;
+  c->waiting = false;
+  c->stopped = false;
+  s->apu->sliceEnd = s->apu->cycles + 0x40000000u;
+  if(sd->spc) {
+    Apu* apu = s->apu;
+    Spc* sp = apu->spc;
+    if(sd->hasP) sps_set_psw(&m->sps, sd->p);
+    if(sd->hasA) sp->a = (uint8_t) sd->a;
+    if(sd->hasX) sp->x = (uint8_t) sd->x;
+    if(sd->hasY) sp->y = (uint8_t) sd->y;
+    if(sd->hasSP) sp->sp = (uint8_t) sd->sp;
+    for(int i = 0; i < sd->cellCount; i++) {
+      uint16_t adr = (uint16_t) sd->cell[i].addr;
+      apu->ram[adr] = (uint8_t) sd->cell[i].val;
+      if(sd->cell[i].width == 2) apu->ram[(uint16_t) (adr + 1)] = (uint8_t) (sd->cell[i].val >> 8);
+    }
+    for(int i = 0; i < sd->portCount; i++) apu->inPorts[sd->port[i].addr] = (uint8_t) sd->port[i].val;
+    if(sd->hasDspAdr) apu->dspAdr = sd->dspAdr;
+    for(int i = 0; i < sd->dspCount; i++) dsp_write(apu->dsp, (uint8_t) sd->dsp[i].addr,
+                                                    (uint8_t) sd->dsp[i].val);
+    sp->resetWanted = false;
+    sp->stopped = false;
+    sp->pc = (uint16_t) sd->entry;
+    if(sd->ret != UNIT_RET_JMP) {
+      unit_spc_push8(apu, (uint8_t) (UNIT_SENT_PC >> 8));
+      unit_spc_push8(apu, (uint8_t) UNIT_SENT_PC);
+    }
+    for(int i = 0; i < sd->stackCount; i++) unit_spc_push8(apu, sd->stack[i]);
+    return;
+  }
+  if(sd->hasP) ss_set_p(&m->ss, sd->p);
+  if(sd->hasA) c->a = sd->a;
+  if(sd->hasX) c->x = sd->x;
+  if(sd->hasY) c->y = sd->y;
+  if(sd->hasDB) c->db = sd->db;
+  if(sd->hasDP) c->dp = sd->dp;
+  if(sd->hasSP) c->sp = sd->sp;
+  for(int i = 0; i < sd->cellCount; i++) {
+    uint32_t adr = sd->cell[i].addr;
+    snes_write(s, adr, (uint8_t) sd->cell[i].val);
+    if(sd->cell[i].width == 2) snes_write(s, (adr + 1) & 0xffffff, (uint8_t) (sd->cell[i].val >> 8));
+  }
+  uint32_t pc24 = unit_run_pc(sd->entry);
+  c->k = (uint8_t) (pc24 >> 16);
+  c->pc = (uint16_t) pc24;
+  switch(sd->ret) {
+    case UNIT_RET_RTS: unit_push16(s, (uint16_t) (UNIT_SENT_PC - 1)); break;
+    case UNIT_RET_RTL: unit_push8(s, UNIT_SENT_BANK);
+                       unit_push16(s, (uint16_t) (UNIT_SENT_PC - 1)); break;
+    case UNIT_RET_RTI: unit_push8(s, UNIT_SENT_BANK);
+                       unit_push16(s, UNIT_SENT_PC);
+                       unit_push8(s, ss_p(&m->ss)); break;
+    case UNIT_RET_JMP: break;
+  }
+  for(int i = 0; i < sd->stackCount; i++) unit_push8(s, sd->stack[i]);
+}
+
+/* Control has left the routine when the instruction about to run is outside its
+ * byte range, the instruction *before* it was inside, and no frame the routine
+ * pushed is still on the stack. All three conditions earn their place:
+ *
+ *   the stack pointer alone cannot say, because the pc leaves the range on
+ *   every call to a routine that is not converted yet, and comes back;
+ *
+ *   the range alone cannot say either, for the same reason;
+ *
+ *   and "the instruction before it was inside" is what keeps a callee that
+ *   deliberately unbalances the stack from looking like the end. The sound
+ *   driver has exactly one: seq_pop_x pops its own return address, pops the
+ *   channel index its caller pushed and pushes only the return address back,
+ *   so for two instructions in the middle of it the stack pointer is *above*
+ *   where the handler started while the pc is nowhere near the handler.
+ *
+ * The routine's first instruction is inside by construction, which is what
+ * seeds the "before" half.  */
+typedef struct { bool wasInside; } UnitWalk;
+
+static bool unit_left_65816(const Machine* m, const UnitSeed* sd, uint16_t spEntry,
+                            UnitWalk* w) {
+  const Cpu* c = m->snes->cpu;
+  uint32_t canon = 0;
+  uint32_t pc24 = ((uint32_t) c->k << 16) | c->pc;
+  const bool inside = canon_rom_addr(pc24, &canon) && canon >= sd->entry && canon < sd->end;
+  if(!inside && w->wasInside && c->sp >= spEntry) return true;
+  w->wasInside = inside;
+  return false;
+}
+
+static bool unit_left_spc(const Machine* m, const UnitSeed* sd, uint8_t spEntry,
+                          UnitWalk* w) {
+  const Spc* s = m->snes->apu->spc;
+  const bool inside = s->pc >= sd->entry && s->pc < sd->end;
+  if(!inside && w->wasInside && s->sp >= spEntry) return true;
+  w->wasInside = inside;
+  return false;
+}
+
+static const char* unit_ret_name(UnitRet r) {
+  switch(r) {
+    case UNIT_RET_RTS: return "rts";
+    case UNIT_RET_RTL: return "rtl";
+    case UNIT_RET_RTI: return "rti";
+    default: return "jmp";
+  }
+}
+
+typedef struct { const char* name; uint32_t ref, cand; } UnitRegDiff;
+
+/* Every register the two machines have to agree on afterwards, read out of one
+ * machine at a time so the two lists line up by index. */
+static void unit_regs(Machine* m, bool spc, uint32_t* v, const char** names, int* n) {
+  int i = 0;
+  if(spc) {
+    const Spc* s = m->snes->apu->spc;
+    names[i] = "a";   v[i++] = s->a;
+    names[i] = "x";   v[i++] = s->x;
+    names[i] = "y";   v[i++] = s->y;
+    names[i] = "sp";  v[i++] = s->sp;
+    names[i] = "pc";  v[i++] = s->pc;
+    names[i] = "psw"; v[i++] = sps_psw(&m->sps);
+  } else {
+    const Cpu* c = m->snes->cpu;
+    names[i] = "a";  v[i++] = c->a;
+    names[i] = "x";  v[i++] = c->x;
+    names[i] = "y";  v[i++] = c->y;
+    names[i] = "sp"; v[i++] = c->sp;
+    names[i] = "dp"; v[i++] = c->dp;
+    names[i] = "db"; v[i++] = c->db;
+    names[i] = "pb"; v[i++] = c->k;
+    names[i] = "pc"; v[i++] = c->pc;
+    names[i] = "p";  v[i++] = ss_p(&m->ss);
+    names[i] = "e";  v[i++] = c->e ? 1u : 0u;
+  }
+  *n = i;
+}
+
+#define UNIT_REGS_MAX 10
+
+static int unit_reg_diffs(Machine* ref, Machine* cand, bool spc, UnitRegDiff* out, int max) {
+  uint32_t rv[UNIT_REGS_MAX], cv[UNIT_REGS_MAX];
+  const char* rn[UNIT_REGS_MAX];
+  const char* cn[UNIT_REGS_MAX];
+  int nr = 0, nc = 0, n = 0;
+  unit_regs(ref, spc, rv, rn, &nr);
+  unit_regs(cand, spc, cv, cn, &nc);
+  for(int i = 0; i < nr && i < nc; i++) {
+    if(rv[i] == cv[i] || n >= max) continue;
+    out[n].name = rn[i];
+    out[n].ref = rv[i];
+    out[n].cand = cv[i];
+    n++;
+  }
+  return n;
+}
+
+/* Returns true when the seed passed. */
+static bool unit_run_seed(const uint8_t* rom, size_t romLen, const UnitBoot* boot,
+                          const UnitSeed* sd, Installed* table, unsigned tableCount,
+                          SpcInstalled* spcTable, unsigned spcCount, int seedIndex) {
+  Machine ref, cand;
+  machine_init(&ref, rom, romLen, table, tableCount, false, false);
+  machine_install_spc(&ref, spcTable, spcCount, false);
+  machine_init(&cand, rom, romLen, table, tableCount, true, false);
+  machine_install_spc(&cand, spcTable, spcCount, true);
+  bool pass = true;
+  const char* err = NULL;
+  char detail[256];
+  detail[0] = 0;
+
+  if(!snes_loadState(ref.snes, boot->data, boot->size) ||
+     !snes_loadState(cand.snes, boot->data, boot->size)) {
+    err = "the boot state would not load";
+    pass = false;
+  }
+
+  if(pass) {
+    unit_apply(&ref, sd);
+    unit_apply(&cand, sd);
+    /* the two machines must be indistinguishable before the routine runs, or
+     * nothing measured afterwards is the routine's doing */
+    machine_snapshot(&ref);
+    machine_snapshot(&cand);
+    Region rr[REGION_COUNT], cr[REGION_COUNT];
+    machine_regions(&ref, rr);
+    machine_regions(&cand, cr);
+    for(int k = 0; k < REGION_COUNT; k++) {
+      if(memcmp(rr[k].data, cr[k].data, rr[k].len) != 0) {
+        snprintf(detail, sizeof(detail), "the seeded machines differ in %s before the run",
+                 rr[k].name);
+        err = detail;
+        pass = false;
+        break;
+      }
+    }
+  }
+
+  uint64_t refCycles = 0, candCycles = 0;
+  uint64_t refInstrs = 0, candInstrs = 0;
+  uint32_t refApu = 0, candApu = 0;
+  if(pass) {
+    const uint64_t cycles0 = ref.snes->cycles;
+    const uint32_t apu0 = ref.snes->apu->cycles;
+    if(sd->spc) {
+      uint8_t spEntry = ref.snes->apu->spc->sp;
+      UnitWalk w = { true };
+      unsigned long guard = 0;
+      while(!unit_left_spc(&ref, sd, spEntry, &w)) {
+        spc_runOpcode(ref.snes->apu->spc);
+        if(++guard > UNIT_GUARD) { err = "the ROM's SPC700 routine never left its byte range"; pass = false; break; }
+      }
+    } else {
+      uint16_t spEntry = ref.snes->cpu->sp;
+      UnitWalk w = { true };
+      unsigned long guard = 0;
+      while(!unit_left_65816(&ref, sd, spEntry, &w)) {
+        cpu_runOpcode(ref.snes->cpu);
+        if(++guard > UNIT_GUARD) { err = "the ROM routine never left its byte range"; pass = false; break; }
+      }
+    }
+    refCycles = ref.snes->cycles - cycles0;
+    refApu = ref.snes->apu->cycles - apu0;
+
+
+    if(pass) {
+      /* The candidate runs the C body, held to the end of its routine
+       * (ss_unit_hold: this machine has no frame boundary to hand the rest
+       * back at, and the SPC700 side of the same gate gets the same effect for
+       * free from the far-away slice end). The loop after it is the safety
+       * net: if a body ever stops short, the ROM finishes the routine exactly
+       * as it does in a hooked frame run, and the comparison still stands. */
+      if(sd->spc) {
+        const SpcInstalled* h = NULL;
+        for(unsigned i = 0; i < spcCount; i++)
+          if(strcmp(spcTable[i].name, sd->name) == 0) h = &spcTable[i];
+        if(h == NULL) { err = "no SPC700 C body is registered under that name"; pass = false; }
+        else {
+          uint8_t spEntry = cand.snes->apu->spc->sp;
+          sps_enter_hook(&cand.sps);
+          h->fn(&cand.sps);
+          sps_leave_hook(&cand.sps);
+          UnitWalk w = { true };
+          unsigned long guard = 0;
+          while(!unit_left_spc(&cand, sd, spEntry, &w)) {
+            spc_runOpcode(cand.snes->apu->spc);
+            if(++guard > UNIT_GUARD) { err = "the C body's SPC700 routine never left its byte range"; pass = false; break; }
+          }
+        }
+      } else {
+        const Installed* h = NULL;
+        for(unsigned i = 0; i < tableCount; i++)
+          if(strcmp(table[i].name, sd->name) == 0) h = &table[i];
+        if(h == NULL || h->fn == NULL) { err = "no C body is registered under that name"; pass = false; }
+        else {
+          uint16_t spEntry = cand.snes->cpu->sp;
+          ss_unit_hold(&cand.ss, true);
+          ss_enter_hook(&cand.ss);
+          h->fn(&cand.ss);
+          ss_leave_hook(&cand.ss);
+          ss_unit_hold(&cand.ss, false);
+          UnitWalk w = { true };
+          unsigned long guard = 0;
+          while(!unit_left_65816(&cand, sd, spEntry, &w)) {
+            cpu_runOpcode(cand.snes->cpu);
+            if(++guard > UNIT_GUARD) { err = "the C body's routine never left its byte range"; pass = false; break; }
+          }
+        }
+      }
+      candCycles = cand.snes->cycles - cycles0;
+      candApu = cand.snes->apu->cycles - apu0;
+      /* Instructions the emulated core still executed on the candidate: the
+       * routine's own are the C body's, so what is left is a callee the port
+       * has not converted, plus anything a body that stopped short handed
+       * back. It is printed so the reading stays checkable rather than
+       * asserted. */
+      /* Both machines are fresh, so these counters start at zero and are the
+       * run's own. */
+      candInstrs = sd->spc ? cand.emulatedSpc : cand.emulated;
+      refInstrs = sd->spc ? ref.emulatedSpc : ref.emulated;
+    }
+  }
+
+  if(pass) {
+    machine_snapshot(&ref);
+    machine_snapshot(&cand);
+    Region rr[REGION_COUNT], cr[REGION_COUNT];
+    machine_regions(&ref, rr);
+    machine_regions(&cand, cr);
+    for(int k = 0; k < REGION_COUNT && pass; k++) {
+      if(memcmp(rr[k].data, cr[k].data, rr[k].len) == 0) continue;
+      for(size_t off = 0; off < rr[k].len; off++) {
+        if(rr[k].data[off] == cr[k].data[off]) continue;
+        snprintf(detail, sizeof(detail),
+                 "%s differs at 0x%05zx: the ROM left %02X, the C body %02X",
+                 rr[k].name, off, rr[k].data[off], cr[k].data[off]);
+        break;
+      }
+      err = detail;
+      pass = false;
+    }
+    if(pass) {
+      UnitRegDiff d[4];
+      int n = unit_reg_diffs(&ref, &cand, sd->spc, d, 4);
+      if(n > 0) {
+        snprintf(detail, sizeof(detail),
+                 "%s differs: the ROM left %04X, the C body %04X%s",
+                 d[0].name, d[0].ref, d[0].cand, n > 1 ? " (and more)" : "");
+        err = detail;
+        pass = false;
+      }
+    }
+    if(pass && (refCycles != candCycles || refApu != candApu)) {
+      snprintf(detail, sizeof(detail),
+               "the ROM spent %" PRIu64 " master and %u APU cycles, the C body %" PRIu64 " and %u",
+               refCycles, refApu, candCycles, candApu);
+      err = detail;
+      pass = false;
+    }
+  }
+
+  printf("unit %s %-30s seed %d  %s@%d %s  %" PRIu64 " master %u apu, rom ran %"
+         PRIu64 " instrs, C left %" PRIu64 "%s%s\n",
+         pass ? "pass" : "FAIL", sd->name, seedIndex, boot->script, boot->frame,
+         unit_ret_name(sd->ret), refCycles, refApu, refInstrs, candInstrs,
+         sd->note[0] ? "  ; " : "", sd->note);
+  if(!pass) printf("     %s\n", err != NULL ? err : "unknown failure");
+
+  machine_free(&ref);
+  machine_free(&cand);
+  return pass;
+}
+
+static int run_unit_gate(const uint8_t* rom, size_t romLen, const char* specPath,
+                         const char* onlyList, Installed* table, unsigned tableCount,
+                         SpcInstalled* spcTable, unsigned spcCount) {
+  UnitSeed* seeds = NULL;
+  int count = 0;
+  if(!unit_load(specPath, &seeds, &count)) return 2;
+
+  /* resolve each name to a side and an entry address through the two registries */
+  bool ok = true;
+  for(int i = 0; i < count; i++) {
+    UnitSeed* sd = &seeds[i];
+    bool found = false;
+    for(unsigned k = 0; k < tableCount && !found; k++) {
+      if(strcmp(table[k].name, sd->name) != 0) continue;
+      sd->spc = false;
+      sd->entry = table[k].addr;
+      found = true;
+    }
+    for(unsigned k = 0; k < spcCount && !found; k++) {
+      if(strcmp(spcTable[k].name, sd->name) != 0) continue;
+      sd->spc = true;
+      sd->entry = spcTable[k].addr;
+      found = true;
+    }
+    if(!found) {
+      fprintf(stderr, "dream_harness: %s:%d: no routine named '%s' is registered\n",
+              specPath, sd->line, sd->name);
+      ok = false;
+    } else if(sd->end <= sd->entry) {
+      fprintf(stderr, "dream_harness: %s:%d: end=%X is not above %s's entry %X\n",
+              specPath, sd->line, sd->end, sd->name, sd->entry);
+      ok = false;
+    }
+  }
+  if(!ok) { free(seeds); return 2; }
+
+  int failures = 0, ran = 0;
+  /* one boot per distinct (script, frame): booting is most of the work, and a
+   * seed only needs the state it produced */
+  bool* done = calloc((size_t) (count > 0 ? count : 1), 1);
+  for(int i = 0; i < count; i++) {
+    if(done[i]) continue;
+    if(!name_in_list(onlyList, seeds[i].name)) { done[i] = true; continue; }
+    UnitBoot boot;
+    memset(&boot, 0, sizeof boot);
+    if(!unit_boot(rom, romLen, seeds[i].script, seeds[i].frame, &boot)) {
+      free(done); free(seeds);
+      return 2;
+    }
+    for(int j = i; j < count; j++) {
+      if(done[j]) continue;
+      if(strcmp(seeds[j].script, boot.script) != 0 || seeds[j].frame != boot.frame) continue;
+      done[j] = true;
+      if(!name_in_list(onlyList, seeds[j].name)) continue;
+      int seedIndex = 1;
+      for(int k = 0; k < j; k++) if(strcmp(seeds[k].name, seeds[j].name) == 0) seedIndex++;
+      if(!unit_run_seed(rom, romLen, &boot, &seeds[j], table, tableCount,
+                        spcTable, spcCount, seedIndex)) failures++;
+      ran++;
+    }
+    free(boot.data);
+  }
+  free(done);
+
+  /* one line per routine, for tools/recomp_verify.py --units */
+  int routines = 0;
+  for(int i = 0; i < count; i++) {
+    bool first = true;
+    for(int k = 0; k < i; k++) if(strcmp(seeds[k].name, seeds[i].name) == 0) first = false;
+    if(!first || !name_in_list(onlyList, seeds[i].name)) continue;
+    int n = 0;
+    for(int k = 0; k < count; k++) if(strcmp(seeds[k].name, seeds[i].name) == 0) n++;
+    printf("unitok %s %d seeds\n", seeds[i].name, n);
+    routines++;
+  }
+  printf("unit: %d seeds over %d routines, %d failed\n", ran, routines, failures);
+  free(seeds);
+  return failures == 0 ? 0 : 1;
+}
+
 static void print_frame_line(int frame, Machine* m, const Region* r) {
   const Cpu* c = m->snes->cpu;
   const Ppu* p = m->snes->ppu;
@@ -1143,8 +2128,11 @@ int main(int argc, char** argv) {
   bool hooksOn = false;
   bool lockstep = false;
   bool quiet = false;
+  bool testCoro = false;
   bool testNesting = false;
   bool testSpcTiming = false;
+  const char* unitPath = NULL;
+  const char* unitOnly = NULL;
   bool spcHooksOn = false;
   bool noCpu = false;
   const char* tableName = "all";
@@ -1180,13 +2168,21 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--only") == 0 && hasNext) onlyList = argv[++i];
     else if(strcmp(a, "--lockstep") == 0) lockstep = true;
     else if(strcmp(a, "--no-cpu") == 0) noCpu = true;
+    else if(strcmp(a, "--test-coro") == 0) testCoro = true;
     else if(strcmp(a, "--test-nesting") == 0) testNesting = true;
     else if(strcmp(a, "--test-spc-timing") == 0) testSpcTiming = true;
+    else if(strcmp(a, "--unit") == 0 && hasNext) unitPath = argv[++i];
+    else if(strcmp(a, "--unit-only") == 0 && hasNext) unitOnly = argv[++i];
     else if(strcmp(a, "--quiet") == 0) quiet = true;
     else if(strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) { usage(); return 0; }
     else { fprintf(stderr, "dream_harness: unknown option %s\n", a); usage(); return 2; }
   }
   if(frames <= 0) { fprintf(stderr, "dream_harness: --frames must be positive\n"); return 2; }
+
+  /* Before the ROM is opened: --test-coro exercises the coroutine backend and
+   * nothing else, so it is the one mode that runs on a machine with no ROM --
+   * which is every CI runner (.github/workflows/ci.yml). */
+  if(testCoro) return run_coro_test();
 
   InputScript script = { NULL, 0 };
   if(inputPath != NULL && !input_load(&script, inputPath)) return 2;
@@ -1244,6 +2240,25 @@ int main(int argc, char** argv) {
     if(cyclesPath == NULL || strcmp(cyclesPath, "none") != 0) {
       if(!load_cycles(table, tableCount, cp, cyclesPath != NULL)) return 2;
     }
+  }
+
+  if(unitPath != NULL) {
+    /* The routine-level gate runs no frames of its own beyond the boot each
+     * seed asks for, so none of the frame-loop options apply; it needs the
+     * whole table on both processors, because a seeded routine reaches its
+     * converted callees the same way it does in a frame run. */
+    if(lockstep || noCpu || profilePath != NULL || onlyList != NULL) {
+      fprintf(stderr, "dream_harness: --unit is its own mode: no --lockstep,"
+                      " --no-cpu, --profile or --only (use --unit-only)\n");
+      return 2;
+    }
+    int rc = run_unit_gate(rom, romLen, unitPath, unitOnly, table, tableCount,
+                           spcTable, spcTableCount);
+    free(rom);
+    free(table);
+    free(spcTable);
+    free(script.ev);
+    return rc;
   }
 
   if(onlyList != NULL) {

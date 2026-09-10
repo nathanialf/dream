@@ -12,7 +12,8 @@
 #include <stdlib.h>
 
 #include "sps_internal.h"
-#include "ss_internal.h"    /* SsCoro: the one suspended stack --no-cpu needs */
+#include "ss_internal.h"
+#include "coro.h"     /* Coro: the one suspended stack --no-cpu needs */
 
 /* ---- registers -------------------------------------------------------- */
 uint8_t  sps_a(const SpcState* sp)  { return sp->spc->a; }
@@ -376,7 +377,7 @@ static void sps_nocpu_suspend(SpcState* sp) {
   sp->suspendPc = sp->spc->pc;
   sp->suspended = true;
   sp->suspensions++;
-  ss_coro_yield(sp->co);
+  coro_yield(sp->co);
   sp->suspended = false;
 }
 
@@ -400,11 +401,11 @@ static bool sps_nocpu_hook(void* ctx, Spc* spc, uint16_t pc) {
   }
   sp->running = true;
   if(resume) {
-    ss_coro_resume(sp->co);
+    coro_resume(sp->co);
   } else {
     gSpsStart.sp = sp;
     gSpsStart.pc = pc;
-    ss_coro_start(sp->co, sps_nocpu_trampoline, NULL);
+    coro_start(sp->co, sps_nocpu_trampoline, NULL);
   }
   sp->running = false;
   (void) spc;
@@ -413,7 +414,7 @@ static bool sps_nocpu_hook(void* ctx, Spc* spc, uint16_t pc) {
 
 void sps_nocpu_enable(SpcState* sp, bool on) {
   if(on) {
-    if(sp->co == NULL) sp->co = ss_coro_new(SPS_NOCPU_STACK);
+    if(sp->co == NULL) sp->co = coro_new(SPS_NOCPU_STACK);
     sp->inner = sp->spc->hook;
     sp->innerCtx = sp->spc->hookCtx;
     sp->spc->hook = sps_nocpu_hook;
@@ -430,7 +431,7 @@ bool sps_nocpu_enabled(const SpcState* sp) { return sp->nocpu; }
 
 /* the driver's stack, back to the allocator (harness teardown only) */
 void sps_nocpu_free(SpcState* sp) {
-  ss_coro_free(sp->co);
+  coro_free(sp->co);
   sp->co = NULL;
   sp->nocpu = false;
 }

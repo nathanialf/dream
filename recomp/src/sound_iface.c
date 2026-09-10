@@ -32,9 +32,13 @@
  * The bodies are static: the registry table below is their only caller, and
  * the vendored SPC700 core already exports a symbol called spc_init.
  *
- * orphan_C183F1 and the unlabelled dead twin unused_spc_execute ($C1804C) are
- * not converted: nothing reaches either (see docs/dkc_crossref.md 3.2, where
- * p4plus2's DKC2 comment marks the twin "Dead code, would crash SPC engine").
+ * unused_spc_set_e7_and_play is converted (below) even though nothing reaches it; it is
+ * credited by the unit gate rather than by a script (config/recomp_units.txt,
+ * `dream_harness --unit`). The unlabelled dead twin unused_spc_execute
+ * ($C1804C) is not: the tracer never gave it a label, so it is a byte run in
+ * out/dream.asm rather than a routine, and there is nothing for the registry
+ * to name (see docs/dkc_crossref.md 3.2, where p4plus2's DKC2 comment marks
+ * the twin "Dead code, would crash SPC engine").
  */
 #include <stdint.h>
 #include <stdbool.h>
@@ -1003,6 +1007,60 @@ static void spc_command(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
+ * unused_spc_set_e7_and_play — $C1:83F1, unused_spc_set_fb_and_play — $C1:8403
+ *
+ * Two dead siblings of spc_command's tail, eighteen bytes each and identical
+ * apart from one immediate byte. Each builds a command word out of the
+ * accumulator's *high* byte -- the xba is what makes the caller's high byte the
+ * parameter -- sends it, then sends $FE ("play"), skipping every upload step
+ * spc_command does first.
+ *
+ * The commands are $F9 and $FB: the driver takes `cmd & 7` as the index into
+ * cmd_table, so $F9 is cmd1_set_E7 (parameter into $E7, which nothing else in
+ * the traced driver reads -- spc/spc_map.txt) and $FB is cmd3_fade_and_song.
+ * Nothing calls either: no jsr, jsl or table word anywhere in out/dream.asm
+ * names either address, and config/recomp_order.txt marks them cold. Only one of the two is
+ * traced as code at a time -- the tracer's orphan sweep reaches whichever the
+ * label file forces -- so both are converted and both are credited by the unit
+ * gate rather than by a script (config/recomp_units.txt, `dream_harness
+ * --unit`).
+ *
+ * Entry: A high byte = the parameter. Exit: rtl, A/flags as the closing
+ * write_spc_command left them.
+ * ------------------------------------------------------------------------- */
+static void unused_spc_set_and_play(SnesState* ss, uint16_t base, uint16_t cmd) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+
+  S(base + 0, 1);                           /* C183F1 xba */
+  { const uint16_t r = (uint16_t) ((a >> 8) | (a << 8));
+    ss_set_nz8(ss, (uint8_t) r);            /* the byte that moved into the low half */
+    ss_idle(ss);
+    ss_check_int(ss);
+    ss_idle(ss);
+    a = r; }
+  SIMM16(base + 1); a = alu_and16(ss, a, 0xFF00);      /* C183F2 and #$FF00 */
+  SIMM16(base + 4); a = alu_ora16(ss, a, cmd);         /* C183F5 ora #$00F9 */
+  SI(base + 7); x = a; ss_set_nz16(ss, x);  /* C183F8 tax */
+
+  JSR(base + 8, 0x80FF);                    /* C183F9 jsr write_spc_command */
+
+  SIMM16(base + 11); x = 0x00FE; ss_set_nz16(ss, x);   /* C183FC ldx #$00FE */
+  JSR(base + 14, 0x80FF);                   /* C183FF jsr write_spc_command */
+
+  S(base + 17, 1);                          /* C18402 rtl */
+  ss_rtl(ss);
+}
+
+static void unused_spc_set_e7_and_play(SnesState* ss) {
+  unused_spc_set_and_play(ss, 0x83F1, 0x00F9);
+}
+
+static void unused_spc_set_fb_and_play(SnesState* ss) {
+  unused_spc_set_and_play(ss, 0x8403, 0x00FB);
+}
+
+/* ---------------------------------------------------------------------------
  * sfx_command_dispatch — $C1:8415
  *
  * Entry: A = the packed channel:sfx_id word, from play_sound_effect
@@ -1035,6 +1093,8 @@ static const RecompEntry kSoundIface[] = {
   { 0xc18324, "upload_spc_block",          upload_spc_block },
   { 0xc18392, "upload_song_sample_set",    upload_song_sample_set },
   { 0xc183ce, "spc_command",               spc_command },
+  { 0xc183f1, "unused_spc_set_e7_and_play", unused_spc_set_e7_and_play },
+  { 0xc18403, "unused_spc_set_fb_and_play", unused_spc_set_fb_and_play },
   { 0xc18415, "sfx_command_dispatch",      sfx_command_dispatch },
 };
 RECOMP_REGISTER(kSoundIface)

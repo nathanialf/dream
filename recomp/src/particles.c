@@ -87,7 +87,84 @@ void particle_table_clear(SnesState* ss) {
   ss_rts(ss);
 }
 
+/* ---------------------------------------------------------------------------
+ * unused_stream_desc_dispatch — $C0:9206
+ *
+ * A jump-table dispatcher nothing calls: no jsr, jsl or table word anywhere in
+ * out/dream.asm names the address, and config/recomp_order.txt marks it cold.
+ * It adds the accumulator to the word at $0BB8, uses the sum as a byte index
+ * into the word table at $C0:B208, and -- when the entry is non-zero -- parks
+ * it in $04, reads and post-increments a second counter at $0BBA, and leaves
+ * through `jmp ($0004)`, so the table entry is the routine that runs next. A
+ * zero entry ends the table and the routine returns instead.
+ *
+ * What it reads is not a jump table any more: $C0:B208 is
+ * vram_stream_desc_table, the VRAM streaming-descriptor array (docs/NOTES.md,
+ * "Open items" 1), so the words it would jump to ($5000, $8AC0, $FFC9, ...)
+ * are descriptor bytes. Nothing sets $0BB8 or $0BBA either. That is what makes
+ * this dead code rather than an unreached branch, and why the unit gate seeds
+ * both exits explicitly instead of leaving them to a script
+ * (config/recomp_units.txt, `dream_harness --unit`).
+ *
+ * The ten bytes after the rts ($C0:921D-$C0:9226) decode as `inc $0BB8 ; inc
+ * $0BB8 ; stz $0BBA ; rts`; the tracer reaches none of them, so they stay a
+ * byte run in out/dream.asm.
+ *
+ * Entry: A = the table offset to add, DB = the bank the counters live in.
+ * Exit: through the table entry with A = the old $0BBA and X = the index, or
+ * rts with A = 0.
+ * ------------------------------------------------------------------------- */
+void unused_stream_desc_dispatch(SnesState* ss) {
+  const uint8_t pb = ss_pb(ss);
+  uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
+  const uint16_t dp = ss_dp(ss);
+
+  SI(0x9206); ss_set_c(ss, false);          /* C09206 clc */
+  S(0x9207, 3);                             /* C09207 adc $0BB8 */
+  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, 0x0BB8)));
+  SI(0x920A); x = a; ss_set_nz16(ss, x);    /* C0920A tax */
+
+  S(0x920B, 4);                             /* C0920B lda data_C0B208,X */
+  a = t_read16(ss, (0x80B208u + x) & 0xffffff);
+  ss_set_nz16(ss, a);
+  S(0x920F, 1); t_branch(ss, a == 0);       /* C0920F beq loc_C0921C */
+  if(a == 0) {
+    ss_set_a(ss, a); ss_set_x(ss, x);
+    S(0x921C, 1);                           /* C0921C rts */
+    ss_rts(ss);
+    return;
+  }
+
+  S(0x9211, 2);                             /* C09211 sta ptr_04 */
+  t_write16(ss, dp + ptr_04, a);
+  S(0x9213, 3);                             /* C09213 lda $0BBA */
+  a = t_read16(ss, ss_abs(ss, 0x0BBA));
+  ss_set_nz16(ss, a);
+
+  S(0x9216, 3);                             /* C09216 inc $0BBA */
+  /* a 16-bit read-modify-write: no latch inside the read, an internal cycle
+   * between read and write, and the write-back high byte first */
+  { const uint32_t adr = ss_abs(ss, 0x0BBA);
+    const uint8_t lo = ss_bus_r8(ss, adr);
+    const uint8_t hi = ss_bus_r8(ss, (adr + 1) & 0xffffff);
+    const uint16_t v = (uint16_t) ((lo | (hi << 8)) + 1);
+    ss_idle(ss);
+    ss_bus_w8(ss, (adr + 1) & 0xffffff, (uint8_t) (v >> 8));
+    ss_check_int(ss);
+    ss_bus_w8(ss, adr, (uint8_t) v);
+    ss_set_nz16(ss, v); }
+
+  ss_set_a(ss, a); ss_set_x(ss, x);
+  S(0x9219, 3);                             /* C09219 jmp ($0004) */
+  /* the vector is read out of bank 0, low byte, latch, high byte */
+  { const uint8_t lo = ss_bus_r8(ss, 0x000004);
+    ss_check_int(ss);
+    const uint8_t hi = ss_bus_r8(ss, 0x000005);
+    ss_set_pc(ss, pb, (uint16_t) (lo | (hi << 8))); }
+}
+
 static const RecompEntry kParticles[] = {
+  { 0xc09206, "unused_stream_desc_dispatch", unused_stream_desc_dispatch },
   { 0xc09227, "mode0_particle_draw_dispatch", mode0_particle_draw_dispatch },
   { 0xc09233, "particle_dispatch_noop", particle_dispatch_noop },
   { 0xc09246, "particle_table_clear", particle_table_clear },

@@ -9,15 +9,11 @@
  * the instruction fetch taken out, so the C bodies *are* the program. See
  * "Running without the CPUs" in recomp/README.md.
  */
-/* makecontext/swapcontext, the one suspended stack --no-cpu needs */
-#define _XOPEN_SOURCE 700
-
 #include <stdint.h>
 #include <stdbool.h>
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <ucontext.h>
 
 #include "ss_internal.h"
 #include "dma.h"
@@ -384,8 +380,14 @@ int ss_hook_max_depth(const SnesState* ss) { return ss->maxDepth; }
 static void ss_nocpu_suspend(SnesState* ss);
 static bool ss_nocpu_frame_ends_here(SnesState* ss);
 
+void ss_unit_hold(SnesState* ss, bool on) { ss->unitHold = on; }
+
 bool ss_yield_wanted(const SnesState* ss) {
   const Snes* snes = ss->snes;
+  /* --unit holds one routine to its end: there is no boundary to hand it back
+   * at, because nothing samples this machine until the routine is over and no
+   * interrupt is enabled while it runs (harness/ss_internal.h). */
+  if(ss->unitHold) return false;
   bool want;
   if(snes->cpu->intWanted) want = true;
   /* Outside a hook there is no routine to hand back, and no snapshot to compare
@@ -536,64 +538,6 @@ const RecompEntry* recomp_find(uint32_t pc24) {
   return NULL;
 }
 
-/* ---- one stack per body chain ------------------------------------------ */
-struct SsCoro {
-  ucontext_t ctx;       /* the body chain's own stack */
-  ucontext_t back;      /* whoever resumed it */
-  char* stack;
-  size_t stackSize;
-  void (*fn)(void*);
-  void* arg;
-  bool done;
-};
-
-static SsCoro* gCoroStarting;   /* makecontext takes ints, not pointers */
-
-static void ss_coro_trampoline(void) {
-  SsCoro* co = gCoroStarting;
-  co->fn(co->arg);
-  co->done = true;              /* uc_link swaps back to co->back */
-}
-
-SsCoro* ss_coro_new(size_t stackSize) {
-  SsCoro* co = calloc(1, sizeof(*co));
-  if(co == NULL) { fprintf(stderr, "snes_state: out of memory\n"); exit(2); }
-  co->stack = malloc(stackSize);
-  if(co->stack == NULL) { fprintf(stderr, "snes_state: out of memory\n"); exit(2); }
-  co->stackSize = stackSize;
-  co->done = true;
-  return co;
-}
-
-void ss_coro_free(SsCoro* co) {
-  if(co == NULL) return;
-  free(co->stack);
-  free(co);
-}
-
-void ss_coro_start(SsCoro* co, void (*fn)(void*), void* arg) {
-  co->fn = fn;
-  co->arg = arg;
-  co->done = false;
-  if(getcontext(&co->ctx) != 0) { fprintf(stderr, "snes_state: getcontext failed\n"); exit(2); }
-  co->ctx.uc_stack.ss_sp = co->stack;
-  co->ctx.uc_stack.ss_size = co->stackSize;
-  co->ctx.uc_link = &co->back;
-  makecontext(&co->ctx, ss_coro_trampoline, 0);
-  gCoroStarting = co;
-  swapcontext(&co->back, &co->ctx);
-}
-
-void ss_coro_resume(SsCoro* co) {
-  swapcontext(&co->back, &co->ctx);
-}
-
-void ss_coro_yield(SsCoro* co) {
-  swapcontext(&co->ctx, &co->back);
-}
-
-bool ss_coro_done(const SsCoro* co) { return co->done; }
-
 /* ---- the --no-cpu scheduler -------------------------------------------- */
 #define SS_NOCPU_STACK (512u * 1024u)
 
@@ -611,7 +555,7 @@ bool ss_nocpu_enabled(const SnesState* ss) { return ss->nocpu; }
  * nothing but its own stack frames. */
 void ss_nocpu_free(SnesState* ss) {
   for(int i = 0; i < SS_NOCPU_CTX_MAX; i++) {
-    ss_coro_free(ss->ctx[i].co);
+    coro_free(ss->ctx[i].co);
     ss->ctx[i].co = NULL;
   }
   ss->nctx = 0;
@@ -698,7 +642,7 @@ static void ss_nocpu_suspend(SnesState* ss) {
   ctx->sp = c->sp;
   ctx->suspended = true;
   ss->suspensions++;
-  ss_coro_yield(ctx->co);
+  coro_yield(ctx->co);
   ctx->suspended = false;
 }
 
@@ -729,7 +673,7 @@ static SsNoCpuCtx* ss_nocpu_push(SnesState* ss, uint32_t pc24) {
   }
   SsNoCpuCtx* ctx = &ss->ctx[ss->nctx++];
   if(ss->nctx > ss->maxCtx) ss->maxCtx = ss->nctx;
-  if(ctx->co == NULL) ctx->co = ss_coro_new(SS_NOCPU_STACK);
+  if(ctx->co == NULL) ctx->co = coro_new(SS_NOCPU_STACK);
   ctx->ss = ss;
   ctx->startPc = pc24;
   ctx->pc24 = pc24;
@@ -788,14 +732,14 @@ static void ss_nocpu_step(SnesState* ss) {
   SsNoCpuCtx* prev = ss->running;
   if(ctx != NULL) {
     ss->running = ctx;
-    ss_coro_resume(ctx->co);
+    coro_resume(ctx->co);
   } else {
     ctx = ss_nocpu_push(ss, pc24);
     ss->running = ctx;
-    ss_coro_start(ctx->co, ss_nocpu_trampoline, ctx);
+    coro_start(ctx->co, ss_nocpu_trampoline, ctx);
   }
   ss->running = prev;
-  if(ss_coro_done(ctx->co)) {
+  if(coro_done(ctx->co)) {
     /* the chain ran to its end: its stack is free for the next dispatch */
     ss->nctx--;
   }

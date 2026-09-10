@@ -10,7 +10,7 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-check-nocpu recomp-profile app sdl3
+.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-check-units recomp-check-nocpu recomp-profile app sdl3 app-win sdl3-win win-dlls
 
 all: check
 
@@ -41,7 +41,7 @@ build/spc.bin: spc/driver.asm $(HALVES) | build
 # Builds into build/recomp/dream_harness. No SDL, no X, no network.
 harness:
 	cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/recomp -j
+	cmake --build build/recomp -j --target dream_harness
 
 # The game: an SDL3 window, sound and gamepad around the same core and the same
 # recomp routines the harness verifies. Built into build/recomp/dream.
@@ -75,11 +75,74 @@ build/sdl3/lib/cmake/SDL3/SDL3Config.cmake:
 	cmake --build build/sdl3-build -j
 	cmake --install build/sdl3-build
 
+# --- Windows, cross-built here with mingw-w64 --------------------------------
+# The same two executables for Windows x86_64, from this Linux box: there is no
+# Wine here, so they can be built and linked but not run -- .github/workflows/ci.yml
+# runs them on a real Windows runner (dream_harness --test-coro exercises the
+# fiber backend of recomp/harness/coro.h there).
+#
+#   make sdl3-win   SDL3 release-3.2.x for the target, static, into build/sdl3-win
+#   make app-win    dream.exe and dream_harness.exe into build/win/
+#
+# The DLL import check at the end of app-win is the gate on the release zip: the
+# zip carries the executables and nothing else, so every DLL they import has to
+# be one Windows itself provides. -static in the toolchain file is what keeps
+# libgcc and libwinpthread out; a static SDL3 is what keeps SDL3.dll out.
+MINGW_TOOLCHAIN := $(CURDIR)/recomp/cmake/mingw-w64.cmake
+SDL3_WIN_PREFIX := $(CURDIR)/build/sdl3-win
+MINGW_OBJDUMP   := x86_64-w64-mingw32-objdump
+
+app-win: sdl3-win
+	cmake -S recomp -B build/win -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_TOOLCHAIN_FILE=$(MINGW_TOOLCHAIN) \
+	    -DCMAKE_PREFIX_PATH=$(SDL3_WIN_PREFIX)
+	cmake --build build/win -j
+	$(MAKE) win-dlls
+
+# Every DLL the two executables import, and a refusal if one of them is not a
+# Windows system DLL (the release zip ships no DLLs at all).
+win-dlls:
+	@ok=0; \
+	for exe in build/win/dream.exe build/win/dream_harness.exe; do \
+	    test -f $$exe || continue; \
+	    echo "$$exe imports:"; \
+	    $(MINGW_OBJDUMP) -p $$exe | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u | \
+	    while read -r dll; do \
+	        case $$(echo $$dll | tr A-Z a-z) in \
+	          advapi32.dll|gdi32.dll|imm32.dll|kernel32.dll|msvcrt.dll|ole32.dll|\
+	          oleaut32.dll|setupapi.dll|shell32.dll|user32.dll|version.dll|winmm.dll|\
+	          ucrtbase.dll|api-ms-win-*|hid.dll|dwmapi.dll|shcore.dll|ws2_32.dll) \
+	              echo "    $$dll" ;; \
+	          *) echo "    $$dll   <-- NOT a system DLL"; exit 1 ;; \
+	        esac; \
+	    done || ok=1; \
+	done; \
+	if [ $$ok -ne 0 ]; then echo "make: the Windows build imports a non-system DLL"; exit 1; fi
+
+sdl3-win: build/sdl3-win/lib/cmake/SDL3/SDL3Config.cmake
+
+build/sdl3-win/lib/cmake/SDL3/SDL3Config.cmake: $(MINGW_TOOLCHAIN)
+	test -d build/sdl3-src || \
+	    git clone https://github.com/libsdl-org/SDL -b release-3.2.x --depth 1 build/sdl3-src
+	cmake -S build/sdl3-src -B build/sdl3-win-build -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_TOOLCHAIN_FILE=$(MINGW_TOOLCHAIN) \
+	    -DSDL_STATIC=ON -DSDL_SHARED=OFF \
+	    -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF \
+	    -DCMAKE_INSTALL_PREFIX=$(SDL3_WIN_PREFIX)
+	cmake --build build/sdl3-win-build -j
+	cmake --install build/sdl3-win-build
+
 # Recomp gate: build the harness, then run every input script under
 # recomp/harness/inputs/ in lockstep with the C routines installed. Fails if any
 # script mismatches; reports the per-routine hook call counts either way.
 recomp-check: harness
 	python3 tools/recomp_verify.py
+
+# The routine-level gate: the routines no input script can reach, each run from
+# the seeded states in config/recomp_units.txt with the ROM's own code and the C
+# body side by side. See recomp/README.md, "The routine-level gate".
+recomp-check-units: harness
+	python3 tools/recomp_verify.py --units
 
 # The same gate with the candidate machine executing no instructions at all: the
 # C bodies are the program and the registry resolves every pc hand-off. A pc with

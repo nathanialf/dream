@@ -33,6 +33,9 @@ Headless, deterministic, no SDL, no X, no network, no threads.
         ss_internal.h             private glue (struct SnesState)
         sps_internal.h            private glue (struct SpcState)
         hooks.c                   the --hook-table demo/empty tables
+        coro.h                    create/switch/destroy one stack, the --no-cpu
+        coro_ucontext.c           scheduler's one platform split: ucontext on
+        coro_fibers.c             POSIX, Win32 fibers on Windows (CMake picks)
         xxh64.c/.h                XXH64, the per-frame region digest
         compare_coverage.py       trace vs out/codemap.txt
         explore.py                search tool: builds/keeps input scripts that add coverage
@@ -104,10 +107,15 @@ no-op here. This is a harness-side decision; no emulator source is changed for i
                                 an instruction (see below); implies --hooks on
                                 --spc-hooks on, and is the candidate under
                                 --lockstep
+      --test-coro               self-test: the coroutine backend the --no-cpu
+                                scheduler runs bodies on; needs no ROM (see below)
       --test-nesting            self-test: a hook entered inside another hook's
                                 callee keeps its own yield snapshot (see below)
       --test-spc-timing         self-test: sps_op_cycles() against the SPC700
                                 core's own opcode timing (see below)
+      --unit FILE               routine-level lockstep over a seed spec, for the
+                                routines no input script can reach (see below)
+      --unit-only A,B           restrict --unit to these routines, by name
       --quiet                   suppress the per-frame lines
       --help
 
@@ -423,6 +431,132 @@ must see nothing to hand back -- it has only just started -- and the outer hook
 must *still* want to yield afterwards. It exits 0 on pass, 1 on fail, and prints
 one line per check.
 
+### `--test-coro`
+
+The other self-test with no ROM in it, and the only one with no emulator in it
+either: the coroutine backend of `harness/coro.h`, on its own.
+
+    ./build/recomp/dream_harness --test-coro
+
+It checks the four things the `--no-cpu` scheduler asks of a backend: that a body
+suspends and resumes where it stopped with its stack intact (16 KiB of locals
+written before a yield and verified after); that coroutines *nest*, so a coro
+started or resumed from inside another coro's stack comes back to that stack --
+which is what happens every time the SPC700's driver stack is resumed from inside
+a 65816 body catching the APU up; that a body yields across a simulated frame
+boundary and resumes inside the same loop, which is `ss_yield_wanted()`'s shape
+with the machine replaced by a counter; and that a coroutine suspended halfway
+through a body can be torn down, which the scheduler does whenever an interrupt
+abandons one and at every exit. It exits 0 on pass, 1 on fail, one line per check.
+
+It exists because the Windows backend cannot be reached by the gate: the gate
+needs the ROM and no ROM ever enters CI. `--test-coro` runs on any machine, so
+`.github/workflows/ci.yml` runs it on a real Windows runner and the fiber backend
+is exercised there.
+
+## The routine-level gate
+
+    ./build/recomp/dream_harness --unit config/recomp_units.txt
+    python3 tools/recomp_verify.py --units
+
+The frame gate can only credit a routine some input script reaches, and a few
+dozen routines in this port are reachable by nothing at all: the six port
+commands no live 65816 code sends, the sequence opcodes no song or sound-effect
+bank emits, the stale `seq_cmd_table` slots, the one-row OAM emitters (no sprite
+frame in the ROM is short enough to pick them), the animation-rate entries no
+table word points at, the `rti` at the unused vectors, and the five 65816
+routines with no caller anywhere in the ROM. "Never entered" was the honest thing
+to say about them, and it left the `recomp` figure short of the code the port
+actually covers.
+
+`--unit` is the same comparison at the granularity of one routine. For each seed
+line it:
+
+1. boots the ROM under a named input script to a named frame, so WRAM, VRAM,
+   CGRAM, OAM, ARAM, the DSP and the SPC registers hold content the game itself
+   produced rather than zeroes;
+2. loads that state into two fresh machines — the reference, which runs no hooks
+   at all, and the candidate, which runs the whole table on both processors —
+   and checks that the two are byte-identical before anything else happens;
+3. applies the seed's register and memory overrides to both, pushes the return
+   frame the routine expects, and points both at the entry address (in the
+   `$80`/`$81` mirror the ROM itself runs the routine in, so the fetches cost
+   what they cost);
+4. runs the ROM's own code on the reference until control leaves the routine, and
+   the C body on the candidate from the identical state;
+5. compares all seven regions, every register, and both cycle counts.
+
+    unit pass unused_wram_clear_full   seed 1  .../title_start_right.txt@400 rts
+         1685154 master 0 apu, rom ran 81159 instrs, C left 0   ; ...
+    unitok unused_wram_clear_full 4 seeds
+    unit: 170 seeds over 42 routines, 0 failed
+
+Exit status is 0 when every seed passed, 1 when one did not, 2 on a bad spec.
+The instruction counts are the check on the check: "rom ran N instrs" is what the
+reference executed, and "C left M" is what the emulated core still had to execute
+on the candidate — a callee the port has not converted, and nothing else when it
+is zero.
+
+### Knowing when the routine is over
+
+Control has left when the instruction about to run is outside the routine's byte
+range, the instruction *before* it was inside, and no frame the routine pushed is
+still on the stack. All three conditions earn their place. The stack pointer
+alone cannot say, because the pc leaves the range on every call to a routine that
+is not converted yet and comes back. The range alone cannot say either, for the
+same reason. And "the instruction before it was inside" is what keeps a callee
+that deliberately unbalances the stack from looking like the end: the sound
+driver has exactly one, `seq_pop_x`, which pops its own return address, pops the
+slot index its caller pushed and pushes only the return address back — for two
+instructions in the middle of it the stack pointer is *above* where the handler
+started while the pc is nowhere near the handler.
+
+The return frame the harness pushes carries a sentinel address no routine owns,
+so an `rts`, an `rtl`, an `rti` and the SPC700's `ret` all satisfy the one rule
+and no instruction at the sentinel is ever fetched. `ret=` in the seed says which
+frame to push, because the shape of the frame is the routine's own business.
+
+Interrupts are the one thing taken out of the picture. A hook is atomic where the
+routine it replaces is not, so an NMI landing inside the reference's run and
+inside a different instruction of the candidate's would be a difference the
+routine is not responsible for. The boot therefore ends with NMI and both timer
+IRQs off and the pending latch cleared, and with the machine parked just past the
+end of vblank, which leaves a whole active frame — some 300 000 master cycles —
+before the vblank flag or the frame counter can move under the routine. For the
+one routine longer than that (`unused_wram_clear_full`, about five frames) the
+candidate is additionally held to the end of its routine (`ss_unit_hold`,
+`harness/ss_internal.h`), which is the 65816's equivalent of the far-away
+`apu->sliceEnd` the SPC700 half of the same gate sets. Without it a body would
+hand the rest back at the first frame boundary and only its first fifth would be
+compared as C.
+
+### The seed spec
+
+`config/recomp_units.txt` is the data, one line per seed:
+
+    name  script  frame  key=value ...  ; note
+
+`end=` and `ret=` are required; the rest override registers (`a= x= y= p= db=
+dp= sp=`, or `a= x= y= psw= sp=` on the SPC700), memory (`ram:ADDR=`,
+`aram:ADDR=`, one byte or a little-endian word), the APU ports (`port:N=`) and
+the DSP (`dsp:RR=`, `dspadr=`). `stack=HH..` pushes extra bytes on top of the
+return frame, for the two callers in this ROM that leave something there: the
+animation-rate handlers' caller leaves one `$80` byte for the tail's `plb`, and
+`seq_fetch` pushes the slot index before it dispatches a sequence-opcode handler.
+Anything a line does not name keeps the value the booted machine had. The file's
+own header documents every key.
+
+Every routine carries at least four seeds, including the edge values its own
+bounds allow — slot 0 and the last slot the entity or channel arrays hold, a zero
+and an all-ones operand, both sides of every branch the routine tests. A routine
+counts only when all of its seeds pass.
+
+`tools/recomp_verify.py --units` runs the whole spec and reports it per routine;
+`--update` runs both gates and writes `config/recomp.txt` with a `; unit` suffix
+on every routine credited this way, so the file says which routines were proved
+against a seeded state rather than a played frame. `tools/progress.py` reads the
+label before the semicolon and credits both the same.
+
 ## Running without the CPUs
 
     ./build/recomp/dream_harness --no-cpu --lockstep --quiet \
@@ -487,9 +621,14 @@ to finish the routine from the address it stopped at -- and that address is in
 the middle of a routine, which the registry does not name. With no ROM there is
 nothing to finish it.
 
-So a dispatched body chain runs on a stack of its own (`SsCoro`,
-`makecontext`/`swapcontext`), and a yield *suspends* that stack instead of
-unwinding it. The scheduler gets control back at exactly the instruction
+So a dispatched body chain runs on a stack of its own (`Coro`,
+`harness/coro.h`) and a yield *suspends* that stack instead of unwinding it.
+That header is the port's one platform split: create, switch and destroy with an
+explicit stack size, over `getcontext`/`makecontext`/`swapcontext` on POSIX
+(`harness/coro_ucontext.c`) and `ConvertThreadToFiber`/`CreateFiber`/
+`SwitchToFiber`/`DeleteFiber` on Windows (`harness/coro_fibers.c`), chosen by
+CMake per platform and by nothing else. `--test-coro` exercises whichever one was
+built, with no ROM (below). The scheduler gets control back at exactly the instruction
 boundary the reference CPU stops on; resuming continues the body from inside
 `ss_yield_wanted()`, which then answers false. One suspended context is the
 whole of the "resume at an interior address" problem, and it needs no change to
@@ -761,8 +900,8 @@ It exits 0 on pass, 1 on fail.
 
 ### The SPC700 driver in C
 
-`recomp/spc/` holds the whole driver, 82 routines, every one modelling its own
-instruction stream:
+`recomp/spc/` holds the whole driver, every routine modelling its own instruction
+stream (95 registered entry addresses, counting the interior ones below):
 
 * `loader.c` — `spc_loader`, `loader_reset_dsp`, `loader_block_loop`, `loader_jump`:
   the IPL-uploaded block at `$04D8` and the handshake the 65816's `upload_spc_block`
@@ -785,12 +924,15 @@ Every route between routines goes through the registry (pc hand-off or a real pu
 frame plus `sps_run_callee`), never a direct C call, so each routine is entered at its
 own address and credited by the gate.
 
-57 of the 82 are entered by the gate's scripts; every script ends `+0 master cycles
-and +0 APU cycles` from the reference. The 25 never entered fall into three groups:
-the command handlers no live 65816 code sends (only `spc_command` sends `$FF`/`$FE` and
-`sfx_command_dispatch` sends sound-effect ids; the dead `orphan_C183F1` would send
-`$F9`), the sequence opcodes none of the three songs or the sound-effect banks use
+66 of the 95 registered entry addresses are entered by the gate's scripts; every
+script ends `+0 master cycles and +0 APU cycles` from the reference. The 29 never
+entered fall into three groups: the command handlers no live 65816 code sends (only
+`spc_command` sends `$FF`/`$FE` and `sfx_command_dispatch` sends sound-effect ids;
+the dead `unused_spc_set_e7_and_play` would send `$F9` and its stale sibling `$FB`),
+the sequence opcodes none of the three songs or the sound-effect banks use
 (`seq_instr_full`, `seq_volume_preset`, `seq_master_percent`, `seq_volume_presets`,
 `seq_set_length`, `seq_clear_length`, `seq_tempo_add`, `seq_vibrato`, `seq_set_note_E0`,
 `seq_set_note_E1`, `seq_transpose_add`, the noise trio), and the four stale table
-slots. They are converted for completeness and listed as unverified.
+slots. Every one of them is credited by the routine-level gate above instead:
+`config/recomp_units.txt` carries four seeds each, and `config/recomp.txt` marks
+them `; unit`.

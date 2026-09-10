@@ -478,7 +478,7 @@ void entity_update_tick(SnesState* ss) {
     S(0x9948, 3);                           /* C09948 jsr entity_ground_y_lookup */
     if(t_call_sub(ss, pb, 0x9BDA)) return;
     a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
-    S(0x994B, 3);                           /* C0994B jsr sub_C0A1F3 */
+    S(0x994B, 3);                           /* C0994B jsr entity_vel_y_from_vel_x */
     if(t_call_sub(ss, pb, 0xA1F3)) return;
     a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
     S(0x994E, 3);                           /* C0994E jsr entity_apply_velocity_x */

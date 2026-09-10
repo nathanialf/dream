@@ -63,6 +63,13 @@ static void anim_rate_store_body(SnesState* ss, uint16_t a) {
    * would be: the frame that was pushed is the real one, and its rtl lands on
    * the rts below whether the hook is still here or not. */
   if(ss_run_callee(ss, sp0)) return;
+  /* anim_update leaves its own A, X and Y behind; the step below publishes the
+   * registers this body is holding in locals, so they have to be the callee's
+   * and not the ones from before the jsl. Without this the rts put the
+   * pre-call accumulator back -- invisible to the frame gate, because the
+   * caller reloads before it reads A again, and caught by the unit gate, which
+   * compares the registers the routine itself left. */
+  a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
   S(0x99DC, 1);                             /* C099DC rts */
   ss_rts(ss);

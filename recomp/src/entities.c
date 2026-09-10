@@ -12,6 +12,20 @@
 #include "dream_alu.h"
 #include "dream_time.h"
 
+/* The three columns unused_entity_apply_velocity_z moves. $08E8 is the third position column
+ * recomp/src/entities_ai.c names entity_z_dead; $0908 and $0928 are its
+ * sub-pixel accumulator and velocity, at the same +$20 spacing the x and y
+ * triples use. Guarded because dream_ram.h gains names as subsystems land. */
+#ifndef entity_z_dead
+#define entity_z_dead        0x08E8
+#endif
+#ifndef entity_z_sub_dead
+#define entity_z_sub_dead    0x0908
+#endif
+#ifndef entity_vel_z_dead
+#define entity_vel_z_dead    0x0928
+#endif
+
 /* ---------------------------------------------------------------------------
  * entity_apply_hit_reaction — $C0:9A61, shared body at loc_C09A66
  *
@@ -295,7 +309,7 @@ void entity_ground_y_lookup(SnesState* ss) {
 }
 
 /* ---------------------------------------------------------------------------
- * sub_C0A1F3 — $C0:A1F3
+ * entity_vel_y_from_vel_x — $C0:A1F3
  *
  * Derives a vertical velocity from the horizontal one: negate entity_vel_x,
  * arithmetic-shift it right twice, then flip the sign again unless the ground
@@ -306,7 +320,7 @@ void entity_ground_y_lookup(SnesState* ss) {
  * from the sign bit and the rotate shifts that copy back in.
  * Entry: X = entity index. Exit: entity_vel_y,X written.
  * ------------------------------------------------------------------------- */
-void sub_C0A1F3(SnesState* ss) {
+void entity_vel_y_from_vel_x(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
 
@@ -494,14 +508,34 @@ void entity_apply_velocity_y(SnesState* ss) {
   entity_apply_velocity(ss, 0xA2B9, entity_vel_y, entity_y_sub, entity_y);
 }
 
+/* ---------------------------------------------------------------------------
+ * unused_entity_apply_velocity_z — $C0:A294
+ *
+ * A third copy of the same thirty-seven bytes, sitting between the x and y
+ * copies, on the column triple $08E8 / $0908 / $0928. $08E8 is entity_z_dead
+ * (recomp/src/entities_ai.c), the third position column entity_init_from_table
+ * and the spawn transforms still copy but nothing moves; $0908 and $0928 are
+ * its sub-pixel accumulator and velocity by the same +$20 spacing the x and y
+ * columns use, and no other routine in the ROM touches either.
+ *
+ * Nothing calls it: no jsr, jsl or table word anywhere in out/dream.asm names
+ * the address, and config/recomp_order.txt marks it cold. No input script can
+ * reach it, so it is credited by the unit gate instead
+ * (config/recomp_units.txt, `dream_harness --unit`).
+ * ------------------------------------------------------------------------- */
+void unused_entity_apply_velocity_z(SnesState* ss) {
+  entity_apply_velocity(ss, 0xA294, entity_vel_z_dead, entity_z_sub_dead, entity_z_dead);
+}
+
 static const RecompEntry kEntities[] = {
   { 0xc08e8e, "check_pending_player_attack", check_pending_player_attack },
   { 0xc09a5f, "entity_ai_none", entity_ai_none },
   { 0xc09a61, "entity_apply_hit_reaction", entity_apply_hit_reaction },
   { 0xc09bda, "entity_ground_y_lookup", entity_ground_y_lookup },
-  { 0xc0a1f3, "sub_C0A1F3", sub_C0A1F3 },
+  { 0xc0a1f3, "entity_vel_y_from_vel_x", entity_vel_y_from_vel_x },
   { 0xc0a232, "entity_accelerate_velocity_x", entity_accelerate_velocity_x },
   { 0xc0a26f, "entity_apply_velocity_x", entity_apply_velocity_x },
+  { 0xc0a294, "unused_entity_apply_velocity_z", unused_entity_apply_velocity_z },
   { 0xc0a2b9, "entity_apply_velocity_y", entity_apply_velocity_y },
 };
 RECOMP_REGISTER(kEntities)

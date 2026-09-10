@@ -242,6 +242,16 @@ const RecompEntry* recomp_registry(unsigned* count);
  * first, so one entry catches the routine however the ROM reached it. */
 const RecompEntry* recomp_find(uint32_t pc24);
 
+/* The registry is filled in by a file-scope constructor per file, which needs
+ * __attribute__((constructor)): GCC, clang and MinGW have it, MSVC does not.
+ * MinGW is therefore the supported Windows compiler (recomp/cmake/mingw-w64.cmake,
+ * recomp/app/README.md). MSVC would need the .CRT$XCU section trick instead;
+ * until someone writes it, say so here rather than link an empty registry and
+ * report every routine as missing. */
+#if defined(_MSC_VER) && !defined(__clang__)
+#error "MSVC has no __attribute__((constructor)): build the Windows port with MinGW (recomp/cmake/mingw-w64.cmake) or add the .CRT$XCU trick to RECOMP_REGISTER."
+#endif
+
 /* Boilerplate for a file's static table:
  *     static const RecompEntry kEntries[] = { { 0xc0a500, "clear_sprite_table", clear_sprite_table } };
  *     RECOMP_REGISTER(kEntries)

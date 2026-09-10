@@ -12,6 +12,7 @@
 #ifndef DREAM_SPS_INTERNAL_H
 #define DREAM_SPS_INTERNAL_H
 
+#include "coro.h"
 #include "spc_state.h"
 #include "apu.h"
 #include "spc.h"
@@ -32,8 +33,6 @@
  * console's firmware rather than the ROM's program: it receives the loader
  * block at power-on and is never entered again. --no-cpu lets those
  * instructions execute and counts them separately. */
-struct SsCoro;
-
 struct SpcState {
   Apu* apu;
   Spc* spc;
@@ -41,7 +40,7 @@ struct SpcState {
   int maxDepth;         /* high-water mark, for the run report */
   /* --no-cpu */
   bool nocpu;
-  struct SsCoro* co;         /* the driver's stack */
+  Coro* co;                  /* the driver's stack (harness/coro.h) */
   bool running;              /* a body chain is executing on it */
   bool suspended;            /* it stopped at a slice boundary */
   uint16_t suspendPc;        /* where */

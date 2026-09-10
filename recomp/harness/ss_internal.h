@@ -3,6 +3,7 @@
 #ifndef DREAM_SS_INTERNAL_H
 #define DREAM_SS_INTERNAL_H
 
+#include "coro.h"
 #include "snes_state.h"
 #include "snes.h"
 #include "cpu.h"
@@ -46,8 +47,9 @@ typedef struct {
  * ss_yield_wanted() says the machine has moved on underneath it, leaving the
  * ROM to finish the routine. With no ROM there is nothing to finish it, and the
  * address it stopped at is in the middle of a routine, which the registry does
- * not name. So a dispatched body chain runs on a stack of its own (SsCoro), and
- * a yield suspends that stack instead of unwinding it: the scheduler regains
+ * not name. So a dispatched body chain runs on a stack of its own (Coro), and
+ * a yield suspends that stack instead of unwinding it (harness/coro.h, whose
+ * backend is ucontext on POSIX and Win32 fibers on Windows): the scheduler regains
  * control at exactly the instruction boundary the reference CPU stops on, and
  * resuming continues the body from inside ss_yield_wanted(), which then answers
  * false. One suspended context is the whole of the "resume at an interior
@@ -57,19 +59,11 @@ typedef struct {
  * longer return to it (an rti would land on its pc with its stack pointer);
  * this game's NMI handler resets S and parks instead, so the context is
  * reclaimed two instructions into the handler. */
-typedef struct SsCoro SsCoro;
-
-SsCoro* ss_coro_new(size_t stackSize);
-void    ss_coro_free(SsCoro* co);
-void    ss_coro_start(SsCoro* co, void (*fn)(void*), void* arg);
-void    ss_coro_resume(SsCoro* co);
-void    ss_coro_yield(SsCoro* co);
-bool    ss_coro_done(const SsCoro* co);
 
 #define SS_NOCPU_CTX_MAX 8      /* body chains alive at once: running + displaced */
 
 typedef struct SsNoCpuCtx {
-  SsCoro* co;
+  Coro* co;
   struct SnesState* ss;
   uint32_t startPc;     /* the body this context was started to run */
   uint32_t pc24;        /* where it suspended */
@@ -96,6 +90,8 @@ struct SnesState {
   uint64_t suspensions;      /* yields that suspended a body chain */
   uint64_t abandoned;        /* suspensions an interrupt threw away */
   int maxCtx;                /* high-water mark of nctx */
+  /* --unit: hold the routine, see ss_unit_hold() below */
+  bool unitHold;
 };
 
 /* Called by the dispatcher around a hook body: push a snapshot of the machine on
@@ -107,6 +103,19 @@ int  ss_hook_depth(const SnesState* ss);
 int  ss_hook_max_depth(const SnesState* ss);
 
 void ss_nocpu_free(SnesState* ss);
+
+/* --unit: run one routine to its end rather than offering it back.
+ *
+ * The frame-level yield exists so that a hook is not atomic across a boundary
+ * the reference CPU stops at. A --unit run has no such boundary: nothing
+ * samples the machine until the routine is over, NMI and both timer IRQs are
+ * off for the duration, and the reference runs the ROM's own code straight
+ * through. With the hold on, ss_yield_wanted() answers false, so a body long
+ * enough to outlast a frame (unused_wram_clear_full is about five) is compared
+ * against the ROM over the whole routine instead of only its first frame. It is
+ * the 65816's equivalent of the far-away apu->sliceEnd the SPC700 side of the
+ * same gate sets, and it is set on the candidate machine only. */
+void ss_unit_hold(SnesState* ss, bool on);
 
 /* --no-cpu run report */
 uint64_t ss_nocpu_dispatches(const SnesState* ss);

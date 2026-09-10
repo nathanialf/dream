@@ -1,0 +1,134 @@
+name: ci
+
+# Four gates. None of them ever sees a ROM, and none of them can: no game data is
+# committed (docs/LEGAL.md), nothing here downloads one, and the only self-test the
+# platform jobs run is the one that needs no ROM at all.
+#
+#   no-rom-gate  is any ROM-derived file tracked (tools/check_no_rom.sh)
+#   linux        do dream_harness and dream build on ubuntu, and does the
+#                coroutine backend pass its self-test
+#   windows      the same on windows-latest under MSYS2/UCRT64, which is where
+#                `dream_harness --test-coro` exercises the *fiber* backend of
+#                recomp/harness/coro.h -- the half of the port that cannot be
+#                run on the Linux box it is written on
+#   macos        the same on macos-latest, where the ucontext backend is the
+#                deprecated-but-present BSD one rather than glibc's
+#
+# The harness's other two self-tests are not here: --test-nesting builds a machine
+# from the ROM image and --test-spc-timing executes SPC700 opcodes on one, so both
+# exit 2 without baserom/DREAM.sfc. They are part of the local gate
+# (`make harness && python3 tools/recomp_verify.py`), which needs your own ROM and
+# therefore cannot run in CI. --test-coro was written to be the part that can.
+#
+# SDL3 is fetched and built by cmake itself (-DDREAM_FETCH_SDL3=ON, pinned to a
+# release tag in recomp/CMakeLists.txt), so no job needs an SDL step of its own.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Force JS actions onto Node.js 24 — Node 20 is deprecated on the runners.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  no-rom-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: no ROM-derived file is committed
+        run: sh tools/check_no_rom.sh
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: SDL3's build dependencies
+        # SDL refuses to configure on Linux with neither X11 nor Wayland headers,
+        # and rightly: a `dream` that cannot open a window is not the app.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev
+
+      - name: configure and build
+        run: |
+          cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release -DDREAM_FETCH_SDL3=ON
+          cmake --build build/recomp -j4
+
+      - name: both executables were built
+        run: test -x build/recomp/dream_harness && test -x build/recomp/dream
+
+      - name: 'self-test: the coroutine backend (no ROM)'
+        run: ./build/recomp/dream_harness --test-coro
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: msys2/setup-msys2@v2
+        # MinGW is the supported Windows compiler for this port: every recomp/src
+        # file registers its routines from a file-scope constructor
+        # (RECOMP_REGISTER, recomp/include/snes_state.h), which needs
+        # __attribute__((constructor)) -- GCC, clang and MinGW have it, MSVC does
+        # not, and the header says so in an #error rather than linking an empty
+        # registry.
+        with:
+          msystem: UCRT64
+          update: true
+          pacboy: >-
+            toolchain:p
+            cmake:p
+            ninja:p
+
+      - name: configure and build
+        shell: msys2 {0}
+        # -static so the executables carry no libgcc or libwinpthread DLL, which
+        # is what makes the release zip self-contained (recomp/cmake/mingw-w64.cmake
+        # does the same for the cross build).
+        run: |
+          cmake -S recomp -B build/recomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DDREAM_FETCH_SDL3=ON -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build build/recomp -j4
+
+      - name: 'self-test: the coroutine backend, on the fiber backend (no ROM)'
+        shell: msys2 {0}
+        run: ./build/recomp/dream_harness.exe --test-coro
+
+      - name: the executables import only system DLLs
+        shell: msys2 {0}
+        run: |
+          set -e
+          for exe in build/recomp/dream_harness.exe build/recomp/dream.exe; do
+            echo "$exe:"
+            objdump -p "$exe" | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u | sed 's/^/    /'
+            if objdump -p "$exe" | grep -Eiq 'DLL Name: *(lib|SDL3\.dll)'; then
+              echo "$exe imports a non-system DLL; the release zip ships executables only"
+              exit 1
+            fi
+          done
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: configure and build
+        run: |
+          cmake -S recomp -B build/recomp -DCMAKE_BUILD_TYPE=Release -DDREAM_FETCH_SDL3=ON
+          cmake --build build/recomp -j4
+
+      - name: both executables were built
+        run: test -x build/recomp/dream_harness && test -x build/recomp/dream
+
+      - name: 'self-test: the coroutine backend (no ROM)'
+        run: ./build/recomp/dream_harness --test-coro

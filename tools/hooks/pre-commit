@@ -3,8 +3,10 @@
 #   1. tools/check_no_rom.sh   — IP-safety scan of tracked files
 #   2. make check              — byte-identical round trip (ROM SHA-1 + SPC700 driver),
 #                                only when staged changes can affect the build
-#   3. make recomp-check       — the C port's lockstep gate against the ROM,
-#                                only when staged changes touch recomp/ or config/recomp*
+#   3. make recomp-check       — the C port's lockstep gate against the ROM, and
+#      make recomp-check-units   the routine-level one for the routines no input
+#                                script can reach; only when staged changes touch
+#                                recomp/ or config/recomp*
 #   4. tools/progress.py       — refresh README badges, docs/PROGRESS.md, docs/progress.json,
 #                                and stage them into this commit
 # Bypass with --no-verify only for commits that cannot touch the build; the pre-push
@@ -41,6 +43,14 @@ if [[ -n "$RECOMP_TOUCHED" ]]; then
     echo "pre-commit: make recomp-check (lockstep gate) ..."
     if ! make -s recomp-check; then
         echo "pre-commit: RECOMP CHECK FAILED — a converted routine no longer matches the ROM." >&2
+        exit 1
+    fi
+    # The other half of the same gate: the routines no script reaches, run from
+    # the seeded states in config/recomp_units.txt. Seconds, not minutes.
+    echo "pre-commit: make recomp-check-units (routine-level gate) ..."
+    if ! make -s recomp-check-units; then
+        echo "pre-commit: UNIT CHECK FAILED — a routine credited by config/recomp_units.txt" >&2
+        echo "            no longer matches the ROM from its seeded state." >&2
         exit 1
     fi
 fi

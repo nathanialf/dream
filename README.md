@@ -52,6 +52,19 @@ make                                  # extract -> assemble -> verify (ROM and S
 once: the pre-commit hook runs `tools/check_no_rom.sh`, the byte-identical gate, and
 `tools/progress.py` (which rewrites `docs/PROGRESS.md` and `docs/progress.json`); the pre-push hook re-runs the gate on the pushed tip.
 
+### Playing it
+
+The port is not the disassembly: `dream` is a native build of the game that reads
+your own ROM. Builds for Linux, Windows and macOS are attached to each tagged
+[release](https://github.com/nathanialf/dream/releases) — a zip holding the
+executable, this README and the LICENSE, and no game data of any kind. Unpack it,
+put your own `DREAM.sfc` next to the executable (on Windows also `%APPDATA%\dream\`;
+on Linux and macOS `./baserom/` or `~/.local/share/dream/`) and run it. Windows
+needs nothing installed alongside: `dream.exe` imports only Windows' own DLLs.
+[`recomp/app/README.md`](recomp/app/README.md) has the controls, the gallery, and
+the Windows section in full; building it yourself is `make app`, or `make app-win`
+to cross-build the Windows executables from Linux with mingw-w64.
+
 ## Workflow
 
 `src/` and `spc/driver.asm` are generated:

@@ -250,6 +250,9 @@ typedef struct SpcRecompEntry {
 void recomp_spc_register(uint16_t entry_addr, const char* name, SpcRecompFn fn);
 const SpcRecompEntry* recomp_spc_registry(unsigned* count);
 
+/* Registered from a file-scope constructor, exactly as the 65816 side is; the
+ * note there (recomp/include/snes_state.h) on MSVC and MinGW applies here too. */
+
 /* Boilerplate for a file's static table:
  *     static const SpcRecompEntry kEntries[] = { { 0x103e, "dsp_init", dsp_init } };
  *     RECOMP_SPC_REGISTER(kEntries)
