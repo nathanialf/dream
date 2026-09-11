@@ -20,6 +20,9 @@
 #include <stdlib.h>
 #include <ucontext.h>
 #include <sys/mman.h>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON   /* macOS and the BSDs spell it this way */
+#endif
 #include <unistd.h>
 
 #include "coro.h"
