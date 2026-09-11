@@ -319,6 +319,10 @@ bool menubar_event(Menubar* mb, SDL_Renderer* renderer, SDL_Event* ev,
     case SDL_EVENT_KEY_DOWN: {
       SDL_Keycode k = ev->key.key;
       if(k == SDLK_F10 || k == SDLK_LALT || k == SDLK_RALT) {
+        /* Held down, Alt and F10 auto-repeat, and a toggle on every repeat opened
+         * and closed the bar many times a second. One press is one toggle; the
+         * arrow keys below keep their repeat, which is what walking a menu wants. */
+        if(ev->key.repeat) return mb->open >= 0 || mb->focused;
         if(mb->open >= 0 || mb->focused) menubar_close(mb);
         else { mb->focused = true; mb->open = 0; mb->hoverItem = -1; step_item(mb, +1); }
         return true;
@@ -336,6 +340,13 @@ bool menubar_event(Menubar* mb, SDL_Renderer* renderer, SDL_Event* ev,
         default:          return true;   /* the bar has the keyboard while it is open */
       }
     }
+    /* Losing focus with the bar focused leaves nothing that can hand the keyboard
+     * back: the key-up for Alt goes to whatever took focus, and the game would sit
+     * on state = 0 until the player found Escape. The bar gives up the keyboard
+     * with the window. */
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+      if(mb->open >= 0 || mb->focused) { menubar_close(mb); return true; }
+      return false;
     default:
       return false;
   }

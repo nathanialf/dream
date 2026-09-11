@@ -58,7 +58,7 @@ Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
 
 - VRAM as each scene's init leaves it, with the palette row its maps give each tile, and
   each scene's 32x32 metatiles drawn once apiece;
-- the 114 alternate-format sprite-frame rows (113 frames plus the truncated tail) and
+- the 120 alternate-format sprite-frame rows and
   the 1555 live frames, with their palettes;
 - the unreferenced font and the three picture strips in bank `$C1`;
 - the previous build's tileset, palette block and animation-script table in the first 32 KB;

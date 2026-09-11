@@ -37,7 +37,6 @@
 #define SFX_BANK1_OFF    0x022E5Cu   /* {dest $2410, words, data}: count, 21 pointers, ... */
 #define SFX_BANK2_OFF    0x023070u   /* {dest $2E94, words, data}: the per-song bank 2 */
 #define SFX_BANK2_ID     0x60        /* sfx_start: id >= $60 indexes bank 2 */
-#define STRIP_TILE_BASE  0x44        /* the strips' tilemaps index VRAM from tile $44 */
 
 /* The picture strips of bank $C1: {tilemap, tileset}, in manifest order. */
 static const struct { uint32_t map; uint32_t tiles; } kStrips[3] = {
@@ -416,6 +415,7 @@ static int* collect(unsigned kindMask, int* countOut, bool skipBankC1) {
     n++;
   }
   int* out = calloc((size_t) (n > 0 ? n : 1), sizeof(int));
+  if(out == NULL) { *countOut = 0; return NULL; }   /* gallery_create refuses on NULL */
   int k = 0;
   for(unsigned i = 0; i < kGalleryAssetCount; i++) {
     if(!((kindMask >> kGalleryAssets[i].kind) & 1u)) continue;
@@ -575,7 +575,7 @@ static void walk_script(Gallery* g, int aid, uint8_t* seen, int mode, int pal, i
   uint32_t o = GX_BANK_C4 + p;
   for(int i = 0; i < 1024; i++) {
     uint32_t q = o + (uint32_t) (8 * i);
-    if(q + 6u > limit) break;
+    if(q + 8u > limit) break;      /* the whole 8-byte record, not its first six */
     uint16_t dur = rd16(g, q + 4u), fr = rd16(g, q + 6u);
     if(dur == 0xFFFE) break;
     if(dur == 0xFFFF) {
@@ -994,9 +994,13 @@ static int brr_pred(int filt, int p1, int p2) {
   }
 }
 
+/* The shift goes through unsigned: s is a signed 4-bit nibble, and C11 6.5.7p4
+ * leaves a left shift of a negative value undefined where Python, which
+ * tools/assetcodec.py defines this decode in, does not. Every value here fits in
+ * 16 bits, so the round trip through unsigned is the same number. */
 static int brr_step(int nib, int shift) {
   int s = nib >= 8 ? nib - 16 : nib;
-  if(shift <= 12) return (s << shift) >> 1;
+  if(shift <= 12) return (int) ((unsigned) s << shift) >> 1;
   return s < 0 ? -2048 : 0;
 }
 
@@ -1013,6 +1017,9 @@ static int brr_decode(Gallery* g, int assetIdx) {
   g->pcm = calloc((size_t) (nblocks > 0 ? nblocks : 1) * 16u, sizeof(int16_t));
   g->pcmCount = 0;
   g->pcmAsset = assetIdx;
+  /* No memory is not a reason to stop the app: the page draws an empty waveform
+   * and plays nothing, which is what a zero block count already means here. */
+  if(g->pcm == NULL) return 0;
 
   int p1 = 0, p2 = 0;
   for(int b = 0; b < nblocks; b++) {
@@ -2135,6 +2142,14 @@ static void draw_bg_raw(Gallery* g, uint32_t* fb) {
     animNote = pal_animated_note(ot->mode, 0x80 + 16 * ot->pal, 16);
   } else {
     pal_override(g, sel - nauto, rgb, palLine, sizeof(palLine));
+    /* The picker fills one 16-colour row. An 8bpp page indexes the whole block
+     * and its strip reads 32 entries, so the row is repeated across all sixteen
+     * rather than left as whatever the last call to this function put on the
+     * stack. Sixteen colours are all the picker has; repeating them says so,
+     * where uninitialised memory would say something different every frame. */
+    if(bpp == 8)
+      for(int r = 1; r < 16; r++)
+        for(int i = 0; i < 16; i++) rgb[r * 16 + i] = rgb[i];
     snprintf(srcLine, sizeof(srcLine), "%s",
              nauto ? "not the palette the game uses"
                    : "no scene uploads it: no CGRAM");
@@ -3231,7 +3246,9 @@ Gallery* gallery_create(const uint8_t* rom, size_t romLen) {
   g->stale = collect(1u << GK_STALE, &g->staleCount, false);
   g->song = collect(1u << GK_SONG, &g->songCount, false);
   g->framePal = calloc((size_t) kGalleryAssetCount, sizeof(FramePal));
-  if(g->canvas == NULL || g->claimed == NULL || g->framePal == NULL) {
+  if(g->canvas == NULL || g->claimed == NULL || g->framePal == NULL ||
+     g->live == NULL || g->alt == NULL || g->bg == NULL ||
+     g->brr == NULL || g->stale == NULL || g->song == NULL) {
     gallery_destroy(g);
     return NULL;
   }

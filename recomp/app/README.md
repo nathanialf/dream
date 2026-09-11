@@ -128,10 +128,18 @@ Every run writes a log beside the executable: `dream.log` in the directory
 `dream.exe` is in on Windows, in the working directory everywhere else. It is
 opened before anything else in `main()`, one timestamped line a stage, flushed
 to disk (and `FlushFileBuffers`'d on Windows) as each line is written, because
-the line that matters is always the last one before the fault:
+the line that matters is always the last one before the fault.
 
-    2026-09-10 19:47:19.448    +0.000  dream: log opened at dream.log
-    2026-09-10 19:47:19.448    +0.000  crash handlers installed (signals)
+Runs **append**, under a `---- dream: new run ----` separator naming the process.
+The situation the file exists for is a crash the player then relaunches to look
+at, and a log opened for truncation would have thrown that crash away on the
+launch made to read it; the separator and the process id are also what keep two
+instances started in one directory readable as two runs. Past 4 MiB a run starts
+the file again from empty, so it stays bounded without anyone clearing it.
+
+    ---- dream: new run ----
+    2026-09-10 19:47:19.448    +0.000  dream: log opened at dream.log (process 4711, appending)
+    2026-09-10 19:47:19.448    +0.000  crash handlers installed (signals, SIGSEGV on an alternate stack)
     2026-09-10 19:47:19.448    +0.000  argv: 5 argument(s)
     ...
     2026-09-10 19:47:19.468    +0.020  rom: sha1 2675d7... (expected 2675d7...): match
@@ -155,7 +163,11 @@ fiber (so a fault on a coroutine stack says so), the last stage logged, and a
 stack walk if `RtlCaptureStackBackTrace` is there: addresses only, since
 `dbghelp.dll` is not among the DLLs this executable is allowed to import. Then it
 flushes, closes the log and leaves with exit code **86**. `SIGSEGV`, `SIGABRT`,
-`SIGILL` and `SIGFPE` are caught on every platform and leave with **87**.
+`SIGILL` and `SIGFPE` are caught on every platform (and `SIGBUS` where there is
+one) and leave with **87**. On POSIX those go in through `sigaction` with
+`SA_ONSTACK` against a 64 KiB alternate stack, because the fault this file most
+needs to report is a body-chain stack overflow and that is exactly the fault a
+handler running on the overflowed stack cannot write down.
 `SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX)` is set as well, so
 a crash under a script or a shortcut falls over and is gone instead of waiting on
 a dialog nobody is looking at.
@@ -183,13 +195,16 @@ built (nesting, a yield across a frame boundary, tearing down a suspended
 coroutine) and needs no ROM, which is how the fiber backend is checked on a real
 Windows runner in CI while the ROM stays out of it.
 
-One case that test does *not* cover is `coro_start` on a coroutine that is
-suspended rather than finished, which is what the scheduler does when it reuses
-the slot of a body chain the NMI handler displaced (`ss_nocpu_reap`). `makecontext`
-gives the POSIX backend a fresh stack every start and so cannot get it wrong;
-`SwitchToFiber` has no such step, so `coro_fibers.c` deletes a parked fiber and
-makes a new one at `coro_start` and only reuses a finished one. A test for it
-belongs in `--test-coro`.
+The case worth naming is `coro_start` on a coroutine that is suspended rather
+than finished, which is what the scheduler does when it reuses the slot of a body
+chain the NMI handler displaced (`ss_nocpu_reap`). `makecontext` gives the POSIX
+backend a fresh stack every start and so cannot get it wrong; `SwitchToFiber` has
+no such step, so `coro_fibers.c` deletes a parked fiber and makes a new one at
+`coro_start` and only reuses a finished one. `--test-coro` covers it on both
+backends, and says so in four of its lines: `the old body ran up to its yield and
+parked there`, `coro_start on a parked coroutine ran the new fn from its start`,
+`the abandoned body's post-yield marker never appeared`, and `a restart from
+inside another coro's stack discards the old body`.
 
 ## Controls
 
@@ -216,8 +231,12 @@ screenshot (see "Screenshots" below).
 
 The menu bar takes the mouse (click a title, click an item) and, as a fallback, the
 keyboard: `Alt` or `F10` focuses it, left/right move between menus, up/down between
-items, `Enter` picks one and `Escape` closes it. While the bar has the keyboard the
-game does not see it, so a menu cannot be walked and played at the same time.
+items, `Enter` picks one and `Escape` closes it. `Alt` and `F10` toggle on the press
+and ignore the auto-repeat, so holding one does not flip the bar open and shut.
+While the bar has the keyboard the machine is handed no input at all, from either
+player's pad or the keyboard, so a menu cannot be walked and played at the same
+time; losing the window's focus gives the keyboard back rather than leaving the
+game held at nothing.
 
 | Menu | Items |
 |------|-------|
@@ -411,7 +430,7 @@ as `A`. Every page prints its own line of controls along the bottom.
   below. **B** switches to the file layout, which is the old reconstruction. **Y** walks
   the four flip combinations, which are four copies of the emit loop in the ROM and so
   four pictures the game itself can draw.
-- **Sprite frames (alternate)**: the 114 frames the manifest lists in the second format
+- **Sprite frames (alternate)**: the 120 frames the manifest lists in the second format
   nothing in the ROM reads. The layout is no longer a guess. The eight header bytes
   decode, and they account for each frame's byte length exactly:
 
@@ -428,13 +447,13 @@ as `A`. Every page prints its own line of controls along the bottom.
   16x16 sprites and `n2 + n3` 8x8 ones needs. A 16x16 sprite is four tiles in the PPU's
   own name-table arrangement (`t`, `t+1`, `t+16`, `t+17` across a sixteen-tile VRAM row),
   and the tile `hdr[2]` names is exactly the next free slot after `n1` of those, in all
-  114. Records are `{x, y}` or `{x, y, attr}`, unsigned, top left, no bias, in file
+  120. Records are `{x, y}` or `{x, y, attr}`, unsigned, top left, no bias, in file
   order. There is no spill: every tile the header declares is used by exactly one sprite
   and none is left over, where the earlier one-tile-per-record reading spilled about two
   thirds of every frame.
 
-  **107 of the 114 assets the manifest lists have a header that accounts for their whole
-  length**; the other seven carry 7255 bytes beyond it, which is where a further frame
+  **116 of the 120 assets the manifest lists have a header that accounts for their whole
+  length**; the other four carry 31 bytes beyond it, which is where a further frame
   starts. The page says so on those frames rather than guessing.
 
   Colour: none. Nothing references these frames, no CGRAM ever holds their colours, and
@@ -512,8 +531,9 @@ as `A`. Every page prints its own line of controls along the bottom.
   is entries 0 and 1: the title palette's row 0 is black then white, and that is the
   guess the font opens on.
 - **Previous build**: the older assembly of the game in the first 32 KB: its 4bpp
-  tileset with its *own* palette block at `007AC8` on the picker (508 colours, 32
-  rows), that palette as swatches, and its animation-script table at `003000` as a
+  tileset with its *own* palette block at `007AC8` on the picker (1016 bytes is 508
+  colours, which is 31 whole rows of 16 and twelve over; the picker offers the 31),
+  that palette as swatches, and its animation-script table at `003000` as a
   record listing, 8 bytes to a line.
 - **Music and sound effects**: the eight song slots and both sound-effect banks,
   playable. See below.
@@ -521,7 +541,7 @@ as `A`. Every page prints its own line of controls along the bottom.
   waveform drawn under the list, `B` plays one through the app's audio stream. The
   four no song's sample list mentions (0, 27, 28, 40) are marked `unused`; that is
   computed by walking the song table's sample lists in the ROM, not hard-coded.
-- **Stale duplicates**: the 14 stale regions as text, each with the live region its
+- **Stale duplicates**: the 17 stale regions as text, each with the live region its
   note says it shadows.
 
 ### Where a page's content comes from
@@ -648,9 +668,9 @@ different palettes; the observation wins and the derived candidate is still list
 
 And the alternate-format checks:
 
-    alternate headers     107 of 114 account for their asset's length exactly;
-                          7255 bytes beyond, where another frame starts
-    alternate frames        0 of 114 have a nearest live frame
+    alternate headers     116 of 120 account for their asset's length exactly;
+                          31 bytes beyond, where another frame starts
+    alternate frames        0 of 120 have a nearest live frame
                             the most tiles any one shares with a live frame is 2
 
 ### Playing music and sound effects

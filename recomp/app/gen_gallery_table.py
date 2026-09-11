@@ -259,7 +259,15 @@ def parse(path):
             start, end, kind, apath = fields[0], fields[1], fields[2], fields[3]
             if kind not in KINDS:
                 raise SystemExit('%s:%d: unknown kind %r' % (path, lineno, kind))
-            assets.append((int(start, 16), int(end, 16), kind, apath, note.strip()))
+            # A malformed offset is a manifest error like the two above it, and it
+            # reads like one; int()'s own ValueError arrives as a traceback and
+            # names neither the file nor the line.
+            try:
+                lo, hi = int(start, 16), int(end, 16)
+            except ValueError:
+                raise SystemExit('%s:%d: start and end must be hex offsets, got %r %r'
+                                 % (path, lineno, start, end))
+            assets.append((lo, hi, kind, apath, note.strip()))
     assets.sort(key=lambda a: a[0])
     return assets
 

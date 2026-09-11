@@ -10,6 +10,14 @@
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+/* sigaltstack() and SA_ONSTACK are XSI, not base POSIX, so _POSIX_C_SOURCE alone
+ * does not declare them; macOS hides them again unless _DARWIN_C_SOURCE is set
+ * once any strict-mode macro is. Both are needed for the alternate signal stack
+ * at the bottom of this file. */
+#define _XOPEN_SOURCE 700
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #endif
 
 #ifdef _WIN32
@@ -43,6 +51,18 @@
                             ExitProcess((UINT) (code)); } while(0)
 #else
 #define DLOG_DIE(code) _exit(code)
+#endif
+
+/* How large the log is allowed to get before a run starts it again from empty.
+ * A few hundred runs of stage lines, which is far more history than anyone reads
+ * and far less than anyone notices on disk. */
+#define DLOG_MAX_BYTES (4L * 1024 * 1024)
+
+/* Which process wrote a line, for the case of two instances sharing a directory. */
+#ifdef _WIN32
+#define DLOG_PID() GetCurrentProcessId()
+#else
+#define DLOG_PID() getpid()
 #endif
 
 static FILE* gLog;
@@ -173,7 +193,23 @@ void dlog_open(void) {
   clock_gettime(CLOCK_MONOTONIC, &gStart);
 #endif
   dlog_path(path, sizeof(path));
-  gLog = fopen(path, "w");
+  /* "a", not "w". The whole point of this file is a crash that already happened,
+   * and the player's first move after one is to launch again and look: truncating
+   * on open threw away the only evidence of the run being asked about. Each run
+   * opens with a separator naming its own process, so two instances started in
+   * one directory read as two runs rather than one interleaved stream.
+   *
+   * Bounded rather than unbounded: past DLOG_MAX_BYTES the file starts again from
+   * empty, because a log nobody ever clears must not fill the disk. */
+  {
+    long had = 0;
+    FILE* old = fopen(path, "rb");
+    if(old != NULL) {
+      if(fseek(old, 0, SEEK_END) == 0) had = ftell(old);
+      fclose(old);
+    }
+    gLog = fopen(path, had > DLOG_MAX_BYTES ? "w" : "a");
+  }
   if(gLog == NULL) {
     /* An unwritable directory is not a reason to refuse to play; the game just
      * has no log. Nothing is printed: stdout carries the frame line and only
@@ -181,7 +217,10 @@ void dlog_open(void) {
     return;
   }
   setvbuf(gLog, NULL, _IOLBF, 0);
-  dlog_stage("dream: log opened at %s", path);
+  fputs("\n---- dream: new run ----\n", gLog);
+  dlog_flush();
+  dlog_stage("dream: log opened at %s (process %ld, appending)", path,
+             (long) DLOG_PID());
 }
 
 /* ---- crash capture ------------------------------------------------------ */
@@ -382,14 +421,42 @@ void dlog_install_crash_handlers(void) {
        " (add an RVA to the link base to find it in dream.map)",
        (void*) gModBase, gModSize, gModLinkBase);
   dlog_stage("crash handlers installed (SEH filter, SetErrorMode, signals)");
-#else
-  dlog_stage("crash handlers installed (signals)");
-#endif
   signal(SIGABRT, dlog_signal_handler);
   signal(SIGSEGV, dlog_signal_handler);
   signal(SIGILL,  dlog_signal_handler);
   signal(SIGFPE,  dlog_signal_handler);
+#else
+  /* The one fault this file most needs to catch is a stack overflow, and that is
+   * the one a handler on the overflowed stack cannot report: the kernel cannot
+   * push a frame, so the process dies with no log at all. An alternate stack is
+   * what makes SIGSEGV reportable there. Windows gets this for free: its fibers
+   * carry a guard page and the SEH filter runs off the faulting stack.
+   *
+   * signal() gives no way to ask for SA_ONSTACK, so these go through
+   * sigaction. The handler itself is unchanged, and so is its contract: it
+   * restores SIG_DFL and writes what it already holds. */
+  {
+    static char altStack[64 * 1024];   /* comfortably over MINSIGSTKSZ everywhere */
+    stack_t ss;
+    ss.ss_sp = altStack;
+    ss.ss_size = sizeof(altStack);
+    ss.ss_flags = 0;
+    bool onAlt = sigaltstack(&ss, NULL) == 0;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = dlog_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = onAlt ? SA_ONSTACK : 0;
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
 #ifdef SIGBUS
-  signal(SIGBUS,  dlog_signal_handler);
+    sigaction(SIGBUS,  &sa, NULL);
+#endif
+    dlog_stage("crash handlers installed (signals%s)",
+               onAlt ? ", SIGSEGV on an alternate stack" : "; no alternate stack");
+  }
 #endif
 }

@@ -358,15 +358,28 @@ static bool scene_cpu_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
   return false;
 }
 
+/* Every field that says "there is a machine and a job is part-way through it"
+ * goes with the machine. spBooting in particular: step_sprite reads it as
+ * permission to skip machine_boot, so a half-booted sprite job that outlives its
+ * machine would step a NULL one. The frame counter goes too, because it is the
+ * boot's own progress against spBootTarget. */
 static void machine_free(Scenes* sc) {
   if(sc->snes != NULL) { snes_free(sc->snes); sc->snes = NULL; }
   sc->ss.snes = NULL;
   sc->spMode = -1;
   sc->spForcing = false;
+  sc->spBooting = false;
+  sc->frame = 0;
 }
 
 static bool machine_boot(Scenes* sc, const ScriptEvent* script, int n) {
   machine_free(sc);
+  /* The observation pass counts script frames on the machine it booted, and
+   * step_observe reboots only when obsFrame is 0. Another job taking the machine
+   * out from under it has to send it back to the top of its script, or it would
+   * carry on counting on a machine sitting in a different scene with the sprite
+   * job's forced entity table. */
+  sc->obsFrame = 0;
   sc->snes = snes_init();
   if(sc->snes == NULL) return false;
   /* the same forced HiROM/2 MiB/no-SRAM cart the game's machine gets: this

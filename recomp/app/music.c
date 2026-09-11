@@ -56,8 +56,12 @@ static bool music_ready(const MusicPlayer* mp) {
   return mp->snes->apu->outPorts[0] == mp->snes->ram[SPC_PORT0_COUNTER];
 }
 
-static void music_call(MusicPlayer* mp, uint16_t addr, uint16_t a) {
-  if(mp == NULL || mp->snes == NULL || !music_ready(mp)) return;
+/* Returns whether the command was handed over. A dropped command must not count
+ * as a choice: `started` is what unmutes the machine, and the scratch machine is
+ * the game booted to its title screen, so unmuting on a command that never left
+ * would play the title music as if it were the track the user picked. */
+static bool music_call(MusicPlayer* mp, uint16_t addr, uint16_t a) {
+  if(mp == NULL || mp->snes == NULL || !music_ready(mp)) return false;
   Cpu* c = mp->snes->cpu;
   /* An interrupt latched at the frame boundary has to be taken first: this ROM's NMI
    * handler does not return to what it interrupted, it resets the stack and re-enters
@@ -77,6 +81,7 @@ static void music_call(MusicPlayer* mp, uint16_t addr, uint16_t a) {
   ss_leave_hook(ss);
   *c = saved;
   mp->snes->nmiEnabled = nmiWas;
+  return true;
 }
 
 MusicPlayer* music_create(const uint8_t* rom, size_t romLen) {
@@ -118,13 +123,11 @@ static unsigned song_words(const uint8_t* rom, size_t romLen, int song) {
 void music_play_song(MusicPlayer* mp, int song) {
   if(mp == NULL || song < 0 || song > 7) return;
   if(song_words(mp->rom, mp->romLen, song) == 0) return;
-  music_call(mp, SPC_COMMAND_ADDR, (uint16_t) (song & 0xFF));
-  mp->started = true;
+  if(music_call(mp, SPC_COMMAND_ADDR, (uint16_t) (song & 0xFF))) mp->started = true;
 }
 
 void music_play_sfx(MusicPlayer* mp, uint16_t command) {
-  music_call(mp, SFX_DISPATCH_ADDR, command);
-  if(mp != NULL) mp->started = true;
+  if(music_call(mp, SFX_DISPATCH_ADDR, command)) mp->started = true;
 }
 
 /* The machine keeps running whether or not anything has been picked. That keeps it at a

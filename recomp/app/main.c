@@ -83,6 +83,37 @@
 #include "dlog.h"   /* dream.log: the run, and the crash, written down */
 #include "png.h"    /* the screenshot writer: stored deflate, no zlib */
 
+/* ---- allocation ---------------------------------------------------------
+ *
+ * The app's setup allocations are the harness's: fixed sizes, made once, before
+ * anything the player can see. A NULL from one of them has no useful recovery
+ * and every caller would have to invent one, so they die here instead, and the
+ * reason reaches dream.log the way every other stage does. The same three names
+ * and the same behaviour as recomp/harness/main.c, which recomp/harness/coro.h
+ * describes. Allocations that stand for one page, one sound or one screenshot
+ * are not these: those are checked in place and the feature goes quiet. */
+static void* xalloc_die(void) {
+  dlog("!! out of memory");
+  fprintf(stderr, "dream: out of memory\n");
+  dlog_close();
+  exit(2);
+}
+
+static void* xmalloc(size_t n) {
+  void* p = malloc(n);
+  return p != NULL ? p : xalloc_die();
+}
+
+static void* xcalloc(size_t n, size_t sz) {
+  void* p = calloc(n, sz);
+  return p != NULL ? p : xalloc_die();
+}
+
+static void* xrealloc(void* p, size_t n) {
+  void* q = realloc(p, n);
+  return q != NULL ? q : xalloc_die();
+}
+
 #define ROM_SIZE    0x200000u
 #define WRAM_SIZE   0x20000u
 #define VRAM_BYTES  0x10000u
@@ -225,7 +256,7 @@ static bool machine_load_rom(Machine* m, const uint8_t* rom, size_t len) {
 static Installed* build_table(unsigned* countOut) {
   unsigned n = 0;
   const RecompEntry* reg = recomp_registry(&n);
-  Installed* out = calloc(n ? n : 1, sizeof(Installed));
+  Installed* out = xcalloc(n ? n : 1, sizeof(Installed));
   for(unsigned i = 0; i < n; i++) {
     out[i].addr = reg[i].addr;
     out[i].name = reg[i].name;
@@ -241,7 +272,7 @@ static Installed* build_table(unsigned* countOut) {
 static SpcInstalled* build_spc_table(unsigned* countOut) {
   unsigned n = 0;
   const SpcRecompEntry* reg = recomp_spc_registry(&n);
-  SpcInstalled* out = calloc(n ? n : 1, sizeof(SpcInstalled));
+  SpcInstalled* out = xcalloc(n ? n : 1, sizeof(SpcInstalled));
   for(unsigned i = 0; i < n; i++) {
     out[i].addr = reg[i].addr;
     out[i].name = reg[i].name;
@@ -359,7 +390,7 @@ static bool input_load(InputScript* s, const char* path) {
     return false;
   }
   int cap = 16;
-  s->ev = malloc((size_t) cap * sizeof(InputEvent));
+  s->ev = xmalloc((size_t) cap * sizeof(InputEvent));
   s->count = 0;
   uint16_t lastState2 = 0;
   char line[512];
@@ -378,6 +409,19 @@ static bool input_load(InputScript* s, const char* path) {
       fclose(f);
       return false;
     }
+    /* input_state_at scans `i < count && ev[i].frame <= frame`, so the first line
+     * whose frame number goes backwards makes every later line invisible for the
+     * whole run: a script that looks like it presses Start never does. Equal frame
+     * numbers are fine, the later line wins. The harness loader refuses the same
+     * thing in the same words; the two have to agree or --frames parity is a
+     * comparison of two different runs. */
+    if(s->count > 0 && (int) frame < s->ev[s->count - 1].frame) {
+      fprintf(stderr, "dream: %s:%d: frame %ld is before the previous line's %d;"
+              " the script must be in frame order\n",
+              path, lineno, frame, s->ev[s->count - 1].frame);
+      fclose(f);
+      return false;
+    }
     p = endp;
     char* bar = strchr(p, '|');
     if(bar != NULL) *bar = 0;
@@ -389,7 +433,7 @@ static bool input_load(InputScript* s, const char* path) {
     }
     if(s->count == cap) {
       cap *= 2;
-      s->ev = realloc(s->ev, (size_t) cap * sizeof(InputEvent));
+      s->ev = xrealloc(s->ev, (size_t) cap * sizeof(InputEvent));
     }
     s->ev[s->count].frame = (int) frame;
     s->ev[s->count].state = state;
@@ -1048,7 +1092,18 @@ int main(int argc, char** argv) {
   for(int i = 1; i < argc; i++) {
     const char* a = argv[i];
     bool hasNext = i + 1 < argc;
-    if(strcmp(a, "--frames") == 0 && hasNext) frames = atoi(argv[++i]);
+    /* strtol rather than atoi: atoi("notanumber") is 0, and 0 here means "run
+     * until the user quits", so a typo in a headless script turned a bounded run
+     * into one that never ends. */
+    if(strcmp(a, "--frames") == 0 && hasNext) {
+      char* endp = NULL;
+      long v = strtol(argv[++i], &endp, 10);
+      if(endp == argv[i] || *endp != 0 || v < 0 || v > 100000000L) {
+        fprintf(stderr, "dream: --frames wants a frame count, got %s\n", argv[i]);
+        return 2;
+      }
+      frames = (int) v;
+    }
     else if(strcmp(a, "--input") == 0 && hasNext) inputPath = argv[++i];
     else if(strcmp(a, "--screenshot") == 0 && hasNext) shotPath = argv[++i];
     else if(strcmp(a, "--screenshot-ui") == 0 && hasNext) uiShotPath = argv[++i];
@@ -1070,10 +1125,6 @@ int main(int argc, char** argv) {
       fprintf(stderr, "dream: more than one ROM path given\n");
       return 2;
     }
-  }
-  if(frames < 0) {
-    fprintf(stderr, "dream: --frames must be positive\n");
-    return 2;
   }
   bool timed = frames > 0;   /* --frames: run N and print the frame line */
 
@@ -1192,7 +1243,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-  srcPixels = malloc((size_t) SRC_W * SRC_H * 4);
+  srcPixels = xmalloc((size_t) SRC_W * SRC_H * 4);
 
   /* No audio device is not a reason to refuse to play the game. */
   dlog_stage("sdl: opening the audio device (%d Hz, stereo s16)", AUDIO_HZ);
@@ -1203,7 +1254,7 @@ int main(int argc, char** argv) {
     const char* dn = SDL_GetAudioDeviceName(dev);
     dlog("audio: device %u \"%s\", stream %p", (unsigned) dev,
          dn != NULL ? dn : "(unnamed)", (void*) audio);
-    audioBuf = malloc((size_t) (AUDIO_SAMPLES_PER_FRAME + 64) * 4);
+    audioBuf = xmalloc((size_t) (AUDIO_SAMPLES_PER_FRAME + 64) * 4);
     SDL_ResumeAudioStreamDevice(audio);
   } else {
     dlog("audio: no device (%s): the game runs silent, which is not an error",
@@ -1253,7 +1304,7 @@ int main(int argc, char** argv) {
    * the ROM image and the framebuffer and nothing else; no path from here reaches
    * the machine above. */
   dlog_stage("ui: creating the gallery and the menu bar");
-  uint32_t* fb = calloc((size_t) FB_W * FB_H, sizeof(uint32_t));
+  uint32_t* fb = xcalloc((size_t) FB_W * FB_H, sizeof(uint32_t));
   Gallery* gal = gallery_create(rom, romLen);
   Menubar* bar = menubar_create(renderer);
   MusicPlayer* music = NULL;
@@ -1338,8 +1389,11 @@ int main(int argc, char** argv) {
         case SDL_EVENT_GAMEPAD_REMOVED:
           if((pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) ||
              (pad2 != NULL && SDL_GetGamepadID(pad2) == ev.gdevice.which)) {
-            if(pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) SDL_CloseGamepad(pad);
-            if(pad2 != NULL && SDL_GetGamepadID(pad2) == ev.gdevice.which) SDL_CloseGamepad(pad2);
+            /* Both handles go, not just the removed one: open_gamepads opens
+             * everything it finds from scratch and would otherwise overwrite the
+             * survivor's handle without closing it, leaking one pad per removal. */
+            if(pad != NULL) { SDL_CloseGamepad(pad); pad = NULL; }
+            if(pad2 != NULL) { SDL_CloseGamepad(pad2); pad2 = NULL; }
             open_gamepads(&pad, &pad2);   /* silently promote whatever is left */
           }
           break;
@@ -1420,8 +1474,13 @@ int main(int argc, char** argv) {
       if(inputPath != NULL) {
         input_state_at(&script, frame, &state, &state2);
       } else if(menubar_focused(bar)) {
+        /* Both players, not just the one holding the keyboard: the bar is walked
+         * with Alt and the arrow keys, and recomp/app/README.md's promise is that
+         * a menu cannot be walked and played at the same time. Player 1's pad was
+         * already dropped here; player 2's pad was not, so a second pad kept
+         * driving the game through an open menu. */
         state = 0;
-        state2 = read_gamepad(pad2);
+        state2 = 0;
       } else {
         state = (uint16_t) (read_gamepad(pad) | read_keyboard());
         state2 = read_gamepad(pad2);
