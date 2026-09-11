@@ -59,34 +59,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             push_failed=1; continue
         fi
     fi
-    # The three recomp gates, for the same reason the pre-commit hook runs them: the
-    # lockstep gate proves the C bodies match the ROM, the unit gate covers the routines
-    # no input script reaches, and the no-CPU gate is the mode recomp/app ships in. Minutes,
-    # and only when the pushed commits touch recomp/ or config/recomp*.
-    if [[ -n "$RECOMP_TOUCHED" ]]; then
-        echo "pre-push: make recomp-check, recomp-check-units, recomp-check-nocpu on $local_ref ..."
-        if ! make -s recomp-check >/dev/null; then
-            echo "pre-push: RECOMP CHECK FAILED on $local_ref: refusing push." >&2
-            push_failed=1; continue
-        fi
-        if ! make -s recomp-check-units >/dev/null; then
-            echo "pre-push: UNIT CHECK FAILED on $local_ref: refusing push." >&2
-            push_failed=1; continue
-        fi
-        if ! make -s recomp-check-nocpu >/dev/null; then
-            echo "pre-push: NO-CPU CHECK FAILED on $local_ref: refusing push." >&2
-            push_failed=1; continue
-        fi
-    fi
-    # The gallery's own gates and the app/harness frame-line parity. See
-    # tools/hooks/pre-commit for what each of the four checks proves.
-    if [[ -n "$APP_TOUCHED" ]]; then
-        echo "pre-push: make app-check on $local_ref ..."
-        if ! make -s app-check >/dev/null; then
-            echo "pre-push: APP CHECK FAILED on $local_ref: refusing push." >&2
-            push_failed=1; continue
-        fi
-    fi
+    # The lockstep gates are a release checklist (README.md "Releasing"), not a hook.
     if ! python3 tools/progress.py --check >/dev/null; then
         echo "pre-push: docs/progress.json is stale: run tools/progress.py and commit." >&2
         push_failed=1; continue

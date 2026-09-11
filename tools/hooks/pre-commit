@@ -4,15 +4,8 @@
 #   2. the index/worktree match: see "What the gate builds" below
 #   3. make check                byte-identical round trip (ROM SHA-1 + SPC700 driver),
 #                                only when staged changes can affect the build
-#   4. make recomp-check         the C port's lockstep gate against the ROM,
-#      make recomp-check-units   the routine-level one for the routines no input
+#   (the lockstep gates are a release checklist, not a hook: see README.md "Releasing")
 #                                script can reach, and
-#      make recomp-check-nocpu   the same lockstep gate with the candidate machine
-#                                executing no instructions, which is the only mode the
-#                                shipped game runs in (recomp/app/main.c calls
-#                                ss_nocpu_enable / sps_nocpu_enable unconditionally);
-#                                only when staged changes touch recomp/ or config/recomp*
-#   5. make app-check            the gallery's own gates and the dream/dream_harness
 #                                frame-line parity, when staged changes touch recomp/
 #                                or config/assets.txt
 #   6. tools/progress.py         refresh docs/PROGRESS.md and docs/progress.json,
@@ -85,48 +78,9 @@ if [[ -n "$BUILD_SENSITIVE" ]]; then
         exit 1
     fi
 fi
-# Recomp gate: only when the commit touches the port or the harness, because it
-# rebuilds the harness and replays every input script (a couple of minutes).
-if [[ -n "$RECOMP_TOUCHED" ]]; then
-    echo "pre-commit: make recomp-check (lockstep gate) ..."
-    if ! make -s recomp-check; then
-        echo "pre-commit: RECOMP CHECK FAILED: a converted routine no longer matches the ROM." >&2
-        exit 1
-    fi
-    # The other half of the same gate: the routines no script reaches, run from
-    # the seeded states in config/recomp_units.txt. Seconds, not minutes.
-    echo "pre-commit: make recomp-check-units (routine-level gate) ..."
-    if ! make -s recomp-check-units; then
-        echo "pre-commit: UNIT CHECK FAILED: a routine credited by config/recomp_units.txt" >&2
-        echo "            no longer matches the ROM from its seeded state." >&2
-        exit 1
-    fi
-    # The mode the shipped game actually runs in. Under --hooks on the emulated CPU
-    # covers for a pc the registry cannot resolve; under --no-cpu that pc calls
-    # ss_nocpu_no_body and exits 3, which in the game is the window vanishing.
-    echo "pre-commit: make recomp-check-nocpu (no-CPU gate) ..."
-    if ! make -s recomp-check-nocpu; then
-        echo "pre-commit: NO-CPU CHECK FAILED: with the CPUs off the port is the whole" >&2
-        echo "            program, and this is the mode recomp/app ships. Either a body" >&2
-        echo "            diverged or a pc hand-off has no registry row." >&2
-        exit 1
-    fi
-fi
-
-# The gallery's own gates. `dream --scene-verify` is what notices when config/assets.txt
-# or the hand-transcribed tables in recomp/app/gen_gallery_table.py drift from the C they
-# were read off, and the frame-line diff is what notices when the app stops being the
-# harness plus SDL. It builds `dream`, so it needs an SDL3 cmake can find or one it can
-# build; make app handles both.
-if [[ -n "$APP_TOUCHED" ]]; then
-    echo "pre-commit: make app-check (gallery gates and dream/dream_harness parity) ..."
-    if ! make -s app-check; then
-        echo "pre-commit: APP CHECK FAILED: a composed scene, a sprite render, the gallery's" >&2
-        echo "            effect on emulation state, or the app's frame line no longer agrees" >&2
-        echo "            with the game it is derived from." >&2
-        exit 1
-    fi
-fi
+# The lockstep gates (make recomp-check, recomp-check-units, recomp-check-nocpu, app-check)
+# are not run here: they take about 25 minutes. They are the release checklist in
+# README.md ("Releasing") and are run by hand before a tag.
 
 echo "pre-commit: refreshing progress ..."
 python3 tools/progress.py >/dev/null

@@ -14,7 +14,8 @@
  * calloc), and freeing the coroutine that is currently running (which used to
  * free the stack it was executing on and carry on running).
  */
-#define _XOPEN_SOURCE 700   /* makecontext/swapcontext */
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE 1   /* macOS hides MAP_ANON under strict _XOPEN_SOURCE without this */   /* makecontext/swapcontext */
 
 #include <stdio.h>
 #include <stdlib.h>

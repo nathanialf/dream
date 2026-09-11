@@ -58,7 +58,7 @@ pushed tip, including for a branch the remote does not have yet, and refuses a d
 ### Playing it
 
 The port is separate from the disassembly: `dream` is a native build of the game
-that reads your own ROM. Builds for Linux, Windows and macOS are attached to each tagged
+that reads your own ROM. Builds for Linux and Windows are attached to each tagged (macOS builds are produced but untested and may be missing)
 [release](https://github.com/nathanialf/dream/releases): a zip holding the
 executable, this README and the LICENSE, and no game data of any kind. Unpack it,
 put your own `DREAM.sfc` where the app looks for it, and run it. On Windows that is
@@ -87,6 +87,23 @@ To improve the disassembly, edit `tools/names.txt` (or the tracer), then
 enriching the generators until the output is worth freezing. Symbol files for
 emulator debuggers (`out/dream.mlb` for Mesen2, `out/dream.sym` for bsnes-plus) are
 produced by the tracer.
+
+## Releasing
+
+The git hooks keep only the fast checks: the no-ROM scan, a clean tree, the byte-identical
+rebuild and the SPC driver compare. The lockstep gates are the release checklist; run them
+by hand on the commit you intend to tag, then tag:
+
+```sh
+make recomp-check          # C bodies against the ROM, seven input scripts, both processors
+make recomp-check-units    # the routines no script reaches, from seeded states
+make recomp-check-nocpu    # the mode the app ships in: no emulated CPU
+make app-check             # gallery gates and app/harness frame-line parity
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+```
+
+`release.yml` then builds and attaches the Linux and Windows zips (macOS is built but
+untested and non-blocking).
 
 ## Layout
 

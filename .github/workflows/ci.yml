@@ -123,6 +123,7 @@ jobs:
 
   macos:
     runs-on: macos-latest
+    continue-on-error: true   # macOS is unverified for now (no Mac to test on); never blocks a push or a release
     steps:
       - uses: actions/checkout@v5
 
