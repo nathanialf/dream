@@ -1,5 +1,18 @@
-; Suggested conversion order: leaf routines first (depth = longest call chain below),
-; executed = reached by recomp/harness/inputs/title_start_right.txt (900 frames).
+; Suggested conversion order: leaf routines first (depth = longest call chain below).
+;
+; Written by hand while the port was being planned. Nothing generates it and nothing
+; reads it: no tool, no gate and no Makefile target. It is a note, kept because the
+; depth column is still the order a new routine is easiest to convert in.
+;
+; The `exec`/`cold` column is NOT evidence of reachability. It records one thing only:
+; whether recomp/harness/inputs/title_start_right.txt entered the routine in its first
+; 900 frames, measured once, before the other six input scripts existed. `cold` means
+; that one script missed it. Across the seven scripts the gate runs today,
+; sparkle_update_and_draw is entered 816 times and mode2_particle_dispatch 2344, and
+; both are marked cold here. The list of routines no script reaches is the one
+; `python3 tools/recomp_verify.py` prints with a `*`, and the routines that genuinely
+; have no caller anywhere in the ROM are argued for in the comment above each body.
+;
 ; addr name size depth exec callees
 C0848C dma_setup_channel_step                22 d0 exec 
 C08A74 sub_C08A74                           359 d0 exec 

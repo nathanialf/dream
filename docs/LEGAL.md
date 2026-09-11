@@ -13,8 +13,13 @@ are never committed.
    `build/`, and `out/` are gitignored and `tools/check_no_rom.sh` refuses to commit
    anything under them or any `*.sfc`/`*.bin`/`*.zip`.
 2. **Generated sources carry no literal byte runs.** Every data region is an
-   `incbin "../data/NN.bin":$start-$end` range into files that `tools/extract.py` splits
-   from *your* ROM after a SHA-1 check. Jump tables are symbolic (`dw label`).
+   `incbin` into files that `tools/extract.py` splits from *your* ROM after a SHA-1
+   check: a whole named asset (`incbin "../data/<kind>/<name>.bin"`) or a half-bank
+   range (`incbin "../data/NN.bin":$lo..$hi`, end exclusive). The `..` separator is
+   what asar 1.91 accepts; the older `$start-$end` form is deprecated and asar 1.91
+   rejects it with `(Ebroken_incbin)`, so `tools/bin/asar` has to be 1.91 or newer.
+   Nothing pins that version, so a build with an older asar will fail loudly rather
+   than quietly. Jump tables are symbolic (`dw label`).
 3. **Assets are never redistributed.** Graphics, samples, music, level and animation data
    stay inside the user-supplied ROM. Analysis documents may quote short byte sequences as
    evidence.

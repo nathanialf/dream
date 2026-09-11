@@ -1,11 +1,11 @@
 /* scene: see scene.h.
  *
  * A second machine, booted from reset exactly as recomp/app/music.c boots one for
- * the sound driver, driven into a game_mode with the same input the harness
- * scripts use, and then walked across its own level. Nothing here decodes a
- * tileset, a metatile or a tilemap word: the ROM's own code does every upload and
- * the vendored PPU renders what it left, which is the only way to be sure the
- * picture is the one the game draws.
+ * the sound driver, and driven into a game_mode with the same input the harness
+ * scripts use. Nothing here decodes a sprite frame or a palette: the ROM's own
+ * code builds every OAM entry and uploads every tile, and the vendored PPU
+ * renders what it left, which is the only way to be sure the picture is the one
+ * the game draws.
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
@@ -38,17 +38,11 @@
 #define SCR_W 256
 #define SCR_H 224
 
-/* ---- direct page and low WRAM the walk reads and writes ------------------
+/* ---- direct page and low WRAM the forced render reads and writes ---------
  * The names are recomp/src/dream_ram.h's; direct page is $0000 in this ROM
  * (every frame line prints dp=0000), so a DP offset is a WRAM offset. */
 #define DP_CAMERA_X      0x0062
 #define DP_CAMERA_Y      0x0068
-#define DP_TILEMAP_A     0x007A   /* $7A/$7C: metatile map pointer and bank */
-#define DP_TILEMAP_A_BK  0x007C
-#define DP_TILEMAP_B     0x007E   /* $7E/$80: metatile definition base */
-#define DP_META_BANK     0x0080
-#define DP_LEVEL_W       0x0086
-#define DP_LEVEL_H       0x0088
 #define DP_GAME_MODE     0x00A4
 #define RAM_ENTITY_TYPE  0x0708
 #define RAM_ENTITY_FLAGS 0x0788
@@ -78,10 +72,11 @@
  *   camera_y = clamp(entity_y[0] - $20, 0, level_height_mask)   (not in mode 1)
  * so writing the player's position is the same act as writing the camera's,
  * except that the player's own physics runs *before* the camera does, and puts
- * it back on the ground. The walk therefore writes the position from a hook at
- * that routine's own entry address and then lets the emulated CPU execute the
- * routine itself: no instruction is replaced, and the only change the walk
- * makes is where the player is standing when the camera looks. */
+ * it back on the ground. A forced sprite render therefore pins the position
+ * from a hook at that routine's own entry address and then lets the emulated
+ * CPU execute the routine itself: no instruction is replaced, and the only
+ * change made is where the player is standing when the camera looks, which is
+ * what holds the camera still while the frame is drawn. */
 #define CAMERA_FOLLOW_PLAYER 0x00A1B0u
 /* $C0:8073 is the instruction after `jsr (game_mode_table,X)` on the scene-start
  * path at $C0:805E: the mode's init has just run and nothing has been drawn yet,
@@ -130,34 +125,52 @@ static const ScriptEvent kAttack[] = {
   { 1140, BTN_RIGHT | BTN_B, 0 }, { 1146, BTN_RIGHT, 0 },
 };
 
+/* recomp/harness/inputs/level_long_traverse.txt: Right held far enough into
+ * game_mode 0 for the distance-triggered spawns, with a jump late on. */
+static const ScriptEvent kLongTraverse[] = {
+  { 0, 0, 0 }, { 120, BTN_START, 0 }, { 126, 0, 0 }, { 240, BTN_RIGHT, 0 },
+  { 2040, BTN_RIGHT | BTN_B, 0 },
+};
+/* recomp/harness/inputs/p2_enemy_attack.txt: two Selects into game_mode 2, Left
+ * until the player stands beside the type-$0E entity, then one press on the
+ * second pad, which is the only thing in the ROM that drives that entity's
+ * attack states. */
+static const ScriptEvent kP2Attack[] = {
+  { 0, 0, 0 }, { 120, BTN_START, 0 }, { 126, 0, 0 }, { 240, BTN_SELECT, 0 },
+  { 246, 0, 0 }, { 360, BTN_SELECT, 0 }, { 366, 0, 0 }, { 420, BTN_LEFT, 0 },
+  { 1850, 0, 0 }, { 1852, 0, BTN_B }, { 1858, 0, 0 },
+};
+
 typedef struct { const ScriptEvent* ev; int n; int frames; const char* name; } Script;
 
-/* Three of the harness's own scripts, run to the frame counts the gate runs them
- * to. p2_enemy_attack.txt was tried as a fourth (it reaches game_mode 2 with a
- * second player attacking) and added 1304 observations without adding a single
- * frame the other three had not already shown, so it is not worth the 2.7
- * seconds. Player 2's column is still driven, for whatever script is added next. */
+/* Five of the harness's own scripts. The machine runs about 250 emulated frames
+ * a second here, and the pass is sliced into the same 12 ms the page gives
+ * everything else, so the frame counts below are what fits in about fifteen
+ * seconds of those slices. The two long ones are cut to the frame their own
+ * point is made at: level_long_traverse only has to walk far enough for the
+ * distance-triggered spawns, and p2_enemy_attack's whole point is the press at
+ * frame 1852, so it is the one that gets the long budget. */
 static const Script kObsScripts[] = {
   { kModeCycle, (int) (sizeof(kModeCycle) / sizeof(kModeCycle[0])), 700, "mode_cycle" },
   { kWalkJump,  (int) (sizeof(kWalkJump)  / sizeof(kWalkJump[0])),  620, "level_walk_jump" },
   { kAttack,    (int) (sizeof(kAttack)    / sizeof(kAttack[0])),    620, "level_attack_enemy" },
+  { kLongTraverse, (int) (sizeof(kLongTraverse) / sizeof(kLongTraverse[0])), 320,
+    "level_long_traverse" },
+  { kP2Attack,  (int) (sizeof(kP2Attack) / sizeof(kP2Attack[0])), 1400, "p2_enemy_attack" },
 };
 #define OBS_SCRIPT_COUNT ((int) (sizeof(kObsScripts) / sizeof(kObsScripts[0])))
 
 /* How much of mode_cycle.txt each scene needs, and the frame it is settled at.
  *
  * The script advances the mode every 120 frames, which is fine for a 700-frame
- * gate run and useless for a walk that has to stay in one scene for thousands:
- * so a scene is reached by replaying the script only as far as the Select that
- * selects it, and then holding no button at all. The settle frame is 110 frames
- * after that press: the mode number changes 17 frames after it and the entity
- * roster is repopulated about 47 frames after that (docs/data_formats.md,
- * "Checked against the running game").
- *
- * The title is not one of them: it is a sequence, black then "RARE PRESENTS"
- * then the logo, and 1200 is where the logo stands with no button pressed. */
-static const int kScriptEvents[SCENE_MODE_COUNT] = { 3, 5, 7, 9, 1 };
-static const int kSettleFrame[SCENE_MODE_COUNT] = { 230, 350, 470, 590, 1200 };
+ * gate run and useless for a machine that has to stay in one scene while frames
+ * are drawn on it: so a scene is reached by replaying the script only as far as
+ * the Select that selects it, and then holding no button at all. The settle
+ * frame is 110 frames after that press: the mode number changes 17 frames after
+ * it and the entity roster is repopulated about 47 frames after that
+ * (docs/data_formats.md, "Checked against the running game"). */
+static const int kScriptEvents[SCENE_MODE_COUNT] = { 3, 5, 7, 9 };
+static const int kSettleFrame[SCENE_MODE_COUNT] = { 230, 350, 470, 590 };
 
 /* game_mode changes about 46 frames before entity_init_from_table repopulates
  * the entity arrays (docs/data_formats.md, "Checked against the running game"),
@@ -167,7 +180,7 @@ static const int kSettleFrame[SCENE_MODE_COUNT] = { 230, 350, 470, 590, 1200 };
 
 /* ---- job state ---------------------------------------------------------- */
 
-/* Everything render_screen puts back before it draws: what the mode's init
+/* Everything render_with puts back before it draws: what the mode's init
  * programmed, not what HDMA left. */
 typedef struct {
   uint8_t mode;
@@ -185,11 +198,7 @@ typedef struct {
 
 typedef enum {
   JOB_NONE = 0,
-  JOB_BOOT,       /* run the script up to the mode's settle frame */
-  JOB_PRIME,      /* walk 32 columns out and back, so the visible window is fresh */
-  JOB_SWEEP,      /* walk the level, rendering a screen every 256 pixels */
   JOB_OBSERVE,    /* the OAM palette pass */
-  JOB_DONE,
   JOB_FAILED
 } JobPhase;
 
@@ -209,38 +218,11 @@ struct Scenes {
   char status[96];
   int progress;           /* 0..1000 */
 
-  /* what was asked for, and what the images hold */
-  int wantMode;
-  int haveMode;
-
-  /* view 0 = every layer the mode's TM enables, view n = BG n on its own. Only
-   * the views the mode actually draws are allocated. */
-  uint32_t* img[SCENE_VIEW_COUNT];
-  unsigned viewMask[SCENE_VIEW_COUNT];
-  int nviews;
-  int imgW, imgH;
-  SceneInfo info;
-
-  /* the sweep */
-  int camXMax, camYMax;
-  int band, bandCount;
-  int camY;               /* what the walk asks camera_follow_player for */
-  int camYTarget;         /* where the band wants the camera to end up */
-  int camX;               /* where the walk is now */
-  int dir;                /* +8 or -8 */
-  int primeLeft, primeBack;
-  int capture[32];        /* camera X positions a screen is taken at */
-  int captureN, captureAt;
-  int sweepDone, sweepTotal, hold;
-  int bootTarget;
-  bool walking;           /* the camera hook is live */
-
   /* The PPU registers the mode's init programmed and the scroll its NMI handler
    * wrote, both taken before HDMA ran over them. Every one of these is a register
    * some mode's HDMA channel drives per scanline (game_mode 1 switches BG1's
-   * tilemap halfway down the screen, game_mode 3 rewrites TM, the title drives
-   * INIDISP), so the value left at the end of a frame is the last scanline's and
-   * not the scene's. */
+   * tilemap halfway down the screen, game_mode 3 rewrites TM), so the value left
+   * at the end of a frame is the last scanline's and not the scene's. */
   bool regsValid, scrollValid;
   PpuRegs regs;
   uint16_t hScroll[4], vScroll[4];
@@ -274,9 +256,6 @@ struct Scenes {
   int obsScript, obsFrame;
   int obsFramesSeen, obsObservations;
   int obsModeSettle, obsLastMode;
-  uint16_t sceneCgram[256];   /* CGRAM at the composition's first screen */
-  bool sceneCgramValid;
-
   uint8_t* obsPal;        /* [SCENE_OBS_MODES][FRAME_COUNT] bitmask of palettes */
   uint16_t* obsFlags;     /* the entity_flags word the first observation carried */
 };
@@ -303,29 +282,6 @@ static void ram16w(Scenes* sc, uint32_t off, uint16_t v) {
   sc->snes->ram[off + 1] = (uint8_t) (v >> 8);
 }
 
-/* kGalleryAssets is sorted by start. */
-static int asset_by_start(uint32_t start) {
-  int lo = 0, hi = (int) kGalleryAssetCount - 1;
-  while(lo <= hi) {
-    int mid = (lo + hi) / 2;
-    if(kGalleryAssets[mid].start == start) return mid;
-    if(kGalleryAssets[mid].start < start) lo = mid + 1;
-    else hi = mid - 1;
-  }
-  return -1;
-}
-
-/* The walk renders nothing but the screens it keeps, so the layers are switched
- * off in between: ppu_runLine still runs a line at a time out of the core, and
- * with every layer disabled it costs a backdrop lookup instead of a tilemap
- * fetch per pixel. render_screen puts back the mode's own TM/TS. */
-static void layers_off(Scenes* sc) {
-  Ppu* p = sc->snes->ppu;
-  for(int i = 0; i < 5; i++) {
-    p->layer[i].mainScreenEnabled = false;
-    p->layer[i].subScreenEnabled = false;
-  }
-}
 
 /* The one hook the scene machine installs. It replaces nothing: it writes the
  * player's position at the instant camera_follow_player is entered and returns
@@ -399,16 +355,6 @@ static bool scene_cpu_hook(void* ctx, Cpu* cpu, uint32_t pc24) {
     }
     return false;
   }
-  if(!sc->walking) return false;
-  ram16w(sc, RAM_ENTITY_X, (uint16_t) (sc->camX + CAMERA_X_BIAS));
-  ram16w(sc, RAM_ENTITY_X_SUB, 0);
-  ram16w(sc, RAM_ENTITY_VEL_X, 0);
-  ram16w(sc, RAM_ENTITY_VX_TGT, 0);
-  if(sc->wantMode != 1) {
-    ram16w(sc, RAM_ENTITY_Y, (uint16_t) (sc->camY + CAMERA_Y_BIAS));
-    ram16w(sc, RAM_ENTITY_Y_SUB, 0);
-    ram16w(sc, RAM_ENTITY_VEL_Y, 0);
-  }
   return false;
 }
 
@@ -433,9 +379,8 @@ static bool machine_boot(Scenes* sc, const ScriptEvent* script, int n) {
   sc->snes->cpu->hook = scene_cpu_hook;
   sc->snes->cpu->hookCtx = sc;
   sc->frame = 0;
-  /* the camera hook is off until a walk turns it on: an observation pass must
-   * not have the player teleported under it by the last composition's camera */
-  sc->walking = false;
+  /* the camera hook does nothing until a sprite render turns it on: an
+   * observation pass must not have the player pinned under it */
   sc->spForcing = false;
   sc->oamTrack = false;
   sc->spMode = -1;
@@ -474,10 +419,9 @@ static void machine_frame(Scenes* sc) {
  * ppu_runLine() renders line by line out of VRAM/CGRAM/OAM and the register
  * state; snes.c calls it once a line, and calling it again over the same frame
  * re-renders that frame. Which is what this is: the machine's own picture, with
- * OBJ off so no sprite lands in a level shot, forced blank off and brightness at
- * 15 so a frame captured mid-fade is not black, and with no HDMA applied,
- * because per-scanline effects are screen-space and stitching them would repeat
- * the same gradient over every screen. */
+ * forced blank off and brightness at 15 so a frame captured mid-fade is not
+ * black, and with the registers the mode's own init and scroll handler wrote
+ * back over whatever HDMA left at the end of the frame. */
 /* Copy one PpuRegs into or out of the PPU. */
 static void regs_read(const Ppu* p, PpuRegs* r) {
   r->mode = p->mode;
@@ -596,12 +540,6 @@ static void render_with(Scenes* sc, unsigned layerMask, bool obj, uint32_t* out)
 
   regs_write(p, &live, true);   /* the machine goes back exactly as it was */
 }
-
-/* A level shot: every BG layer the caller asked for and no sprites. */
-static void render_screen(Scenes* sc, unsigned layerMask, uint32_t* out) {
-  render_with(sc, layerMask, false, out);
-}
-
 
 /* ---- one sprite frame, drawn by the game's own OAM builder ---------------
  *
@@ -982,92 +920,6 @@ void scenes_sprite_walk_observed(Scenes* sc, SceneSpriteRefFn cb, void* ctx) {
   free(state);
 }
 
-static void blit_screen(Scenes* sc, int view, int x0, int y0) {
-  uint32_t* img = sc->img[view];
-  for(int y = 0; y < SCR_H; y++) {
-    int dy = y0 + y;
-    if(dy < 0 || dy >= sc->imgH) continue;
-    for(int x = 0; x < SCR_W; x++) {
-      int dx = x0 + x;
-      if(dx < 0 || dx >= sc->imgW) continue;
-      img[(size_t) dy * sc->imgW + dx] = sc->screen[y * SCR_W + x];
-    }
-  }
-}
-
-/* One image for every layer the mode draws, plus one with all of them: rendering
- * is cheap next to the walk, so the page's layer toggle is a pointer swap rather
- * than another walk across the level. */
-static void images_free(Scenes* sc) {
-  for(int v = 0; v < SCENE_VIEW_COUNT; v++) { free(sc->img[v]); sc->img[v] = NULL; }
-  sc->nviews = 0;
-}
-
-static bool images_alloc(Scenes* sc) {
-  images_free(sc);
-  size_t n = (size_t) sc->imgW * sc->imgH;
-  unsigned all = 0;
-  for(int i = 0; i < 4; i++) if(sc->regsValid && sc->regs.main[i]) all |= 1u << i;
-  if(all == 0) all = SCENE_BG_ALL;
-  sc->viewMask[SCENE_VIEW_ALL] = all;
-  sc->img[SCENE_VIEW_ALL] = calloc(n, sizeof(uint32_t));
-  if(sc->img[SCENE_VIEW_ALL] == NULL) return false;
-  sc->nviews = 1;
-  for(int i = 0; i < 4; i++) {
-    if(((all >> i) & 1u) == 0) continue;
-    sc->viewMask[i + 1] = 1u << i;
-    sc->img[i + 1] = calloc(n, sizeof(uint32_t));
-    if(sc->img[i + 1] == NULL) return false;
-    sc->nviews++;
-  }
-  return true;
-}
-
-/* ---- the sweep ----------------------------------------------------------- */
-
-/* Put the camera where the walk wants it and let the game move it there: the
- * player's position is what camera_follow_player clamps, and every column the
- * blitter writes this frame is written by the ROM. */
-/* One frame of the walk. The camera hook above does the placing; everything
- * else (the column the metatile blitter builds, the DMA that uploads it, the
- * scroll registers the mode's NMI handler writes) is the game's own. */
-static void walk_step(Scenes* sc) {
-  sc->walking = true;
-  layers_off(sc);
-  machine_frame(sc);
-}
-
-static void sweep_begin_band(Scenes* sc) {
-  /* Sweep left to right on even bands, right to left on odd ones, so a band
-   * change never has to walk the whole level twice. */
-  sc->dir = (sc->band & 1) ? -8 : +8;
-  sc->camX = (sc->dir > 0) ? 0 : sc->camXMax;
-  if(sc->bandCount > 1) {
-    sc->camYTarget = sc->band * SCR_H > sc->camYMax ? sc->camYMax : sc->band * SCR_H;
-    sc->camY = sc->camYTarget;
-  } else {
-    sc->camYTarget = sc->camY;
-  }
-  sc->captureAt = (sc->dir > 0) ? 0 : sc->captureN - 1;
-  /* The window at the sweep's first camera position was last written for a
-   * different camera Y (or never). One column is written per frame, so walk 32
-   * columns out and 32 back before capturing anything. */
-  sc->primeLeft = 32;
-  sc->primeBack = 32;
-  sc->hold = 0;
-  sc->phase = JOB_PRIME;
-}
-
-static void sweep_plan(Scenes* sc) {
-  sc->captureN = 0;
-  for(int x = 0; x <= sc->camXMax && sc->captureN < 31; x += SCR_W)
-    sc->capture[sc->captureN++] = x;
-  if(sc->captureN == 0 || sc->capture[sc->captureN - 1] != sc->camXMax)
-    sc->capture[sc->captureN++] = sc->camXMax;
-  sc->sweepDone = 0;
-  sc->sweepTotal = sc->bandCount * (sc->camXMax / 8 + 1 + 64);
-}
-
 /* ---- observation --------------------------------------------------------- */
 
 static bool oam_has_attr(const Scenes* sc, uint8_t attr) {
@@ -1120,8 +972,6 @@ Scenes* scenes_create(const uint8_t* rom, size_t romLen) {
   if(sc == NULL) return NULL;
   sc->rom = rom;
   sc->romLen = romLen;
-  sc->haveMode = -1;
-  sc->wantMode = -1;
   sc->spMode = -1;
   sc->oamSlot = -1;
   sc->px = calloc((size_t) SRC_W * SRC_H * 4, 1);
@@ -1140,7 +990,6 @@ void scenes_destroy(Scenes* sc) {
   if(sc == NULL) return;
   sprite_shot_free(&sc->spShot);
   machine_free(sc);
-  images_free(sc);
   free(sc->px);
   free(sc->screen);
   free(sc->obsPal);
@@ -1148,223 +997,9 @@ void scenes_destroy(Scenes* sc) {
   free(sc);
 }
 
-void scenes_request(Scenes* sc, int mode) {
-  if(sc == NULL || mode < 0 || mode >= SCENE_MODE_COUNT) return;
-  if(sc->haveMode == mode && sc->phase != JOB_FAILED) return;
-  if(sc->wantMode == mode &&
-     (sc->phase == JOB_BOOT || sc->phase == JOB_PRIME || sc->phase == JOB_SWEEP)) return;
-  sc->wantMode = mode;
-  sc->haveMode = -1;
-  sc->sceneCgramValid = false;
-  sc->phase = JOB_BOOT;
-  sc->bootTarget = kSettleFrame[mode];
-  sc->progress = 0;
-  snprintf(sc->status, sizeof(sc->status), "booting %s", kGalleryModeName[mode]);
-  if(!machine_boot(sc, kModeCycle, kScriptEvents[mode])) {
-    sc->phase = JOB_FAILED;
-    snprintf(sc->status, sizeof(sc->status), "no machine");
-  }
-}
-
 void scenes_observe_request(Scenes* sc) {
   if(sc == NULL || sc->obsReady) return;
   sc->obsWanted = true;
-}
-
-/* The sweep, one frame at a time, so the caller keeps its own frame rate. */
-static void step_compose(Scenes* sc) {
-  switch(sc->phase) {
-    case JOB_BOOT: {
-      machine_frame(sc);
-      sc->progress = sc->frame * 1000 / (sc->bootTarget > 0 ? sc->bootTarget : 1);
-      if(sc->progress > 999) sc->progress = 999;
-      if(sc->frame < sc->bootTarget) return;
-
-      /* The title is one screen and has no level: no map, no camera. */
-      if(sc->wantMode == SCENE_MODE_TITLE) {
-        sc->imgW = SCR_W;
-        sc->imgH = SCR_H;
-        if(!images_alloc(sc)) { sc->phase = JOB_FAILED; return; }
-        for(int v = 0; v < SCENE_VIEW_COUNT; v++) {
-          if(sc->img[v] == NULL) continue;
-          render_screen(sc, sc->viewMask[v], sc->screen);
-          memcpy(sc->img[v], sc->screen, (size_t) SCR_W * SCR_H * sizeof(uint32_t));
-        }
-        memset(&sc->info, 0, sizeof(sc->info));
-        sc->info.bgmode = sc->snes->ppu->mode;
-        sc->info.bg3prio = sc->snes->ppu->bg3priority;
-        sc->info.screens = 1;
-        sc->info.frames = sc->frame;
-        for(int i = 0; i < 5; i++)
-          if(sc->regsValid ? sc->regs.main[i] : sc->snes->ppu->layer[i].mainScreenEnabled)
-            sc->info.tm |= 1u << i;
-        sc->haveMode = sc->wantMode;
-        sc->phase = JOB_DONE;
-        sc->progress = 1000;
-        snprintf(sc->status, sizeof(sc->status), "title screen, one screen");
-        machine_free(sc);
-        return;
-      }
-
-      /* From here the machine runs on no input at all. mode_cycle.txt keeps
-       * pressing Select every 120 frames, and a walk long enough to cross the
-       * level would cycle straight out of the mode it just entered. */
-      sc->scriptN = 0;
-
-      /* The level, out of the machine's own direct page. */
-      int wmask = (int) ram16(sc, DP_LEVEL_W);
-      int hmask = (int) ram16(sc, DP_LEVEL_H);
-      uint32_t mapAddr = (uint32_t) (((sc->snes->ram[DP_TILEMAP_A_BK] & 0x3Fu) << 16)
-                                     | ram16(sc, DP_TILEMAP_A));
-      uint32_t metaAddr = (uint32_t) (((sc->snes->ram[DP_META_BANK] & 0x3Fu) << 16)
-                                      | ram16(sc, DP_TILEMAP_B));
-      int cols = (wmask + 1 + SCR_W) / 32;
-      int mapIdx = asset_by_start(mapAddr);
-      int rows = 0;
-      if(mapIdx >= 0 && cols > 0)
-        rows = (int) ((kGalleryAssets[mapIdx].end - kGalleryAssets[mapIdx].start) /
-                      (uint32_t) (2 * cols));
-      if(cols <= 0 || rows <= 0) {
-        sc->phase = JOB_FAILED;
-        snprintf(sc->status, sizeof(sc->status), "no level map at %06X", mapAddr);
-        return;
-      }
-
-      sc->imgW = cols * 32;
-      sc->imgH = rows * 32;
-      sc->camXMax = wmask;
-      sc->camYMax = sc->imgH - SCR_H;
-      if(sc->camYMax > hmask) sc->camYMax = hmask;
-      if(sc->camYMax < 0) sc->camYMax = 0;
-      /* mode 1 keeps its own vertical scroll (camera_follow_player returns
-       * before the vertical half), so its band is wherever the game put it. */
-      if(sc->wantMode == 1) {
-        sc->camY = (int) ram16(sc, DP_CAMERA_Y);
-        sc->bandCount = 1;
-        sc->imgH = SCR_H + sc->camY;
-      } else {
-        sc->camY = 0;
-        /* bands at 0, 224, 448, ... and one pinned at the camera's own limit, so
-         * the bottom of the level is covered rather than left at the last whole
-         * screen */
-        sc->bandCount = 1;
-        while((sc->bandCount - 1) * SCR_H < sc->camYMax) sc->bandCount++;
-      }
-
-      if(!images_alloc(sc)) { sc->phase = JOB_FAILED; return; }
-
-      memset(&sc->info, 0, sizeof(sc->info));
-      sc->info.cols = cols;
-      sc->info.rows = rows;
-      sc->info.mapAddr = mapAddr;
-      sc->info.metaAddr = metaAddr;
-      sc->info.bgmode = sc->regs.mode;
-      sc->info.bg3prio = sc->regs.bg3prio;
-      sc->info.levelBg = 0;
-      for(int i = 0; i < 4; i++) {
-        sc->info.bgMap[i] = sc->regs.bg[i].map;
-        sc->info.bgChr[i] = sc->regs.bg[i].chr;
-        if(sc->info.bgMap[i] == 0x7800u) sc->info.levelBg = i + 1;
-      }
-      for(int i = 0; i < 5; i++) if(sc->regs.main[i]) sc->info.tm |= 1u << i;
-
-      sweep_plan(sc);
-      sc->band = 0;
-      sweep_begin_band(sc);
-      return;
-    }
-
-    case JOB_PRIME: {
-      /* 32 columns out, then 32 back: one column is written per frame, so the
-       * 32 columns the first screen shows end up current. */
-      if(sc->primeLeft > 0) {
-        sc->primeLeft--;
-        sc->camX += sc->dir;
-        if(sc->camX < 0) sc->camX = 0;
-        if(sc->camX > sc->camXMax) sc->camX = sc->camXMax;
-        walk_step(sc);
-      } else if(sc->primeBack > 0) {
-        sc->primeBack--;
-        sc->camX -= sc->dir;
-        if(sc->camX < 0) sc->camX = 0;
-        if(sc->camX > sc->camXMax) sc->camX = sc->camXMax;
-        walk_step(sc);
-      } else {
-        /* camera_follow_player adds camera_y_bias ($74) to the clamped player
-         * position, so the camera settles a few pixels off what was asked for.
-         * Take that out now the prime has settled it, rather than lose those
-         * rows off the top of the band. */
-        int gotY = (int) ram16(sc, DP_CAMERA_Y);
-        sc->camY += sc->camYTarget - gotY;
-        if(sc->camY < 0) sc->camY = 0;
-        sc->phase = JOB_SWEEP;
-      }
-      sc->sweepDone++;
-      return;
-    }
-
-    case JOB_SWEEP: {
-      walk_step(sc);
-      sc->sweepDone++;
-      sc->progress = sc->sweepTotal > 0 ? sc->sweepDone * 1000 / sc->sweepTotal : 0;
-      if(sc->progress > 999) sc->progress = 999;
-      snprintf(sc->status, sizeof(sc->status), "%s: band %d/%d, x %d/%d",
-               kGalleryModeName[sc->wantMode], sc->band + 1, sc->bandCount,
-               sc->camX, sc->camXMax);
-
-      /* The camera is the game's, not ours: read it back and blit where it is.
-       *
-       * The picture is two frames behind the walk while the walk is moving: each
-       * mode's NMI handler writes the scroll registers from the camera the
-       * *previous* frame computed. So a capture stops the camera for two frames
-       * first, and then what is on the screen is what camera_x/camera_y say. */
-      int gotX = (int) ram16(sc, DP_CAMERA_X);
-      int gotY = (int) ram16(sc, DP_CAMERA_Y);
-      if(sc->hold > 0) {
-        if(--sc->hold == 0) {
-          if(sc->info.screens == 0) {
-            memcpy(sc->sceneCgram, sc->snes->ppu->cgram, sizeof(sc->sceneCgram));
-            sc->sceneCgramValid = true;
-          }
-          for(int v = 0; v < SCENE_VIEW_COUNT; v++) {
-            if(sc->img[v] == NULL) continue;
-            render_screen(sc, sc->viewMask[v], sc->screen);
-            blit_screen(sc, v, gotX, gotY);
-          }
-          sc->info.screens++;
-          sc->captureAt += (sc->dir > 0) ? 1 : -1;
-        }
-        return;
-      }
-      if(sc->captureAt >= 0 && sc->captureAt < sc->captureN &&
-         ((sc->dir > 0) ? (gotX >= sc->capture[sc->captureAt])
-                        : (gotX <= sc->capture[sc->captureAt]))) {
-        sc->hold = 2;
-        return;
-      }
-
-      bool bandDone = (sc->dir > 0) ? (sc->camX >= sc->camXMax) : (sc->camX <= 0);
-      if(!bandDone) {
-        sc->camX += sc->dir;
-        if(sc->camX > sc->camXMax) sc->camX = sc->camXMax;
-        if(sc->camX < 0) sc->camX = 0;
-        return;
-      }
-      sc->band++;
-      if(sc->band < sc->bandCount) { sweep_begin_band(sc); return; }
-
-      sc->info.frames = sc->frame;
-      sc->haveMode = sc->wantMode;
-      sc->phase = JOB_DONE;
-      sc->progress = 1000;
-      snprintf(sc->status, sizeof(sc->status), "%d screens, %d frames",
-               sc->info.screens, sc->info.frames);
-      machine_free(sc);
-      return;
-    }
-
-    default: return;
-  }
 }
 
 static void step_observe(Scenes* sc) {
@@ -1406,9 +1041,7 @@ bool scenes_step(Scenes* sc, int budgetMs) {
   if(sc == NULL) return false;
   uint64_t end = now_ms() + (uint64_t) (budgetMs > 0 ? budgetMs : 1);
   do {
-    if(sc->phase == JOB_BOOT || sc->phase == JOB_PRIME || sc->phase == JOB_SWEEP) {
-      step_compose(sc);
-    } else if(sc->spWanted) {
+    if(sc->spWanted) {
       step_sprite(sc);
     } else if(sc->obsWanted && !sc->obsReady) {
       sc->phase = JOB_OBSERVE;
@@ -1422,111 +1055,12 @@ bool scenes_step(Scenes* sc, int budgetMs) {
 
 bool scenes_busy(const Scenes* sc) {
   if(sc == NULL) return false;
-  if(sc->phase == JOB_BOOT || sc->phase == JOB_PRIME || sc->phase == JOB_SWEEP) return true;
   if(sc->spWanted) return true;
   return sc->obsWanted && !sc->obsReady;
 }
 
 int scenes_progress(const Scenes* sc) { return sc != NULL ? sc->progress : 0; }
 const char* scenes_status(const Scenes* sc) { return sc != NULL ? sc->status : ""; }
-
-const uint32_t* scenes_image(const Scenes* sc, int view, int* w, int* h) {
-  if(sc == NULL || sc->haveMode < 0) return NULL;
-  if(view < 0 || view >= SCENE_VIEW_COUNT || sc->img[view] == NULL) return NULL;
-  if(w != NULL) *w = sc->imgW;
-  if(h != NULL) *h = sc->imgH;
-  return sc->img[view];
-}
-
-bool scenes_view_available(const Scenes* sc, int view) {
-  return sc != NULL && sc->haveMode >= 0 && view >= 0 && view < SCENE_VIEW_COUNT &&
-         sc->img[view] != NULL;
-}
-
-int scenes_image_mode(const Scenes* sc) { return sc != NULL ? sc->haveMode : -1; }
-
-bool scenes_info(const Scenes* sc, SceneInfo* out) {
-  if(sc == NULL || sc->haveMode < 0 || out == NULL) return false;
-  *out = sc->info;
-  return true;
-}
-
-static unsigned view_mask(const Scenes* sc, int view) {
-  if(view <= 0) {
-    unsigned all = 0;
-    for(int i = 0; i < 4; i++) if(sc->regsValid && sc->regs.main[i]) all |= 1u << i;
-    return all != 0 ? all : SCENE_BG_ALL;
-  }
-  return (view <= 4) ? (1u << (view - 1)) : SCENE_BG_ALL;
-}
-
-bool scenes_reference(Scenes* sc, int mode, int view,
-                      uint32_t* out, int* camX, int* camY) {
-  if(sc == NULL || mode < 0 || mode >= SCENE_MODE_COUNT || out == NULL) return false;
-  if(!machine_boot(sc, kModeCycle, kScriptEvents[mode])) return false;
-  sc->walking = false;
-  while(sc->frame < kSettleFrame[mode]) machine_frame(sc);
-  sc->scriptN = 0;
-  /* Hold the reference until the camera has stopped moving. The mode's NMI
-   * handler writes the scroll registers from the camera it computed on the
-   * previous frame, so a frame taken while the camera is still drifting is
-   * drawn one line away from the camera_x/camera_y that frame ends with, and
-   * the comparison would be against the wrong row of the level rather than
-   * against a difference in the picture. */
-  if(mode != SCENE_MODE_TITLE) {
-    int lastX = -1, lastY = -1, still = 0;
-    for(int i = 0; i < 240 && still < 3; i++) {
-      int x = (int) ram16(sc, DP_CAMERA_X), y = (int) ram16(sc, DP_CAMERA_Y);
-      still = (x == lastX && y == lastY) ? still + 1 : 0;
-      lastX = x;
-      lastY = y;
-      machine_frame(sc);
-    }
-  }
-  if(camX != NULL) *camX = (int) ram16(sc, DP_CAMERA_X);
-  if(camY != NULL) *camY = (int) ram16(sc, DP_CAMERA_Y);
-  render_screen(sc, view_mask(sc, view), out);
-  machine_free(sc);
-  return true;
-}
-
-bool scenes_screen_at(Scenes* sc, int mode, int camX, int camY, int view,
-                      uint32_t* out, int* gotX, int* gotY) {
-  if(sc == NULL || mode < 0 || mode >= 4 || out == NULL) return false;
-  if(!machine_boot(sc, kModeCycle, kScriptEvents[mode])) return false;
-  sc->walking = false;
-  while(sc->frame < kSettleFrame[mode]) machine_frame(sc);
-  sc->scriptN = 0;
-  sc->wantMode = mode;
-  int wmask = (int) ram16(sc, DP_LEVEL_W);
-  sc->camY = camY;
-  sc->camX = camX;
-  /* the same 32 columns out, 32 back the composition primes a band with */
-  int start = (int) ram16(sc, DP_CAMERA_X);
-  int step = (camX >= start) ? 8 : -8;
-  for(int i = 0; i < 32; i++) {
-    sc->camX = camX + (31 - i) * (-step);
-    if(sc->camX < 0) sc->camX = 0;
-    if(sc->camX > wmask) sc->camX = wmask;
-    walk_step(sc);
-  }
-  for(int i = 0; i < 32; i++) {
-    sc->camX = camX - (31 - i) * (-step);
-    if(sc->camX < 0) sc->camX = 0;
-    if(sc->camX > wmask) sc->camX = wmask;
-    walk_step(sc);
-  }
-  sc->camX = camX;
-  int settled = (int) ram16(sc, DP_CAMERA_Y);
-  sc->camY += camY - settled;
-  if(sc->camY < 0) sc->camY = 0;
-  for(int i = 0; i < 4; i++) walk_step(sc);
-  if(gotX != NULL) *gotX = (int) ram16(sc, DP_CAMERA_X);
-  if(gotY != NULL) *gotY = (int) ram16(sc, DP_CAMERA_Y);
-  render_screen(sc, view_mask(sc, view), out);
-  machine_free(sc);
-  return true;
-}
 
 bool scenes_obs_get(const Scenes* sc, uint16_t frameId, uint8_t palMask[SCENE_OBS_MODES]) {
   if(sc == NULL || sc->obsPal == NULL) return false;
@@ -1544,13 +1078,6 @@ uint16_t scenes_obs_flags(const Scenes* sc, uint16_t frameId, int mode) {
   if((frameId & 3) != 0 || frameId / 4 >= (unsigned) FRAME_COUNT) return 0;
   return sc->obsFlags[(size_t) mode * FRAME_COUNT + (frameId / 4)];
 }
-
-bool scenes_cgram(const Scenes* sc, uint16_t* out256) {
-  if(sc == NULL || out256 == NULL || !sc->sceneCgramValid) return false;
-  memcpy(out256, sc->sceneCgram, sizeof(sc->sceneCgram));
-  return true;
-}
-
 
 bool scenes_obs_ready(const Scenes* sc) { return sc != NULL && sc->obsReady; }
 

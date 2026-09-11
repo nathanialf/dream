@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Compare the assembled SPC RAM image with the loader/driver blocks in the ROM data files."""
 import sys, glob, os
+if len(sys.argv) != 2:
+    sys.exit(f'usage: {sys.argv[0]} <assembled spc image>')
 img = open(sys.argv[1], 'rb').read()
 # file 0x20000.. lives in data/020000.bin (bank $C2 low half) after `make regen`
 p = os.path.join(os.path.dirname(__file__), '..', 'data', '04.bin')   # file 0x020000-0x027FFF

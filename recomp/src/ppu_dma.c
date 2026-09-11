@@ -35,25 +35,25 @@ void dma_setup_channel_step(SnesState* ss) {
   const uint16_t dp = ss_dp(ss);
 
   S(0x848C, 3); t_index(ss);                /* C0848C sta A1TL0,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (A1TL0 + x)), a);
+  t_write16(ss, ss_abs(ss, (A1TL0 + x)), a);
   SI(0x848F); a = y; ss_set_nz16(ss, a);    /* C0848F tya */
   S(0x8490, 3); t_index(ss);                /* C08490 sta DMAP0,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (DMAP0 + x)), a);
+  t_write16(ss, ss_abs(ss, (DMAP0 + x)), a);
 
   SEP(0x8493, 0x20); /* C08493 sep #$20 */
   S(0x8495, 2);                             /* C08495 lda ptr_04 */
-  uint8_t b = t_read8(ss, dp + ptr_04);
+  uint8_t b = t_read8_dp(ss, dp, ptr_04);
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
   S(0x8497, 3); t_index(ss);                /* C08497 sta A1B0,X */
-  t_write8(ss, ss_abs(ss, (uint16_t) (A1B0 + x)), b);
+  t_write8(ss, ss_abs(ss, (A1B0 + x)), b);
 
   S(0x849A, 2);                             /* C0849A lda $05 */
-  b = t_read8(ss, dp + ptr_04 + 1);
+  b = t_read8_dp(ss, dp, ptr_04 + 1);
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
   S(0x849C, 3); t_index(ss);                /* C0849C sta DASB0,X */
-  t_write8(ss, ss_abs(ss, (uint16_t) (DASB0 + x)), b);
+  t_write8(ss, ss_abs(ss, (DASB0 + x)), b);
   REP(0x849F, 0x20); /* C0849F rep #$20 */
 
   ss_set_a(ss, a);
@@ -86,31 +86,31 @@ void cgram_upload_queue_flush(SnesState* ss) {
     return;
   }
 
-  S(0x9D37, 3); a = 0x2202; ss_set_nz16(ss, a);  /* C09D37 lda #$2202 */
+  SIMM16(0x9D37); a = 0x2202; ss_set_nz16(ss, a);  /* C09D37 lda #$2202 */
   S(0x9D3A, 3); t_write16(ss, ss_abs(ss, DMAP0), a);  /* C09D3A sta DMAP0 */
 
   do {
     S(0x9D3D, 3); t_index(ss);              /* C09D3D lda $0B84,X */
-    a = t_read16(ss, ss_abs(ss, (uint16_t) (0x0B84 + x)));
+    a = t_read16(ss, ss_abs(ss, (0x0B84 + x)));
     ss_set_nz16(ss, a);
     S(0x9D40, 3); t_write16(ss, ss_abs(ss, DASL0), a); /* C09D40 sta DASL0 */
     S(0x9D43, 3); t_index(ss);              /* C09D43 lda $0B88,X */
-    a = t_read16(ss, ss_abs(ss, (uint16_t) (0x0B88 + x)));
+    a = t_read16(ss, ss_abs(ss, (0x0B88 + x)));
     ss_set_nz16(ss, a);
     S(0x9D46, 3); t_write16(ss, ss_abs(ss, A1TL0), a); /* C09D46 sta A1TL0 */
 
     SEP(0x9D49, 0x20);                      /* C09D49 sep #$20 */
     S(0x9D4B, 3); t_index(ss);              /* C09D4B lda $0B8A,X */
-    uint8_t b = t_read8(ss, ss_abs(ss, (uint16_t) (cgram_queue_index + x)));
+    uint8_t b = t_read8(ss, ss_abs(ss, (cgram_queue_index + x)));
     a = (uint16_t) ((a & 0xff00) | b);
     ss_set_nz8(ss, b);
     S(0x9D4E, 3); t_write8(ss, ss_abs(ss, A1B0), b);  /* C09D4E sta A1B0 */
     S(0x9D51, 3); t_index(ss);              /* C09D51 lda $0B86,X */
-    b = t_read8(ss, ss_abs(ss, (uint16_t) (0x0B86 + x)));
+    b = t_read8(ss, ss_abs(ss, (0x0B86 + x)));
     a = (uint16_t) ((a & 0xff00) | b);
     ss_set_nz8(ss, b);
     S(0x9D54, 3); t_write8(ss, ss_abs(ss, CGADD), b);  /* C09D54 sta CGADD */
-    S(0x9D57, 2);                           /* C09D57 lda #$01 */
+    SIMM8(0x9D57);                          /* C09D57 lda #$01 */
     a = (uint16_t) ((a & 0xff00) | 0x01);
     ss_set_nz8(ss, 0x01);
     S(0x9D59, 3); t_write8(ss, ss_abs(ss, MDMAEN), 0x01); /* C09D59 sta MDMAEN */
@@ -118,7 +118,7 @@ void cgram_upload_queue_flush(SnesState* ss) {
 
     SI(0x9D5E); a = x; ss_set_nz16(ss, a);  /* C09D5E txa */
     SI(0x9D5F); ss_set_c(ss, true);         /* C09D5F sec */
-    S(0x9D60, 3); a = alu_sbc16(ss, a, 0x0008);/* C09D60 sbc #$0008 */
+    SIMM16(0x9D60); a = alu_sbc16(ss, a, 0x0008);/* C09D60 sbc #$0008 */
     SI(0x9D63); x = a; ss_set_nz16(ss, x);  /* C09D63 tax */
     S(0x9D64, 1); t_branch(ss, x != 0);     /* C09D64 bne loc_C09D3D */
   } while(x != 0);
@@ -144,17 +144,17 @@ void dma_fill_vram_zero(SnesState* ss) {
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
 
   S(0xA445, 3); t_write16(ss, ss_abs(ss, VMADDL), a);  /* C0A445 sta VMADDL */
-  S(0xA448, 3); a = 0xA443; ss_set_nz16(ss, a);  /* C0A448 lda #$A443 */
+  SIMM16(0xA448); a = 0xA443; ss_set_nz16(ss, a);  /* C0A448 lda #$A443 */
   S(0xA44B, 3); t_write16(ss, ss_abs(ss, A1TL0), a);  /* C0A44B sta A1TL0 */
   S(0xA44E, 3); t_write16(ss, ss_abs(ss, A2AL0), a);  /* C0A44E sta A2AL0 */
-  S(0xA451, 3); a = 0x0800; ss_set_nz16(ss, a);  /* C0A451 lda #$0800 */
+  SIMM16(0xA451); a = 0x0800; ss_set_nz16(ss, a);  /* C0A451 lda #$0800 */
   S(0xA454, 3); t_write16(ss, ss_abs(ss, DASL0), a);  /* C0A454 sta DASL0 */
-  S(0xA457, 3); a = 0x1809; ss_set_nz16(ss, a);  /* C0A457 lda #$1809 */
+  SIMM16(0xA457); a = 0x1809; ss_set_nz16(ss, a);  /* C0A457 lda #$1809 */
   S(0xA45A, 3); t_write16(ss, ss_abs(ss, DMAP0), a);  /* C0A45A sta DMAP0 */
 
   SEP(0xA45D, 0x20);                        /* C0A45D sep #$20 */
   S(0xA45F, 3); t_write8(ss, ss_abs(ss, A1B0), 0x00);  /* C0A45F stz A1B0 */
-  S(0xA462, 2);                             /* C0A462 lda #$01 */
+  SIMM8(0xA462);                            /* C0A462 lda #$01 */
   a = (uint16_t) ((a & 0xff00) | 0x01);
   ss_set_nz8(ss, 0x01);
   S(0xA464, 3); t_write8(ss, ss_abs(ss, MDMAEN), 0x01);/* C0A464 sta MDMAEN */
@@ -181,7 +181,7 @@ void dma_upload_to_vram(SnesState* ss) {
 
   S(0xA46A, 3); t_write16(ss, ss_abs(ss, A1TL0), a);  /* C0A46A sta A1TL0 */
   S(0xA46D, 3); t_write16(ss, ss_abs(ss, DASL0), y);  /* C0A46D sty DASL0 */
-  S(0xA470, 3); a = 0x1801; ss_set_nz16(ss, a);  /* C0A470 lda #$1801 */
+  SIMM16(0xA470); a = 0x1801; ss_set_nz16(ss, a);  /* C0A470 lda #$1801 */
   S(0xA473, 3); t_write16(ss, ss_abs(ss, DMAP0), a);  /* C0A473 sta DMAP0 */
 
   SEP(0xA476, 0x30);                        /* C0A476 sep #$30 */
@@ -190,7 +190,7 @@ void dma_upload_to_vram(SnesState* ss) {
 
   S(0xA478, 3);                             /* C0A478 stx A1B0 */
   t_write8(ss, ss_abs(ss, A1B0), (uint8_t) x);
-  S(0xA47B, 2);                             /* C0A47B lda #$01 */
+  SIMM8(0xA47B);                            /* C0A47B lda #$01 */
   a = (uint16_t) ((a & 0xff00) | 0x01);
   ss_set_nz8(ss, 0x01);
   S(0xA47D, 3); t_write8(ss, ss_abs(ss, MDMAEN), 0x01);/* C0A47D sta MDMAEN */
@@ -221,11 +221,11 @@ void dma_upload_to_cgram(SnesState* ss) {
   SI(0xA488); a = alu_asl16(ss, a);         /* C0A488 asl A */
   SI(0xA489); a = alu_asl16(ss, a);         /* C0A489 asl A */
   S(0xA48A, 3); t_write16(ss, ss_abs(ss, DASL0), a);  /* C0A48A sta DASL0 */
-  S(0xA48D, 3); a = 0x2200; ss_set_nz16(ss, a);  /* C0A48D lda #$2200 */
+  SIMM16(0xA48D); a = 0x2200; ss_set_nz16(ss, a);  /* C0A48D lda #$2200 */
   S(0xA490, 3); t_write16(ss, ss_abs(ss, DMAP0), a);  /* C0A490 sta DMAP0 */
 
   SEP(0xA493, 0x20);                        /* C0A493 sep #$20 */
-  S(0xA495, 2);                             /* C0A495 lda #$C4 */
+  SIMM8(0xA495);                            /* C0A495 lda #$C4 */
   a = (uint16_t) ((a & 0xff00) | 0xC4);
   ss_set_nz8(ss, 0xC4);
   S(0xA497, 3); t_write8(ss, ss_abs(ss, A1B0), 0xC4);  /* C0A497 sta A1B0 */
@@ -234,7 +234,7 @@ void dma_upload_to_cgram(SnesState* ss) {
   ss_set_nz8(ss, (uint8_t) y);
   S(0xA49B, 3);                             /* C0A49B sta CGADD */
   t_write8(ss, ss_abs(ss, CGADD), (uint8_t) y);
-  S(0xA49E, 2);                             /* C0A49E lda #$01 */
+  SIMM8(0xA49E);                            /* C0A49E lda #$01 */
   a = (uint16_t) ((a & 0xff00) | 0x01);
   ss_set_nz8(ss, 0x01);
   S(0xA4A0, 3); t_write8(ss, ss_abs(ss, MDMAEN), 0x01);/* C0A4A0 sta MDMAEN */
@@ -269,7 +269,7 @@ static void set_bg_scroll_body(SnesState* ss) {
     S((uint16_t) (0xA4A8 + i * 3), 3);
     t_write8(ss, ss_abs(ss, kHofs[i]), 0x00);
   }
-  S(0xA4BA, 2);                             /* C0A4BA lda #$FF */
+  SIMM8(0xA4BA);                            /* C0A4BA lda #$FF */
   a = (uint16_t) ((a & 0xff00) | 0xFF);
   ss_set_nz8(ss, 0xFF);
   for(int i = 0; i < 6; i++) {              /* C0A4BC..C0A4CB sta BGnVOFS */

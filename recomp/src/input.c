@@ -45,7 +45,7 @@ static void read_joypads_check(SnesState* ss, uint8_t pb, uint16_t base, uint16_
   uint16_t a = *ap;
 
   SY(base + 0x00, 2);                       /* C0A307 lda $8A */
-  a = t_read16(ss, ss_dp(ss) + held);
+  a = t_read16_dp(ss, ss_dp(ss), held);
   ss_set_nz16(ss, a);
   SY(base + 0x02, 3);                       /* C0A309 and #$0007 */
   a = alu_and16(ss, a, 0x0007);
@@ -70,9 +70,9 @@ static void read_joypads_check(SnesState* ss, uint8_t pb, uint16_t base, uint16_
     ss_set_y(ss, y);
     SYREP(base + 0x12, 0x20);               /* C0A319 rep #$20 */
     SY(base + 0x14, 2);                     /* C0A31B stz $8A */
-    t_write16(ss, ss_dp(ss) + held, 0);
+    t_write16_dp(ss, ss_dp(ss), held, 0);
     SY(base + 0x16, 2);                     /* C0A31D stz $8C */
-    t_write16(ss, ss_dp(ss) + pressed, 0);
+    t_write16_dp(ss, ss_dp(ss), pressed, 0);
     SY(base + 0x18, 1);                     /* C0A31F bra loc_C0A331 */
     t_branch(ss, true);
     *ap = a;
@@ -92,9 +92,9 @@ static void read_joypads_check(SnesState* ss, uint8_t pb, uint16_t base, uint16_
   if((a & 0x0001) != 0) { *ap = a; return; }
 
   SY(base + 0x26, 2);                       /* C0A32D stz $8A */
-  t_write16(ss, ss_dp(ss) + held, 0);
+  t_write16_dp(ss, ss_dp(ss), held, 0);
   SY(base + 0x28, 2);                       /* C0A32F stz $8C */
-  t_write16(ss, ss_dp(ss) + pressed, 0);
+  t_write16_dp(ss, ss_dp(ss), pressed, 0);
   *ap = a;
 }
 
@@ -118,7 +118,7 @@ void read_joypads(SnesState* ss) {
   const uint16_t dp = ss_dp(ss);
 
   SEP(0xA2DE, 0x20);                        /* C0A2DE sep #$20 */
-  S(0xA2E0, 2);                             /* C0A2E0 lda #$01 */
+  SIMM8(0xA2E0);                            /* C0A2E0 lda #$01 */
   a = (uint16_t) ((a & 0xff00) | 0x01);
   ss_set_nz8(ss, 0x01);
 
@@ -136,28 +136,28 @@ void read_joypads(SnesState* ss) {
   S(0xA2E9, 3);                             /* C0A2E9 lda JOY1L */
   a = t_read16(ss, db | JOY1L); ss_set_nz16(ss, a);
   S(0xA2EC, 2);                             /* C0A2EC eor $8A */
-  a = alu_eor16(ss, a, t_read16(ss, dp + joy1_held));
+  a = alu_eor16(ss, a, t_read16_dp(ss, dp, joy1_held));
   S(0xA2EE, 3);                             /* C0A2EE and JOY1L */
   a = alu_and16(ss, a, t_read16(ss, db | JOY1L));
   S(0xA2F1, 2);                             /* C0A2F1 sta $8C */
-  t_write16(ss, dp + joy1_pressed, a);
+  t_write16_dp(ss, dp, joy1_pressed, a);
   S(0xA2F3, 3);                             /* C0A2F3 lda JOY1L */
   a = t_read16(ss, db | JOY1L); ss_set_nz16(ss, a);
   S(0xA2F6, 2);                             /* C0A2F6 sta $8A */
-  t_write16(ss, dp + joy1_held, a);
+  t_write16_dp(ss, dp, joy1_held, a);
 
   S(0xA2F8, 3);                             /* C0A2F8 lda JOY2L */
   a = t_read16(ss, db | JOY2L); ss_set_nz16(ss, a);
   S(0xA2FB, 2);                             /* C0A2FB eor $8E */
-  a = alu_eor16(ss, a, t_read16(ss, dp + joy2_held));
+  a = alu_eor16(ss, a, t_read16_dp(ss, dp, joy2_held));
   S(0xA2FD, 3);                             /* C0A2FD and JOY2L */
   a = alu_and16(ss, a, t_read16(ss, db | JOY2L));
   S(0xA300, 2);                             /* C0A300 sta $90 */
-  t_write16(ss, dp + joy2_pressed, a);
+  t_write16_dp(ss, dp, joy2_pressed, a);
   S(0xA302, 3);                             /* C0A302 lda JOY2L */
   a = t_read16(ss, db | JOY2L); ss_set_nz16(ss, a);
   S(0xA305, 2);                             /* C0A305 sta $8E */
-  t_write16(ss, dp + joy2_held, a);
+  t_write16_dp(ss, dp, joy2_held, a);
 
   bool yielded = false;
   read_joypads_check(ss, pb, 0xA307, &a, joy1_held, joy1_pressed, JOYSER0, &yielded);

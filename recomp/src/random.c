@@ -68,7 +68,7 @@ void random_next(SnesState* ss) {
   SEP(0xA212, 0x20);                        /* C0A212 sep #$20 */
 
   S(0xA214, 2);                             /* C0A214 lda $9D */
-  b = t_read8(ss, dp + 0x9D);
+  b = t_read8_dp(ss, dp, 0x9D);
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
 
@@ -83,7 +83,7 @@ void random_next(SnesState* ss) {
   ss_set_nz8(ss, (uint8_t) a);
 
   S(0xA218, 2);                             /* C0A218 lda init_magic_FFFF */
-  b = t_read8(ss, dp + init_magic_FFFF);
+  b = t_read8_dp(ss, dp, init_magic_FFFF);
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
 
@@ -93,12 +93,12 @@ void random_next(SnesState* ss) {
   t_rol8_dp(ss, init_magic_FFFF);
 
   S(0xA21E, 2);                             /* C0A21E eor $9F */
-  b = (uint8_t) (a ^ t_read8(ss, dp + 0x9F));
+  b = (uint8_t) (a ^ t_read8_dp(ss, dp, 0x9F));
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
 
   S(0xA220, 2);                             /* C0A220 sta $9D */
-  t_write8(ss, dp + 0x9D, (uint8_t) a);
+  t_write8_dp(ss, dp, 0x9D, (uint8_t) a);
 
   S(0xA222, 1);                             /* C0A222 pla */
   ss_idle(ss);
@@ -109,10 +109,10 @@ void random_next(SnesState* ss) {
   ss_set_nz8(ss, b);
 
   S(0xA223, 2);                             /* C0A223 sta $9F */
-  t_write8(ss, dp + 0x9F, (uint8_t) a);
+  t_write8_dp(ss, dp, 0x9F, (uint8_t) a);
 
   S(0xA225, 2);                             /* C0A225 eor init_magic_FFFF */
-  b = (uint8_t) (a ^ t_read8(ss, dp + init_magic_FFFF));
+  b = (uint8_t) (a ^ t_read8_dp(ss, dp, init_magic_FFFF));
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
 
@@ -122,12 +122,12 @@ void random_next(SnesState* ss) {
   ss_push8(ss, (uint8_t) a);
 
   S(0xA228, 2);                             /* C0A228 lda init_magic_AA55 */
-  b = t_read8(ss, dp + init_magic_AA55);
+  b = t_read8_dp(ss, dp, init_magic_AA55);
   a = (uint16_t) ((a & 0xff00) | b);
   ss_set_nz8(ss, b);
 
   S(0xA22A, 2);                             /* C0A22A sta init_magic_FFFF */
-  t_write8(ss, dp + init_magic_FFFF, (uint8_t) a);
+  t_write8_dp(ss, dp, init_magic_FFFF, (uint8_t) a);
 
   S(0xA22C, 1);                             /* C0A22C pla */
   ss_idle(ss);
@@ -138,7 +138,7 @@ void random_next(SnesState* ss) {
   ss_set_nz8(ss, b);
 
   S(0xA22D, 2);                             /* C0A22D sta init_magic_AA55 */
-  t_write8(ss, dp + init_magic_AA55, (uint8_t) a);
+  t_write8_dp(ss, dp, init_magic_AA55, (uint8_t) a);
 
   REP(0xA22F, 0x20);                        /* C0A22F rep #$20 */
 

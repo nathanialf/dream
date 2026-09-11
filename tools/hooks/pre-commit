@@ -1,16 +1,47 @@
 #!/usr/bin/env bash
 # Installed via `git config core.hooksPath tools/hooks` (tools/install_hooks.sh). Runs:
-#   1. tools/check_no_rom.sh   — IP-safety scan of tracked files
-#   2. make check              — byte-identical round trip (ROM SHA-1 + SPC700 driver),
+#   1. tools/check_no_rom.sh     IP-safety scan of tracked files
+#   2. the index/worktree match: see "What the gate builds" below
+#   3. make check                byte-identical round trip (ROM SHA-1 + SPC700 driver),
 #                                only when staged changes can affect the build
-#   3. make recomp-check       — the C port's lockstep gate against the ROM, and
+#   4. make recomp-check         the C port's lockstep gate against the ROM,
 #      make recomp-check-units   the routine-level one for the routines no input
-#                                script can reach; only when staged changes touch
-#                                recomp/ or config/recomp*
-#   4. tools/progress.py       — refresh README badges, docs/PROGRESS.md, docs/progress.json,
+#                                script can reach, and
+#      make recomp-check-nocpu   the same lockstep gate with the candidate machine
+#                                executing no instructions, which is the only mode the
+#                                shipped game runs in (recomp/app/main.c calls
+#                                ss_nocpu_enable / sps_nocpu_enable unconditionally);
+#                                only when staged changes touch recomp/ or config/recomp*
+#   5. make app-check            the gallery's own gates and the dream/dream_harness
+#                                frame-line parity, when staged changes touch recomp/
+#                                or config/assets.txt
+#   6. tools/progress.py         refresh docs/PROGRESS.md and docs/progress.json,
 #                                and stage them into this commit
 # Bypass with --no-verify only for commits that cannot touch the build; the pre-push
 # hook re-runs the gate on the pushed tip regardless.
+#
+# --- What the gate builds ----------------------------------------------------
+# `make check` and `make recomp-check` build the *working tree*. The thing being
+# committed is the *index*. When those differ, a commit can pass the gate and still
+# not rebuild: stage half an edit to tools/names.txt with `git add -p`, the whole edit
+# is on disk, the build is byte-identical, and the committed tree is not.
+#
+# Three ways to close that:
+#   (a) refuse the commit while the index and the working tree differ under any path
+#       the gate reads, so building the working tree *is* building the commit;
+#   (b) `git stash push --keep-index` around the build;
+#   (c) export the index into a temporary `git worktree` and build there.
+# (b) is rejected: a stash that fails to pop (a merge conflict, an interrupted hook,
+# a build that kills the shell) leaves the user's uncommitted work somewhere they did
+# not put it, and a hook must never be able to lose work. (c) is rejected: the build
+# needs baserom/DREAM.sfc, tools/bin/asar and data/, all of them ignored and none of
+# them in the index, so the temporary tree has to be stitched back to the real one by
+# hand, and the stitching is exactly where a stale data/ would hide.
+# (a) is what runs below. It cannot lose work and it has no partial state. The cost is
+# that a partial commit of a build-sensitive path is refused rather than verified;
+# commit the whole edit, or use --no-verify and let the pre-push hook be the gate.
+# Untracked files under those paths are refused for the same reason: an `incsrc` of a
+# file that is not in the commit builds here and nowhere else.
 set -e
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
@@ -19,21 +50,38 @@ tools/check_no_rom.sh
 STAGED=$(git diff --cached --name-only -z | tr '\0' '\n')
 BUILD_SENSITIVE=$(grep -E '^(src/|spc/|tools/|config/|Makefile$)' <<<"$STAGED" || true)
 RECOMP_TOUCHED=$(grep -E '^(recomp/|config/recomp|tools/recomp_verify\.py$)' <<<"$STAGED" || true)
-if [[ -z "$BUILD_SENSITIVE" && -z "$RECOMP_TOUCHED" ]]; then
+APP_TOUCHED=$(grep -E '^(recomp/|config/assets\.txt$)' <<<"$STAGED" || true)
+if [[ -z "$BUILD_SENSITIVE" && -z "$RECOMP_TOUCHED" && -z "$APP_TOUCHED" ]]; then
     exit 0
 fi
+
+# The paths the gates about to run will read.
+GATE_PATHS=()
+[[ -n "$BUILD_SENSITIVE" ]] && GATE_PATHS+=(src spc tools config Makefile)
+[[ -n "$RECOMP_TOUCHED" || -n "$APP_TOUCHED" ]] && GATE_PATHS+=(recomp tools config)
+DIRTY=$(git diff --name-only -- "${GATE_PATHS[@]}")
+UNTRACKED=$(git ls-files -o --exclude-standard -- "${GATE_PATHS[@]}")
+if [[ -n "$DIRTY" || -n "$UNTRACKED" ]]; then
+    echo "pre-commit: the working tree is not the tree being committed, so the gate" >&2
+    echo "            below would verify content this commit does not carry." >&2
+    [[ -n "$DIRTY" ]]     && { echo "  staged and working copies differ:" >&2; sed 's/^/    /' <<<"$DIRTY" >&2; }
+    [[ -n "$UNTRACKED" ]] && { echo "  untracked, so not in the commit:" >&2; sed 's/^/    /' <<<"$UNTRACKED" >&2; }
+    echo "            Stage the rest (git add), stash it, or remove it, then commit again." >&2
+    exit 1
+fi
+
 if [[ ! -f baserom/DREAM.sfc ]]; then
-    echo "pre-commit: baserom/DREAM.sfc missing — cannot run the SHA-1 gate, skipping" >&2
+    echo "pre-commit: baserom/DREAM.sfc missing: cannot run the SHA-1 gate, skipping" >&2
     exit 0
 fi
 if [[ ! -x tools/bin/asar ]]; then
-    echo "pre-commit: tools/bin/asar missing — build asar first (see README), skipping gate" >&2
+    echo "pre-commit: tools/bin/asar missing: build asar first (see README), skipping gate" >&2
     exit 0
 fi
 if [[ -n "$BUILD_SENSITIVE" ]]; then
     echo "pre-commit: make check (SHA-1 gate) ..."
     if ! make -s check; then
-        echo "pre-commit: BUILD FAILED — the staged changes break the byte-identical round trip." >&2
+        echo "pre-commit: BUILD FAILED: the staged changes break the byte-identical round trip." >&2
         exit 1
     fi
 fi
@@ -42,15 +90,40 @@ fi
 if [[ -n "$RECOMP_TOUCHED" ]]; then
     echo "pre-commit: make recomp-check (lockstep gate) ..."
     if ! make -s recomp-check; then
-        echo "pre-commit: RECOMP CHECK FAILED — a converted routine no longer matches the ROM." >&2
+        echo "pre-commit: RECOMP CHECK FAILED: a converted routine no longer matches the ROM." >&2
         exit 1
     fi
     # The other half of the same gate: the routines no script reaches, run from
     # the seeded states in config/recomp_units.txt. Seconds, not minutes.
     echo "pre-commit: make recomp-check-units (routine-level gate) ..."
     if ! make -s recomp-check-units; then
-        echo "pre-commit: UNIT CHECK FAILED — a routine credited by config/recomp_units.txt" >&2
+        echo "pre-commit: UNIT CHECK FAILED: a routine credited by config/recomp_units.txt" >&2
         echo "            no longer matches the ROM from its seeded state." >&2
+        exit 1
+    fi
+    # The mode the shipped game actually runs in. Under --hooks on the emulated CPU
+    # covers for a pc the registry cannot resolve; under --no-cpu that pc calls
+    # ss_nocpu_no_body and exits 3, which in the game is the window vanishing.
+    echo "pre-commit: make recomp-check-nocpu (no-CPU gate) ..."
+    if ! make -s recomp-check-nocpu; then
+        echo "pre-commit: NO-CPU CHECK FAILED: with the CPUs off the port is the whole" >&2
+        echo "            program, and this is the mode recomp/app ships. Either a body" >&2
+        echo "            diverged or a pc hand-off has no registry row." >&2
+        exit 1
+    fi
+fi
+
+# The gallery's own gates. `dream --scene-verify` is what notices when config/assets.txt
+# or the hand-transcribed tables in recomp/app/gen_gallery_table.py drift from the C they
+# were read off, and the frame-line diff is what notices when the app stops being the
+# harness plus SDL. It builds `dream`, so it needs an SDL3 cmake can find or one it can
+# build; make app handles both.
+if [[ -n "$APP_TOUCHED" ]]; then
+    echo "pre-commit: make app-check (gallery gates and dream/dream_harness parity) ..."
+    if ! make -s app-check; then
+        echo "pre-commit: APP CHECK FAILED: a composed scene, a sprite render, the gallery's" >&2
+        echo "            effect on emulation state, or the app's frame line no longer agrees" >&2
+        echo "            with the game it is derived from." >&2
         exit 1
     fi
 fi

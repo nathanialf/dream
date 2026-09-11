@@ -438,6 +438,14 @@ uint64_t ss_cycles(const SnesState* ss) { return ss->snes->cycles; }
 
 void ss_consume_cycles(SnesState* ss, int cycles) {
   if(cycles <= 0) return;
+  /* The core advances two master cycles at a time, so an odd charge cannot be
+   * spent exactly. The odd cycle is carried into the next call instead of being
+   * dropped: rounding down silently and forever charged every odd-cost routine
+   * one cycle less on every call it ever made, and the drift is unbounded. */
+  cycles += ss->cycleCarry;
+  ss->cycleCarry = cycles & 1;
+  cycles &= ~1;
+  if(cycles == 0) return;
   /* Spend the time the way the CPU would: in short steps, not one long one.
    * snes_runCycles() inserts the 40-cycle DRAM refresh when a step crosses
    * hPos 536, so a single 4000-cycle call would charge one refresh where the
@@ -450,7 +458,7 @@ void ss_consume_cycles(SnesState* ss, int cycles) {
     uint64_t left = target - ss->snes->cycles;
     int step = left > 6 ? 6 : (int) left;
     step &= ~1;                       /* snes_runCycle advances two at a time */
-    if(step == 0) break;
+    if(step == 0) break;              /* unreachable: the budget is even above */
     dma_handleDma(ss->snes->dma, step);
     snes_runCycles(ss->snes, step);
   }
@@ -601,9 +609,12 @@ static void ss_nocpu_no_body(SnesState* ss, uint32_t pc24) {
     const RecompEntry* e = recomp_find(fromPc);
     from = e != NULL ? e->name : "(an unregistered pc)";
   }
+  /* "recomp:", not "dream_harness:": snes_state.c is linked into the shipped
+   * game as well, and a player reading dream.log after the window vanished
+   * should not be told a program they never ran has failed. */
   fprintf(stderr,
-          "dream_harness: --no-cpu: no C body at %02X:%04X (canonical %06X)\n"
-          "               handed over by %s",
+          "recomp: no-cpu: no C body at %02X:%04X (canonical %06X)\n"
+          "        handed over by %s",
           (unsigned) ((pc24 >> 16) & 0xff), (unsigned) (pc24 & 0xffff),
           ss_canon(pc24), from);
   if(fromPc != 0) fprintf(stderr, " at %06X", ss_canon(fromPc));
@@ -667,7 +678,7 @@ static void ss_nocpu_reap(SnesState* ss) {
 
 static SsNoCpuCtx* ss_nocpu_push(SnesState* ss, uint32_t pc24) {
   if(ss->nctx >= SS_NOCPU_CTX_MAX) {
-    fprintf(stderr, "dream_harness: --no-cpu: more than %d suspended body chains\n",
+    fprintf(stderr, "recomp: no-cpu: more than %d suspended body chains\n",
             SS_NOCPU_CTX_MAX);
     exit(2);
   }
@@ -699,7 +710,7 @@ static void ss_nocpu_step(SnesState* ss) {
    * reached. If any of that stops being true the machine would take an
    * interrupt whose frame no body pops, so stop instead of running on. */
   if(c->irqWanted || ss->snes->hIrqEnabled || ss->snes->vIrqEnabled) {
-    fprintf(stderr, "dream_harness: --no-cpu: an IRQ was enabled or raised"
+    fprintf(stderr, "recomp: no-cpu: an IRQ was enabled or raised"
                     " (irqWanted %d, hIrq %d, vIrq %d); this ROM never uses one\n",
             c->irqWanted, ss->snes->hIrqEnabled, ss->snes->vIrqEnabled);
     exit(3);
@@ -723,7 +734,7 @@ static void ss_nocpu_step(SnesState* ss) {
        * routine: it stopped between two instructions and the scheduler was the
        * only code running since. If this fires, a body left the pc somewhere
        * other than where it suspended. */
-      fprintf(stderr, "dream_harness: --no-cpu: a body suspended at %06X sp %04X"
+      fprintf(stderr, "recomp: no-cpu: a body suspended at %06X sp %04X"
                       " but the machine is at %06X sp %04X\n",
               ss_canon(top->pc24), top->sp, ss_canon(pc24), c->sp);
       exit(2);

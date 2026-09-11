@@ -10,7 +10,11 @@ Editable files land under build/assets/<same subpath as data/>; build/ is gitign
 so nothing produced here is ever committed (docs/LEGAL.md rule 1).  A kind counts as
 round-tripping only when *every* asset of that kind reproduces its ROM bytes exactly;
 config/roundtrip.txt lists exactly those kinds and is what tools/progress.py reads to
-decide which data bytes count as matched.
+decide which data bytes count as matched. An asset whose file is not there counts as a
+failure of its kind, for the same reason: a kind cannot be at 100% on assets nobody read.
+
+Exit status: 0 all checked assets round-trip, 1 something failed or nothing was checked,
+2 the arguments were refused.
 """
 from __future__ import annotations
 
@@ -76,7 +80,14 @@ def main():
         src = os.path.join(ROOT, path)
         st = stats.setdefault(kind, {'pass': 0, 'total': 0, 'bytes': 0, 'files': 0})
         if not os.path.exists(src):
+            # A missing file is a failure, not an absence. It used to `continue` before
+            # st['total'] += 1, so the kind's ratio never saw it: a manifest that gained
+            # asset paths `make extract` had not written yet reported that kind at 100%,
+            # --update promoted it into config/roundtrip.txt, and tools/progress.py
+            # credited every byte of the kind as matched.
             missing += 1
+            st['total'] += 1
+            failures.append((kind, path, 'file missing under data/ (run `make extract`)'))
             continue
         st['total'] += 1
         rel = os.path.dirname(os.path.relpath(path, 'data'))
@@ -137,6 +148,8 @@ def main():
         print(f'note: {len(raw_assets)} assets decode to a raw form (exact but not editable): ' + ', '.join(raw_assets))
     if missing:
         print(f'note: {missing} asset files missing under data/ (run `make extract` first)')
+    if tot_t == 0:
+        print('roundtrip: no asset was checked; nothing here proves anything')
     print(f'elapsed {time.time() - t0:.1f}s')
 
     if failures:
@@ -150,7 +163,7 @@ def main():
     if args.update:
         if args.kind:
             print('\nrefusing --update with --kind (it would drop the kinds not checked)')
-            return 1
+            return 2     # a usage refusal, not a failing round trip
         with open(ROUNDTRIP, 'w') as fp:
             fp.write(HEADER)
             for kind in perfect:
@@ -161,7 +174,7 @@ def main():
                     fp.write(f'raw {path}\n')
         print(f'\nwrote {ROUNDTRIP}: {len(perfect)} kinds at 100% '
               f'({", ".join(perfect) if perfect else "none"})')
-    return 1 if failures else 0
+    return 1 if (failures or tot_t == 0) else 0
 
 
 if __name__ == '__main__':

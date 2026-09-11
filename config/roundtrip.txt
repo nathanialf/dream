@@ -23,3 +23,9 @@ tilemap
 tileset_2bpp
 tileset_4bpp
 tileset_8bpp
+; assets whose editable form is a raw byte dump: exact, but not counted as round-tripping
+raw data/sprites/frame_0000.bin
+raw data/sprites/frame_0001.bin
+raw data/sprites/frame_0017.bin
+raw data/sprites/frame_0018.bin
+raw data/sprites/frame_0031.bin

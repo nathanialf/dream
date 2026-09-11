@@ -20,6 +20,14 @@ name: ci
 # (`make harness && python3 tools/recomp_verify.py`), which needs your own ROM and
 # therefore cannot run in CI. --test-coro was written to be the part that can.
 #
+# The three lockstep gates are absent for the same reason, and that includes
+# `make recomp-check-nocpu`, the mode the shipped game runs in. Every one of them
+# replays an input script against the ROM in an emulated machine, so none of them can
+# run anywhere without a ROM, and no ROM ever reaches a runner. They run in the
+# pre-commit and pre-push hooks (tools/hooks), on the developer's own copy. CI gates
+# what CI can see: that no ROM-derived file is tracked, and that both executables build
+# and pass the coroutine self-test on all three platforms.
+#
 # SDL3 is fetched and built by cmake itself (-DDREAM_FETCH_SDL3=ON, pinned to a
 # release tag in recomp/CMakeLists.txt), so no job needs an SDL step of its own.
 on:
@@ -41,7 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: no ROM-derived file is committed
-        run: sh tools/check_no_rom.sh
+        # bash, not sh: the scan reads `git ls-files -z` with `read -r -d ''` so that a
+        # path git would otherwise C-quote still matches the patterns.
+        run: bash tools/check_no_rom.sh
 
   linux:
     runs-on: ubuntu-latest
@@ -106,16 +116,10 @@ jobs:
 
       - name: the executables import only system DLLs
         shell: msys2 {0}
-        run: |
-          set -e
-          for exe in build/recomp/dream_harness.exe build/recomp/dream.exe; do
-            echo "$exe:"
-            objdump -p "$exe" | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u | sed 's/^/    /'
-            if objdump -p "$exe" | grep -Eiq 'DLL Name: *(lib|SDL3\.dll)'; then
-              echo "$exe imports a non-system DLL; the release zip ships executables only"
-              exit 1
-            fi
-          done
+        # The allowlist is tools/check_dlls.sh, the same one `make win-dlls` and the
+        # release job use. The test that used to be inline here flagged only a DLL whose
+        # name starts with lib, and SDL3.dll, so zlib1.dll would have passed.
+        run: bash tools/check_dlls.sh build/recomp/dream_harness.exe build/recomp/dream.exe
 
   macos:
     runs-on: macos-latest

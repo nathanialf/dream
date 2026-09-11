@@ -18,7 +18,8 @@ progresses.
   `dream_harness --unit` boots the ROM to a frame of a script, seeds the registers and a
   few memory cells from `config/recomp_units.txt`, runs the ROM's routine and the C body
   from that identical state, and compares the seven regions, every register and the cycle
-  counts. At least four seeds each, all of which must pass. `config/recomp.txt` marks a
+  counts. At least four seeds each, all of which must pass, and a routine with fewer
+  than four fails the gate instead of being credited. `config/recomp.txt` marks a
   routine credited this way `; unit`, so the badge shows how each routine was credited.
 - The disassembly (`src/`) is the source of truth for behaviour; the C mirrors its
   routine boundaries and names so the two can be read side by side.
@@ -47,7 +48,7 @@ The app boots straight into the game, with a conventional desktop-style menu bar
 across the top of the window (SDL3 has no native menus, so it is rendered by the app).
 Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
 
-- **File**: Quit.
+- **File**: Screenshot (F12), Quit.
 - **View**: Scale 1x/2x/3x/4x, Fit to window (integer), Aspect 8:7 or 4:3, Fullscreen.
   Scaling never touches emulation state; there is no config file, the window size is the
   only memory.
@@ -55,30 +56,30 @@ Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
   the page in the viewport; closing resumes exactly. It shows the ROM's content that the
   game itself never displays:
 
-- each `game_mode`'s whole level and the title screen, composed out of the game's own
-  code and the emulator's own PPU rather than assembled by the viewer;
-- VRAM as each scene's init leaves it, with the palette row its maps give each tile;
-- the 113 alternate-format sprite frames and the 1555 live frames, with their palettes;
+- VRAM as each scene's init leaves it, with the palette row its maps give each tile, and
+  each scene's 32x32 metatiles drawn once apiece;
+- the 114 alternate-format sprite-frame rows (113 frames plus the truncated tail) and
+  the 1555 live frames, with their palettes;
 - the unreferenced font and the three picture strips in bank `$C1`;
 - the previous build's tileset, palette block and animation-script table in the first 32 KB;
 - every BRR sample (playable), with the four the songs never use marked;
 - the stale duplicate regions, listed with what live data they shadow.
 
-Everything but the level pages is decoded from the user's ROM in C at runtime using the
-same formats the Python codecs in `tools/assetcodec.py` implement; the list of what to
-show comes from the committed manifest `config/assets.txt`. Nothing from the ROM is
-shipped.
+Everything on these pages is decoded from the user's ROM in C at runtime using the same
+formats the Python codecs in `tools/assetcodec.py` implement; the list of what to show
+comes from the committed manifest `config/assets.txt`. Nothing from the ROM is shipped.
 
-A level is the exception, because it is not a file: several tilesets at different VRAM
-addresses, a metatile map the blitter turns into tilemap columns one column a frame as
-the camera moves, a static tilemap on another layer, a palette row per tilemap word and
-a scroll register per layer written by the mode's own NMI handler. Nothing assembled by
-hand can be trusted to agree with that, so the viewer assembles nothing: a second
-machine is booted from reset (the trick the Music page already uses for the sound
-driver), its camera is walked along the level with the game's own code doing every
-upload, and the picture is read back out of the PPU that drew it. `dream --scene-verify`
-is the gate on that: a composed screen and a frame of the running game, compared pixel
-for pixel with sprites masked.
+A sprite frame is the exception, because what the game draws is not what the frame file
+says on its own: the tiles land in an OBJ slot, the palette comes from an entity's flag
+word and the emitter decides which OAM entries exist. Nothing assembled by hand can be
+trusted to agree with that, so the viewer assembles nothing: a second machine is booted
+from reset (the trick the Music page already uses for the sound driver), the frame is
+forced onto one entity and the picture is read back out of the PPU that drew it.
+`dream --sprite-verify` is the gate on that: every forced render against the game's own,
+compared pixel for pixel. `make app-check` is what runs it, together with a
+`--gallery-toggle` run against the same run without the gallery, and a `dream --frames` /
+`dream_harness --hooks on` frame-line diff; the pre-commit and pre-push hooks run that
+target when a commit touches `recomp/` or `config/assets.txt`.
 
 The app's own lettering is the ROM's too — the 96-glyph 2bpp font at `014FE0` that no
 code in the game ever uploads. There is no other font in the binary: nothing is drawn
@@ -118,6 +119,7 @@ launcher, no menu, no settings, no config file: the mapping above is compiled in
 and Escape quits.
 
     make app        # builds SDL3 into build/sdl3 first if the system has none
+    make app-check  # the gallery's own gates and the app/harness frame-line diff
     make app-win    # the same two executables for Windows, cross-built with mingw-w64
 
 `dream` and `dream_harness` are deliberately the same machine: the same core, the
@@ -125,6 +127,8 @@ same hook dispatcher, the same accessors and the same cycle charge, with SDL as
 the only addition. Two hidden flags keep that checkable: `--frames N --input
 SCRIPT` runs a harness input script and prints the harness's own frame line, which
 must agree field for field with `dream_harness --hooks on` over the same script.
+`make app-check` is what runs that comparison, so it is a gate rather than a check
+somebody remembers to do.
 The picture and the sound are still produced under those flags, so the check
 covers the platform layer instead of routing around it.
 
@@ -165,7 +169,9 @@ that owns the address in the registry. The PPU, DMA and HDMA, the DSP, the APU
 timers and the port handshake keep running out of the vendored core, driven by the
 cycles the bodies already charge, so the frame timing is identical rather than
 close: every gate script passes `--lockstep` against full emulation at +0 master
-cycles and +0 APU cycles with 0 instructions executed.
+cycles and +0 APU cycles with 0 instructions executed. `--lockstep` compares both
+cycle counts after every frame and fails on a difference, so that figure is enforced
+rather than merely reported.
 
 Two consequences shape it. A pc with no body is a fatal error naming the pc and the
 body that handed it over, so the mode doubles as the port's dead-code check: it cannot
@@ -202,6 +208,10 @@ And the yield boundary is the APU catch-up slice rather than the frame: the SPC
 runs in steps against the CPU's clock, so the reference stops mid-routine at an
 instant a hooked run would otherwise have to run past.
 
-`config/recomp.txt` lists what has passed; `make recomp-check` is the gate,
-`make recomp-check-units` the routine-level one for what no script reaches, and
-`tools/hooks/pre-commit` runs the first when a commit touches `recomp/`.
+`config/recomp.txt` lists what has passed. `make recomp-check` is the gate, and it also
+refuses when that file no longer matches what the gates credit; `make recomp-check-units`
+is the routine-level one for what no script reaches; `make recomp-check-nocpu` is the same
+lockstep run with the candidate executing no instructions, which is the mode the shipped
+game runs in. The pre-commit and pre-push hooks run all three when a commit touches
+`recomp/` or `config/recomp*`. None of them can run in CI: every one of them replays a
+script against your own ROM, and no ROM ever reaches a runner.

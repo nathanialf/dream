@@ -555,7 +555,9 @@ animation-rate handlers' caller leaves one `$80` byte for the tail's `plb`, and
 Anything a line does not name keeps the value the booted machine had. The file's
 own header documents every key.
 
-Every routine carries at least four seeds, including the edge values its own
+Every routine carries at least four seeds, and `tools/recomp_verify.py` fails the
+gate on a routine that carries fewer rather than crediting it. The seeds include
+the edge values its own
 bounds allow: slot 0 and the last slot the entity or channel arrays hold, a zero
 and an all-ones operand, both sides of every branch the routine tests. A routine
 counts only when all of its seeds pass.
@@ -593,7 +595,10 @@ Everything else is the same machine. The PPU, DMA and HDMA, the DSP, the APU
 timers and the port handshake all keep running out of the vendored core, driven
 by the cycles the bodies charge through the timed accessors, so the frame timing
 is identical to the reference's rather than merely close: every
-script passes `--lockstep` at `+0 master cycles and +0 APU cycles`.
+script passes `--lockstep` at `+0 master cycles and +0 APU cycles`. That is a gate,
+not an observation: `--lockstep` compares both cycle counts after every frame and
+fails on any difference, so a wrong cycle charge is caught where it moves the clock
+rather than only where it eventually moves a compared byte.
 
 ### The scheduler
 
@@ -612,8 +617,12 @@ script passes `--lockstep` at `+0 master cycles and +0 APU cycles`.
 A pc the registry does not name is a fatal error naming the pc and the body that
 handed it over:
 
-    dream_harness: --no-cpu: no C body at 80:9679 (canonical C09679)
-                   handed over by mode1_particle_dispatch at C0922A, 0 bodies in flight
+    recomp: no-cpu: no C body at 80:9679 (canonical C09679)
+            handed over by mode1_particle_dispatch at C0922A, 0 bodies in flight
+
+The prefix is `recomp:` rather than `dream_harness:` because `harness/snes_state.c`
+is linked into the shipped game too: a player whose window vanished reads that line
+in `dream.log`, and the harness is not what they ran.
 
 so the mode doubles as the port's **dead-code check**: it cannot run at all
 until every address the program reaches has a body. Running it until it stopped
@@ -632,8 +641,10 @@ So a dispatched body chain runs on a stack of its own (`Coro`,
 `harness/coro.h`) and a yield *suspends* that stack instead of unwinding it.
 That header is the port's one platform split: create, switch and destroy with an
 explicit stack size, over `getcontext`/`makecontext`/`swapcontext` on POSIX
-(`harness/coro_ucontext.c`) and `ConvertThreadToFiber`/`CreateFiber`/
-`SwitchToFiber`/`DeleteFiber` on Windows (`harness/coro_fibers.c`), chosen by
+(`harness/coro_ucontext.c`, on an `mmap`ed stack with a `PROT_NONE` guard page
+below it) and `ConvertThreadToFiber`/`CreateFiberEx`/`SwitchToFiber`/`DeleteFiber`
+on Windows (`harness/coro_fibers.c`, which creates the fiber at the first
+`coro_start` rather than at `coro_new`), chosen by
 CMake per platform and by nothing else. `--test-coro` exercises whichever one was
 built, with no ROM (below). The scheduler gets control back at exactly the instruction
 boundary the reference CPU stops on; resuming continues the body from inside

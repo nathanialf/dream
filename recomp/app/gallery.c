@@ -76,6 +76,10 @@ typedef struct {
   int n1, n2, tileOff, unk1, unk2, ntiles1, vramOff, flags, ntiles2;
   int nrec, ntiles, spill;
   int altPal;         /* alternate format: the palette its OAM records carry */
+  int altAttr;        /* the OAM attribute byte its records carry, -1 when 2-byte */
+  int recSize;        /* 2 or 3, from the header's own flag bit */
+  int declared;       /* the length the header accounts for */
+  int extra;          /* what the manifest asset has beyond it */
   int cw, chh;        /* the assembled part */
   int w, h;           /* including the spill strip */
   bool truncated;
@@ -120,18 +124,24 @@ typedef struct {
   uint8_t  pal[GAL_MAX_FRAME_PAL];    /* OBJ palette 0-7 -> CGRAM $80 + 16*pal */
   uint16_t types[GAL_MAX_FRAME_PAL];  /* bit (entity_type / 2) per type that plays it */
   uint16_t flags[GAL_MAX_FRAME_PAL];  /* the whole entity_flags word of that entity */
+  /* How much of the tables points here: animation records that reach this frame
+   * through this {scene, palette}, and whether any of the types that do is an
+   * entity the scene's init table spawns itself rather than one of the three
+   * spawn transforms (types 4, 6 and $0A, whose animation is the parent's
+   * offset). Both are what orders several derived candidates. */
+  uint16_t hits[GAL_MAX_FRAME_PAL];
+  uint8_t  spawned[GAL_MAX_FRAME_PAL];
 } FramePal;
+
+/* An animation script is played by one entity, so every frame of it is drawn
+ * with that entity's palette: an observation of any frame of a script is
+ * evidence for every frame of it. These are the two directions of that map. */
+#define GAL_MAX_FRAME_ANIM 4
 
 /* VRAM is 32 KB of words; a 4bpp tile is 16 of them. */
 #define GAL_VRAM_TILES 2048
 
 typedef struct { int item, pal, page; } SecState;
-
-/* Scenes page state: which scene, which layer view, where the window is over the
- * composed image and how far it is zoomed out. */
-typedef struct {
-  int mode, view, zoom, sx, sy;
-} SceneState;
 
 struct Gallery {
   const uint8_t* rom;
@@ -169,8 +179,8 @@ struct Gallery {
 
   /* VRAM as each scene's init leaves it: every upload replayed in order, so a
    * tile index in one of the scene's maps means here what it means there. The
-   * metatile blitter's own $7800 columns are not in it (they are a column a
-   * frame as the camera moves): the Scenes page is where those are shown. */
+   * metatile blitter's own $7800 columns are not in it: they are a column a
+   * frame as the camera moves, not an init upload. */
   uint16_t vram[GAL_MODE_COUNT][0x8000];
   uint8_t vramSet[GAL_MODE_COUNT][0x8000];
   /* Per 4bpp VRAM tile: the palette row the scene's own maps reference it with
@@ -181,6 +191,15 @@ struct Gallery {
 
   /* One row per manifest asset; only the sprite_frame rows are filled. */
   FramePal* framePal;
+  /* frame asset -> the animation ids that name it, and animation id -> the
+   * frames it names, as a head/next chain over the asset table. */
+  uint8_t* frameAnimN;
+  uint8_t (*frameAnim)[GAL_MAX_FRAME_ANIM];
+  int animHead[GX_ANIM_COUNT];
+  int* animNext;
+  /* entity type -> how many animation records give it each OBJ palette, over
+   * every scene: what orders the eight guesses for a frame no scene reaches. */
+  uint32_t typePal[16][8];
   /* frame id (the byte index into data_C40000) of each sprite_frame asset, so a
    * page can ask the observation pass about the frame it is showing. */
   uint16_t* frameId;
@@ -208,7 +227,19 @@ struct Gallery {
   bool bgPaged;            /* the user has paged: stop picking a default page */
 
   Scenes* scenes;          /* main.c owns it; NULL until a page needs one */
-  SceneState scene;
+
+  /* The two source lines the current page last set (see draw_source_foot). */
+  char srcA[96], srcB[96];
+
+  /* The picture strips' measured VRAM layout, found once (strip_find_base). */
+  int stripBase[3], stripRot[3], stripCoarse[3], stripFine[3];
+  bool stripDone[3];
+
+  /* What the scene machine was last asked to draw, so a shot that finishes while
+   * the page is showing something else is still taken into the cache. */
+  bool prePending;
+  int preMode;
+  uint16_t preFid, preFlags;
 };
 
 /* ---- ROM access ----------------------------------------------------------------- */
@@ -337,6 +368,16 @@ static uint32_t pal_pick(const PalBlock* set, int n, int idx, const char** name,
 }
 
 #define MAIN_PAL_N ((int) (sizeof(kMainPals) / sizeof(kMainPals[0])))
+
+/* Index 0 transparent, 1-15 an even grey ramp. What a page with no palette at
+ * all is drawn through: nothing in the ROM says what colours these bytes are
+ * meant to have, so the page shows the pixel values and says so. */
+static void neutral_ramp(uint32_t* rgb) {
+  for(int i = 0; i < 16; i++) {
+    unsigned v = (unsigned) (i * 17);
+    rgb[i] = RGB(v, v, v);
+  }
+}
 
 /* The picker, now an override rather than the only way to colour a page: fills 16
  * RGB entries and returns the line that says which row the user asked for. */
@@ -488,19 +529,35 @@ static uint32_t frame_id_offset(const Gallery* g, uint16_t fid) {
 /* Record one {scene, palette, type} on the frame at `off`, merging into whatever
  * an earlier entity already recorded for the same {scene, palette}. */
 static void frame_pal_add(Gallery* g, uint32_t off, int mode, int pal, int type,
-                          uint16_t flags) {
+                          uint16_t flags, bool spawned, int aid) {
   int idx = asset_by_start(off);
   if(idx < 0 || kGalleryAssets[idx].kind != GK_SPRITE_FRAME) return;
+  /* The script this frame belongs to, both ways round. */
+  if(aid > 0 && (aid & 1) == 0 && aid < ANIM_IDS * 2) {
+    uint8_t a = (uint8_t) (aid / 2);
+    bool have = false;
+    for(int i = 0; i < g->frameAnimN[idx]; i++) if(g->frameAnim[idx][i] == a) have = true;
+    if(!have && g->frameAnimN[idx] < GAL_MAX_FRAME_ANIM) {
+      g->frameAnim[idx][g->frameAnimN[idx]++] = a;
+      g->animNext[idx] = g->animHead[a];
+      g->animHead[a] = idx;
+    }
+  }
+  if(type >= 0 && type < 32 && pal >= 0 && pal < 8) g->typePal[type / 2][pal]++;
   FramePal* fp = &g->framePal[idx];
   for(int i = 0; i < fp->n; i++)
     if(fp->mode[i] == mode && fp->pal[i] == pal) {
       fp->types[i] |= (uint16_t) (1u << (type / 2));
+      if(fp->hits[i] < 0xFFFFu) fp->hits[i]++;
+      if(spawned) fp->spawned[i] = 1;
       return;
     }
   if(fp->n >= GAL_MAX_FRAME_PAL) return;
   fp->mode[fp->n] = (uint8_t) mode;
   fp->pal[fp->n] = (uint8_t) pal;
   fp->types[fp->n] = (uint16_t) (1u << (type / 2));
+  fp->hits[fp->n] = 1;
+  fp->spawned[fp->n] = (uint8_t) (spawned ? 1 : 0);
   /* The whole flag word, not just its palette bits: bits 0-8 are the OBJ tile
    * slot the frame's tiles are DMA'd to and bits 12-13 the priority, which is
    * what a forced render has to hand the entity back. */
@@ -511,7 +568,7 @@ static void frame_pal_add(Gallery* g, uint32_t off, int mode, int pal, int type,
 /* Walk one animation script, recording its frames and following the one link a
  * terminator can carry (duration $FFFF = switch to the animation id in `frame`). */
 static void walk_script(Gallery* g, int aid, uint8_t* seen, int mode, int pal, int type,
-                        uint16_t flags) {
+                        uint16_t flags, bool spawned) {
   if(aid <= 0 || (aid & 1) != 0 || aid >= ANIM_IDS * 2) return;
   uint16_t p = rd16(g, GX_ANIM_INDEX + (uint32_t) aid);
   uint32_t limit = GX_BANK_C4 + script_limit(g, p);
@@ -524,12 +581,12 @@ static void walk_script(Gallery* g, int aid, uint8_t* seen, int mode, int pal, i
     if(dur == 0xFFFF) {
       if(fr > 0 && (fr & 1) == 0 && fr < (uint16_t) (ANIM_IDS * 2) && !seen[fr / 2]) {
         seen[fr / 2] = 1;
-        walk_script(g, fr, seen, mode, pal, type, flags);
+        walk_script(g, fr, seen, mode, pal, type, flags, spawned);
       }
       break;
     }
     uint32_t off = frame_id_offset(g, fr);
-    if(off != 0) frame_pal_add(g, off, mode, pal, type, flags);
+    if(off != 0) frame_pal_add(g, off, mode, pal, type, flags, spawned, aid);
   }
 }
 
@@ -618,12 +675,14 @@ static void build_frame_palettes(Gallery* g) {
 
     for(int i = 0; i < n; i++) {
       int pal = (slot[i].flags >> 9) & 7;
+      int t0 = slot[i].type;
       uint8_t seen[174];
       memset(seen, 0, sizeof(seen));
       for(int a = 2; a < ANIM_IDS * 2; a += 2) {
         if(!slot[i].anims[a / 2] || seen[a / 2]) continue;
         seen[a / 2] = 1;
-        walk_script(g, a, seen, mode, pal, slot[i].type, slot[i].flags);
+        walk_script(g, a, seen, mode, pal, slot[i].type, slot[i].flags,
+                    t0 != 4 && t0 != 6 && t0 != 0x0A);
       }
     }
   }
@@ -900,6 +959,7 @@ static void vram_tile_pixels(const uint16_t* vram, unsigned word, int bpp, uint8
   }
 }
 
+
 /* ---- which BRR samples the songs actually use ------------------------------------ */
 
 /* Walked from the ROM rather than hard-coded: the song table's second pointer of each
@@ -1102,79 +1162,115 @@ static bool frame_build_live(Gallery* g, int assetIdx, FrameInfo* fi) {
   return true;
 }
 
-/* Alternate format (docs/data_formats.md 1c): 8-byte header, then {x, y, attr} records
- * whose attr band identifies them, then 4bpp tiles: one tile per record, in order. */
+/* Alternate format, decoded from its own header.
+ *
+ * The header is not opaque and the records are not one tile each. Over all 114
+ * assets the manifest lists, these eight bytes account for the frame's length
+ * exactly, with nothing left over:
+ *
+ *   hdr[0]  bit 7  the records carry a third byte, the OAM attribute
+ *           bits 0-6  n1, the number of 16x16 sprites
+ *   hdr[1]  n2, 8x8 sprites; hdr[2] off2, the VRAM tile they start at
+ *   hdr[3]  n3, 8x8 sprites; hdr[4] off3, the VRAM tile they start at
+ *   hdr[5]  nt1, the tiles of the first DMA chunk, which lands at VRAM tile 0
+ *   hdr[6]  vo2, where the second chunk lands; hdr[7] nt2, its tile count
+ *
+ *   length = 8 + (3 or 2) * (n1 + n2 + n3) + 32 * (nt1 + nt2)
+ *
+ * and nt1 + nt2 = 4 * n1 + n2 + n3 in every frame, which is what a roster of n1
+ * 16x16 sprites and n2 + n3 8x8 ones needs. A 16x16 sprite is four tiles in the
+ * PPU's own name-table arrangement, t, t+1, t+16, t+17 across a sixteen-tile
+ * VRAM row, and the i'th of them sits at 2 * (i % 8) + 32 * (i / 8): the tile
+ * hdr[2] names is exactly the next free slot after n1 of those, in all 114.
+ *
+ * Records are {x, y} or {x, y, attr}, unsigned, top left, no bias, in file
+ * order. There is no spill: every tile the header declares is used by exactly
+ * one sprite and none is left over.
+ *
+ * Colour: none. Nothing in the ROM reads these frames, no CGRAM ever holds their
+ * colours, and the attribute byte's palette bits name a row nothing uploads. The
+ * page draws them through a neutral ramp and says so.
+ */
 static bool frame_build_alt(Gallery* g, int assetIdx, FrameInfo* fi) {
   uint32_t s = kGalleryAssets[assetIdx].start, e = kGalleryAssets[assetIdx].end;
   if(e < s + 8u) return false;
   memset(fi, 0, sizeof(*fi));
   for(int i = 0; i < 8; i++) fi->hdr[i] = rd8(g, s + (uint32_t) i);
 
-  int n = 0;
-  int palVotes[8];
-  memset(palVotes, 0, sizeof(palVotes));
-  while(n < 200) {
-    uint32_t p = s + 8u + (uint32_t) (3 * n);
-    if(p + 2u >= e) break;
-    uint8_t attr = rd8(g, p + 2u);
-    if(attr < 0x1C || attr > 0x22) break;
-    palVotes[(attr >> 1) & 7]++;
-    n++;
-  }
-  fi->nrec = n;
-  /* The record's low OBJ attribute byte decodes as vhppp pN (docs/data_formats.md
-   * 1c), so bits 3-1 are the palette the frame's own data asks for: the only
-   * palette evidence there is for a format the live game never reads. */
-  fi->altPal = 0;
-  for(int i = 1; i < 8; i++) if(palVotes[i] > palVotes[fi->altPal]) fi->altPal = i;
-  uint32_t recEnd = s + 8u + (uint32_t) (3 * n);
-  fi->ntiles = recEnd < e ? (int) ((e - recEnd) / 32u) : 0;
+  int n1 = fi->hdr[0] & 0x7F;
+  bool wide = (fi->hdr[0] & 0x80) != 0;
+  int n2 = fi->hdr[1], off2 = fi->hdr[2];
+  int n3 = fi->hdr[3], off3 = fi->hdr[4];
+  int nt1 = fi->hdr[5], vo2 = fi->hdr[6], nt2 = fi->hdr[7];
+  int recs = n1 + n2 + n3, tiles = nt1 + nt2;
+  int rsz = wide ? 3 : 2;
 
-  int minx = 255, miny = 255, maxx = 0, maxy = 0;
-  for(int i = 0; i < n; i++) {
-    int x = rd8(g, s + 8u + (uint32_t) (3 * i));
-    int y = rd8(g, s + 9u + (uint32_t) (3 * i));
+  fi->n1 = n1;
+  fi->n2 = n2;
+  fi->tileOff = off2;
+  fi->unk1 = n3;
+  fi->unk2 = off3;
+  fi->ntiles1 = nt1;
+  fi->vramOff = vo2;
+  fi->flags = nt2;
+  fi->ntiles2 = nt2;
+  fi->nrec = recs;
+  fi->ntiles = tiles;
+  fi->recSize = rsz;
+  if(recs <= 0 || tiles <= 0) return false;
+  if(tiles != 4 * n1 + n2 + n3) fi->truncated = true;
+
+  uint32_t recEnd = s + 8u + (uint32_t) (rsz * recs);
+  uint32_t want = (uint32_t) (8 + rsz * recs + 32 * tiles);
+  fi->declared = (int) want;
+  fi->extra = (int) ((e - s) - want);          /* 0 when the header accounts for it all */
+  if(recEnd + (uint32_t) (32 * tiles) > e) return false;
+
+  /* The attribute byte the records carry, for the footer. It is not a palette
+   * the page can use: nothing uploads a palette for these frames. */
+  fi->altPal = 0;
+  fi->altAttr = wide ? (int) rd8(g, s + 10u) : -1;
+
+  int minx = 4096, miny = 4096, maxx = -4096, maxy = -4096;
+  for(int i = 0; i < recs; i++) {
+    int x = rd8(g, s + 8u + (uint32_t) (rsz * i));
+    int y = rd8(g, s + 9u + (uint32_t) (rsz * i));
+    int sz = i < n1 ? 16 : 8;
     if(x < minx) minx = x;
     if(y < miny) miny = y;
-    if(x > maxx) maxx = x;
-    if(y > maxy) maxy = y;
+    if(x + sz > maxx) maxx = x + sz;
+    if(y + sz > maxy) maxy = y + sz;
   }
-  if(n == 0) { minx = miny = maxx = maxy = 0; }
-  fi->cw = n ? maxx + 8 - minx : 0;
-  fi->chh = n ? maxy + 8 - miny : 0;
+  fi->cw = maxx - minx;
+  fi->chh = maxy - miny;
+  if(fi->cw < 8) fi->cw = 8;
+  if(fi->chh < 8) fi->chh = 8;
   if(fi->cw > CANVAS_W) fi->cw = CANVAS_W;
   if(fi->chh > CANVAS_H) fi->chh = CANVAS_H;
 
   canvas_reset(g);
-  bool placed[512];
-  memset(placed, 0, sizeof(placed));
   uint8_t px[64];
-  for(int i = 0; i < n && i < fi->ntiles; i++) {
-    int x = rd8(g, s + 8u + (uint32_t) (3 * i)) - minx;
-    int y = rd8(g, s + 9u + (uint32_t) (3 * i)) - miny;
-    if(!canvas_free(g, x, y)) continue;
-    tile_pixels(g, recEnd + (uint32_t) (32 * i), 4, px);
-    canvas_put(g, x, y, px);
-    if(i < 512) placed[i] = true;
+  for(int i = 0; i < recs; i++) {
+    int x = rd8(g, s + 8u + (uint32_t) (rsz * i)) - minx;
+    int y = rd8(g, s + 9u + (uint32_t) (rsz * i)) - miny;
+    /* The VRAM tile this sprite starts at, and from it the tile in the file:
+     * the first chunk lands at tile 0, the second at vo2. */
+    int v;
+    if(i < n1) v = 2 * (i % 8) + 32 * (i / 8);
+    else if(i < n1 + n2) v = off2 + (i - n1);
+    else v = off3 + (i - n1 - n2);
+    int quad = i < n1 ? 4 : 1;
+    for(int q = 0; q < quad; q++) {
+      int tv = v + (q & 1) + ((q >> 1) * 16);
+      int f = tv < nt1 ? tv : nt1 + (tv - vo2);
+      if(f < 0 || f >= tiles) continue;
+      tile_pixels(g, recEnd + (uint32_t) (32 * f), 4, px);
+      canvas_put(g, x + (q & 1) * 8, y + (q >> 1) * 8, px);
+    }
   }
-
   fi->spill = 0;
-  for(int i = 0; i < fi->ntiles && i < 512; i++) if(!placed[i]) fi->spill++;
-  int gap = (fi->chh > 0 && fi->spill > 0) ? 1 : 0;
-  int srows = (fi->spill + 15) / 16;
   fi->w = fi->cw;
-  if(fi->spill > 0 && fi->w < 128) fi->w = 128;
-  if(fi->w < 8) fi->w = 8;
-  fi->h = fi->chh + gap + srows * 8;
-  if(fi->h > CANVAS_H) fi->h = CANVAS_H;
-
-  int k = 0;
-  for(int i = 0; i < fi->ntiles && i < 512; i++) {
-    if(placed[i]) continue;
-    tile_pixels(g, recEnd + (uint32_t) (32 * i), 4, px);
-    canvas_put(g, (k % 16) * 8, fi->chh + gap + (k / 16) * 8, px);
-    k++;
-  }
+  fi->h = fi->chh;
   return true;
 }
 
@@ -1225,15 +1321,21 @@ static int draw_tile_grid(const Gallery* g, uint32_t* fb, uint32_t start, uint32
 /* Draw a tilemap of 16-bit words {tile, palette, priority, flips}. The strips' tile
  * numbers are VRAM-relative and start at $44 (their tilesets never reached VRAM, so the
  * base is read off the maps themselves: see recomp/app/README.md). */
-static void draw_tilemap(const Gallery* g, uint32_t* fb, uint32_t mapOff, int words,
-                         uint32_t tilesOff, uint32_t tilesEnd, const uint32_t* rgb,
-                         bool wordPal, int baseTile, int cols, int x0, int y0) {
+/* `rot` rotates the map's columns, because a tilemap wraps: a caption that runs
+ * off the right of a 32-column map comes back on the left, and the picture only
+ * reads with the wrap taken out (strip_rotation below finds it). */
+static void draw_tilemap_rot(const Gallery* g, uint32_t* fb, uint32_t mapOff, int words,
+                             uint32_t tilesOff, uint32_t tilesEnd, const uint32_t* rgb,
+                             bool wordPal, int baseTile, int cols, int x0, int y0,
+                             int rot) {
   int ntiles = (int) ((tilesEnd - tilesOff) / 32u);
   uint8_t px[64];
   for(int i = 0; i < words; i++) {
-    uint16_t w = rd16(g, mapOff + (uint32_t) (2 * i));
+    int c = i % cols, r = i / cols;
+    int src = r * cols + ((c + rot) % cols + cols) % cols;
+    uint16_t w = rd16(g, mapOff + (uint32_t) (2 * src));
     int idx = (w & 0x3FF) - baseTile;
-    int cx = x0 + (i % cols) * 8, cy = y0 + (i / cols) * 8;
+    int cx = x0 + c * 8, cy = y0 + r * 8;
     if(idx < 0 || idx >= ntiles) {
       for(int y = 0; y < 8; y++)
         for(int x = 0; x < 8; x++) fb_px(fb, cx + x, cy + y, checker(cx + x, cy + y));
@@ -1251,6 +1353,7 @@ static void draw_tilemap(const Gallery* g, uint32_t* fb, uint32_t mapOff, int wo
       }
   }
 }
+
 
 /* ---- chrome ---------------------------------------------------------------------- */
 
@@ -1270,6 +1373,51 @@ static void draw_foot(uint32_t* fb, const char* s) {
   fb_text(fb, 3, FOOT_Y, s, C_DIM);
 }
 
+/* ---- where a page's content comes from -------------------------------------
+ *
+ * Every page says which bytes of the user's ROM it is showing and what the
+ * program does with them: the file offsets, the manifest path under data/ the
+ * same bytes extract to, and the routine or table that reads them. Two lines,
+ * above the controls, in the ROM's own font. Where a value is not something the
+ * ROM states, the line says "best guess", the way the palettes already do.
+ * -------------------------------------------------------------------------- */
+#define SRC_Y0 (FOOT_Y - 2 * LINE)
+
+#if defined(__GNUC__)
+__attribute__((format(printf, 2, 3)))
+#endif
+static void set_source(Gallery* g, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(g->srcA, sizeof(g->srcA), fmt, ap);
+  va_end(ap);
+  g->srcB[0] = 0;
+}
+
+#if defined(__GNUC__)
+__attribute__((format(printf, 2, 3)))
+#endif
+static void set_source2(Gallery* g, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(g->srcB, sizeof(g->srcB), fmt, ap);
+  va_end(ap);
+}
+
+/* The manifest path of an asset, without its directory, or "" when there is none. */
+static const char* asset_file(int idx) {
+  if(idx < 0 || idx >= (int) kGalleryAssetCount) return "";
+  const char* p = kGalleryAssets[idx].path;
+  if(p == NULL) return "";
+  const char* slash = strrchr(p, '/');
+  return slash != NULL ? slash + 1 : p;
+}
+
+static void draw_source_foot(const Gallery* g, uint32_t* fb) {
+  if(g->srcA[0] != 0) fb_text(fb, 3, SRC_Y0, g->srcA, C_DIM);
+  if(g->srcB[0] != 0) fb_text(fb, 3, SRC_Y0 + LINE, g->srcB, C_DIM);
+}
+
 static void draw_palette_strip(uint32_t* fb, const uint32_t* rgb, int count, int x, int y) {
   for(int i = 0; i < count; i++) fb_fill(fb, x + i * 5, y, 4, 5, rgb[i]);
 }
@@ -1287,113 +1435,6 @@ static void types_str(uint16_t mask, char* out, size_t cap) {
   if(k == 0) snprintf(out, cap, "-");
 }
 
-/* ---- scenes ----------------------------------------------------------------
- *
- * The one page whose picture does not come out of the ROM by hand. scene.c boots
- * a machine of its own, walks its camera across the level with the game's own
- * code doing every metatile column, every DMA and every scroll register, and
- * reads the picture back out of the PPU that drew it; this only puts a window on
- * the result. See recomp/app/scene.h for what the composed image is and where it
- * can differ from a frame of the running game.
- * -------------------------------------------------------------------------- */
-
-#define SCENE_VIEW_Y0 12
-#define SCENE_VIEW_H  164
-
-static const char* scene_view_name(int view) {
-  static char buf[24];
-  if(view == SCENE_VIEW_ALL) return "all layers";
-  snprintf(buf, sizeof(buf), "BG%d only", view);
-  return buf;
-}
-
-static void draw_scenes(Gallery* g, uint32_t* fb) {
-  SceneState* st = &g->scene;
-  char right[32];
-  snprintf(right, sizeof(right), "%d/%d", st->mode + 1, SCENE_MODE_COUNT);
-  draw_frame_chrome(fb, "SCENES", right);
-
-  if(g->scenes == NULL) {
-    fb_text(fb, 3, 20, "no scene machine", C_MARK);
-    draw_foot(fb, "A back");
-    return;
-  }
-  scenes_request(g->scenes, st->mode);
-
-  int w = 0, h = 0;
-  const uint32_t* img = scenes_image(g->scenes, st->view, &w, &h);
-  if(img == NULL) img = scenes_image(g->scenes, SCENE_VIEW_ALL, &w, &h);
-
-  if(img == NULL || scenes_image_mode(g->scenes) != st->mode) {
-    /* Composing. The bar is the walk's own progress: the machine runs one frame
-     * per 8 pixels of camera travel, because that is how often the game's
-     * metatile blitter lays down a column. */
-    fb_textf(fb, 3, 24, C_TEXT, "composing %s", scenes_mode_name(st->mode));
-    char line[64];
-    snprintf(line, sizeof(line), "%.34s", scenes_status(g->scenes));
-    fb_text(fb, 3, 34, line, C_DIM);
-    int pct = scenes_progress(g->scenes);
-    fb_fill(fb, 3, 48, 250, 9, C_RULE);
-    fb_fill(fb, 4, 49, 248 * pct / 1000, 7, C_SEL);
-    fb_textf(fb, 3, 64, C_DIM, "%d.%d%%", pct / 10, pct % 10);
-    fb_text(fb, 3, 80, "a second machine booted from reset,", C_DIM);
-    fb_text(fb, 3, 88, "walked across the level by the game", C_DIM);
-    draw_foot(fb, "A back");
-    return;
-  }
-
-  /* Zoom 0 is "fit the level's height", which is what a scene page should open
-   * on: the whole map top to bottom, scrolled along its length. */
-  int zoom = st->zoom;
-  if(zoom < 1) {
-    zoom = 1;
-    while(zoom < 16 && h / zoom > SCENE_VIEW_H) zoom *= 2;
-  }
-  int vw = w / zoom, vh = h / zoom;
-  int maxSx = vw > GALLERY_FB_W ? vw - GALLERY_FB_W : 0;
-  int maxSy = vh > SCENE_VIEW_H ? vh - SCENE_VIEW_H : 0;
-  if(st->sx > maxSx) st->sx = maxSx;
-  if(st->sy > maxSy) st->sy = maxSy;
-  if(st->sx < 0) st->sx = 0;
-  if(st->sy < 0) st->sy = 0;
-
-  /* centre an image smaller than the window rather than pin it to a corner */
-  int ox = vw < GALLERY_FB_W ? (GALLERY_FB_W - vw) / 2 : 0;
-  int oy = vh < SCENE_VIEW_H ? (SCENE_VIEW_H - vh) / 2 : 0;
-  for(int y = 0; y < SCENE_VIEW_H; y++) {
-    int sy = (st->sy + y - oy) * zoom;
-    for(int x = 0; x < GALLERY_FB_W; x++) {
-      int sx = (st->sx + x - ox) * zoom;
-      uint32_t c = (sx >= 0 && sy >= 0 && sx < w && sy < h)
-                   ? img[(size_t) sy * w + sx] : C_BG;
-      fb_px(fb, x, SCENE_VIEW_Y0 + y, c);
-    }
-  }
-
-  SceneInfo info;
-  bool haveInfo = scenes_info(g->scenes, &info);
-  int y = SCENE_VIEW_Y0 + SCENE_VIEW_H + 4;
-  fb_textf(fb, 3, y, C_TEXT, "%s %dx%d %s 1:%d",
-           scenes_mode_name(st->mode), w, h, scene_view_name(st->view), zoom);
-  y += LINE;
-  if(haveInfo && info.cols > 0) {
-    fb_textf(fb, 3, y, C_TEXT, "map %06X %dx%d meta %06X",
-             info.mapAddr, info.cols, info.rows, info.metaAddr);
-    y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "BGMODE %d%s TM %02X  level BG%d",
-             info.bgmode, info.bg3prio ? "+p3" : "", info.tm, info.levelBg);
-    y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "%d screens %d frames  HDMA off",
-             info.screens, info.frames);
-  } else {
-    fb_text(fb, 3, y, "the title screen, no button pressed", C_DIM);
-    y += LINE;
-    fb_textf(fb, 3, y, C_DIM, "BGMODE %d TM %02X  8bpp BG1, no map",
-             haveInfo ? info.bgmode : 0, haveInfo ? info.tm : 0);
-  }
-  draw_foot(fb, "dpad scroll  LR scene  B layer  Y zoom");
-}
-
 /* ---- the palettes a frame is actually drawn with ---------------------------
  *
  * Two sources, and the page says which is which. Observed: the scene machine
@@ -1405,13 +1446,16 @@ static void draw_scenes(Gallery* g, uint32_t* fb) {
  * -------------------------------------------------------------------------- */
 
 #define GAL_SRC_OBSERVED 0
-#define GAL_SRC_DERIVED  1
-#define GAL_SRC_GUESS    2
+#define GAL_SRC_SCRIPT   1
+#define GAL_SRC_DERIVED  2
+#define GAL_SRC_GUESS    3
 
 typedef struct {
   uint8_t mode, pal, source;
+  uint8_t via;         /* the animation id the observation travelled along, /2 */
   uint16_t types;      /* entity types the derivation attributes it to, if any */
   uint16_t flags;      /* the whole entity_flags word a forced render hands over */
+  uint32_t rank;       /* what ordered it inside its own source */
 } PalCand;
 
 #define GAL_MAX_CAND (GAL_MAX_FRAME_PAL + 8)
@@ -1422,20 +1466,78 @@ static uint16_t flags_with_pal(uint16_t flags, int pal) {
   return (uint16_t) ((flags & ~0x0E00u) | ((unsigned) (pal & 7) << 9));
 }
 
+/* Did the observation pass see this frame itself, in this scene, at this palette? */
+static bool obs_has(const Gallery* g, int idx, int mode, int pal) {
+  uint8_t obs[SCENE_OBS_MODES];
+  uint16_t fid = g->frameId != NULL ? g->frameId[idx] : 0;
+  if(fid == 0 || g->scenes == NULL || !scenes_obs_ready(g->scenes)) return false;
+  if(!scenes_obs_get(g->scenes, fid, obs)) return false;
+  return ((obs[mode] >> pal) & 1u) != 0;
+}
+
+/* Order for the eight guesses: a frame no scene reaches has no entity of its
+ * own, so the nearest frame that does have one lends its entity types, and the
+ * palettes those types are given elsewhere come first. */
+static uint16_t nearest_types(const Gallery* g, int idx) {
+  for(int d = 1; d < 64; d++) {
+    for(int s = 0; s < 2; s++) {
+      int n = s ? idx - d : idx + d;
+      if(n < 0 || n >= (int) kGalleryAssetCount) continue;
+      if(kGalleryAssets[n].kind != GK_SPRITE_FRAME) continue;
+      const FramePal* fp = &g->framePal[n];
+      if(fp->n == 0) continue;
+      uint16_t t = 0;
+      for(int i = 0; i < fp->n; i++) t |= fp->types[i];
+      if(t != 0) return t;
+    }
+  }
+  return 0;
+}
+
+static int cand_cmp(const void* a, const void* b) {
+  const PalCand* x = (const PalCand*) a;
+  const PalCand* y = (const PalCand*) b;
+  if(x->source != y->source) return x->source < y->source ? -1 : 1;
+  if(x->rank != y->rank) return x->rank > y->rank ? -1 : 1;
+  if(x->mode != y->mode) return x->mode < y->mode ? -1 : 1;
+  return x->pal < y->pal ? -1 : (x->pal > y->pal ? 1 : 0);
+}
+
+/* Every palette this frame could be drawn with, best evidence first.
+ *
+ *  OBSERVED   the scene machine saw this frame in OAM with these palette bits.
+ *  OBSERVED via script N
+ *             the machine saw another frame of animation script N with them.
+ *             One script is played by one entity and an entity's palette is a
+ *             constant of its init record, so every frame of a script is drawn
+ *             with the same palette: an observation anywhere in a script is an
+ *             observation for all of it.
+ *  DERIVED    the entity/animation walk allows it. Several are ordered by how
+ *             much of the tables points at each: the number of animation records
+ *             that reach this frame through that entity type, and whether the
+ *             type is one the scene's init table spawns itself rather than one
+ *             of the three spawn transforms.
+ *  GUESS      no entity in any scene reaches this frame. The eight OBJ palettes
+ *             of game_mode 0, ordered by what the nearest frame with an entity
+ *             is given elsewhere.
+ *
+ * Where the derivation and an observation disagree the observation wins, because
+ * it is a measurement: the derived candidate is still listed, below.
+ */
 static int frame_pal_candidates(const Gallery* g, int idx, PalCand* out) {
   int n = 0;
   const FramePal* fp = g->framePal != NULL ? &g->framePal[idx] : NULL;
   uint8_t obs[SCENE_OBS_MODES];
   uint16_t fid = g->frameId != NULL ? g->frameId[idx] : 0;
-  if(fid != 0 && g->scenes != NULL && scenes_obs_ready(g->scenes) &&
-     scenes_obs_get(g->scenes, fid, obs)) {
+  bool ready = g->scenes != NULL && scenes_obs_ready(g->scenes);
+  if(fid != 0 && ready && scenes_obs_get(g->scenes, fid, obs)) {
     for(int m = 0; m < SCENE_OBS_MODES && n < GAL_MAX_CAND; m++)
       for(int p = 0; p < 8 && n < GAL_MAX_CAND; p++) {
         if(((obs[m] >> p) & 1u) == 0) continue;
+        memset(&out[n], 0, sizeof(out[n]));
         out[n].mode = (uint8_t) m;
         out[n].pal = (uint8_t) p;
         out[n].source = GAL_SRC_OBSERVED;
-        out[n].types = 0;
         /* The flag word the entity carried when it was seen: that is the tile
          * slot and priority the game itself gave this frame. */
         out[n].flags = flags_with_pal(scenes_obs_flags(g->scenes, fid, m), p);
@@ -1445,52 +1547,115 @@ static int frame_pal_candidates(const Gallery* g, int idx, PalCand* out) {
         n++;
       }
   }
+  /* The same observation, carried along the animation scripts this frame is in. */
+  if(ready && g->frameAnimN != NULL)
+    for(int k = 0; k < g->frameAnimN[idx] && n < GAL_MAX_CAND; k++) {
+      int a = g->frameAnim[idx][k];
+      for(int f = g->animHead[a]; f >= 0 && n < GAL_MAX_CAND; f = g->animNext[f]) {
+        uint16_t ofid = g->frameId[f];
+        uint8_t o2[SCENE_OBS_MODES];
+        if(f == idx || ofid == 0 || !scenes_obs_get(g->scenes, ofid, o2)) continue;
+        for(int m = 0; m < SCENE_OBS_MODES && n < GAL_MAX_CAND; m++)
+          for(int p = 0; p < 8 && n < GAL_MAX_CAND; p++) {
+            if(((o2[m] >> p) & 1u) == 0) continue;
+            bool dup = false;
+            for(int i = 0; i < n; i++)
+              if(out[i].mode == m && out[i].pal == p) dup = true;
+            if(dup) continue;
+            memset(&out[n], 0, sizeof(out[n]));
+            out[n].mode = (uint8_t) m;
+            out[n].pal = (uint8_t) p;
+            out[n].source = GAL_SRC_SCRIPT;
+            out[n].via = (uint8_t) a;
+            out[n].flags = flags_with_pal(scenes_obs_flags(g->scenes, ofid, m), p);
+            if(fp != NULL)
+              for(int i = 0; i < fp->n; i++)
+                if(fp->mode[i] == m && fp->pal[i] == p) out[n].types = fp->types[i];
+            n++;
+          }
+      }
+    }
+  int firstDerived = n;
   if(fp != NULL) {
     for(int i = 0; i < fp->n && n < GAL_MAX_CAND; i++) {
       bool dup = false;
       for(int k = 0; k < n; k++)
         if(out[k].mode == fp->mode[i] && out[k].pal == fp->pal[i]) dup = true;
       if(dup) continue;
+      memset(&out[n], 0, sizeof(out[n]));
       out[n].mode = fp->mode[i];
       out[n].pal = fp->pal[i];
       out[n].source = GAL_SRC_DERIVED;
       out[n].types = fp->types[i];
       out[n].flags = flags_with_pal(fp->flags[i], fp->pal[i]);
+      out[n].rank = (uint32_t) fp->hits[i] + (fp->spawned[i] ? 0x10000u : 0u);
       n++;
     }
   }
   /* No entity in any of the four scenes plays this frame, so there is no
    * evidence to order. The game can still be made to draw it: game_mode 0, each
-   * of the eight OBJ palettes, labelled as guesses. */
+   * of the eight OBJ palettes, labelled as guesses, commonest first. */
   if(n == 0) {
+    uint16_t types = nearest_types(g, idx);
     for(int p = 0; p < 8; p++) {
+      memset(&out[n], 0, sizeof(out[n]));
       out[n].mode = 0;
       out[n].pal = (uint8_t) p;
       out[n].source = GAL_SRC_GUESS;
-      out[n].types = 0;
       out[n].flags = flags_with_pal(g->modeFlags[0], p);
+      uint32_t r = 0;
+      for(int t = 0; t < 16; t++) if((types >> t) & 1u) r += g->typePal[t][p];
+      out[n].rank = r;
       n++;
     }
+    qsort(out, (size_t) n, sizeof(out[0]), cand_cmp);
+    return n;
   }
+  if(n > firstDerived)
+    qsort(out + firstDerived, (size_t) (n - firstDerived), sizeof(out[0]), cand_cmp);
   return n;
 }
 
+/* Where the tables and the measurement disagree: an observed frame whose top
+ * derived candidate names a different {scene, palette}. The observation wins;
+ * this counts the cases so the report can say how many there are. */
+static bool frame_pal_disagrees(const Gallery* g, int idx, PalCand* top) {
+  PalCand cand[GAL_MAX_CAND];
+  int n = frame_pal_candidates(g, idx, cand);
+  if(n == 0 || cand[0].source > GAL_SRC_SCRIPT) return false;
+  const FramePal* fp = &g->framePal[idx];
+  if(fp->n == 0) return false;
+  for(int i = 0; i < n; i++)
+    if(cand[i].source >= GAL_SRC_DERIVED) {
+      if(cand[i].mode == cand[0].mode && cand[i].pal == cand[0].pal) return false;
+      if(top != NULL) *top = cand[i];
+      return !obs_has(g, idx, cand[i].mode, cand[i].pal);
+    }
+  return false;
+}
+
 /* How the whole corpus comes out: observed, derived only, and neither. */
-static void frame_pal_tally(const Gallery* g, int* observed, int* derived, int* unknown) {
-  int o = 0, d = 0, u = 0;
+static void frame_pal_tally(const Gallery* g, GalleryPalTally* t) {
+  memset(t, 0, sizeof(*t));
   for(int i = 0; i < g->liveCount; i++) {
     int idx = g->live[i];
-    uint8_t obs[SCENE_OBS_MODES];
-    uint16_t fid = g->frameId != NULL ? g->frameId[idx] : 0;
-    bool seen = fid != 0 && g->scenes != NULL && scenes_obs_ready(g->scenes) &&
-                scenes_obs_get(g->scenes, fid, obs);
-    if(seen) o++;
-    else if(g->framePal != NULL && g->framePal[idx].n > 0) d++;
-    else u++;
+    PalCand cand[GAL_MAX_CAND];
+    int n = frame_pal_candidates(g, idx, cand);
+    int src = n > 0 ? cand[0].source : GAL_SRC_GUESS;
+    if(src == GAL_SRC_OBSERVED) t->observed++;
+    else if(src == GAL_SRC_SCRIPT) t->viaScript++;
+    else if(src == GAL_SRC_DERIVED) t->derived++;
+    else t->guess++;
+    if(src == GAL_SRC_DERIVED) {
+      /* Did the ranking move this frame's top derived candidate off the one the
+       * table walk happened to record first? */
+      const FramePal* fp = &g->framePal[idx];
+      if(fp->n > 1 && (fp->mode[0] != cand[0].mode || fp->pal[0] != cand[0].pal))
+        t->reordered++;
+      if(fp->n > 1) t->multi++;
+    }
+    if(frame_pal_disagrees(g, idx, NULL)) t->disagree++;
   }
-  *observed = o;
-  *derived = d;
-  *unknown = u;
 }
 
 /* ---- the forced render, and the cache in front of it ----------------------
@@ -1515,15 +1680,58 @@ static const SpriteShot* shot_keep(Gallery* g, const SpriteShot* src) {
   return dst;
 }
 
+static uint16_t flip_bits(int flip);
+
+/* Take whatever the machine has finished into the cache. The page asks for the
+ * frame it is showing and then for its neighbours, so a shot often lands while
+ * the page is drawing something else. */
+static void shot_take(Gallery* g) {
+  if(!g->prePending || g->scenes == NULL) return;
+  const SpriteShot* got = scenes_sprite_get(g->scenes, g->preMode, g->preFid, g->preFlags);
+  if(got == NULL) return;
+  shot_keep(g, got);
+  g->prePending = false;
+}
+
+static void shot_ask(Gallery* g, int mode, uint16_t fid, uint16_t flags) {
+  if(g->scenes == NULL || fid == 0) return;
+  scenes_sprite_request(g->scenes, mode, fid, flags);
+  g->prePending = true;
+  g->preMode = mode;
+  g->preFid = fid;
+  g->preFlags = flags;
+}
+
 /* The shot for this frame and palette, asking the scene machine for it when it
  * is not already in hand. NULL means "not drawn yet": the page says so. */
 static const SpriteShot* shot_for(Gallery* g, int mode, uint16_t fid, uint16_t flags) {
   if(fid == 0 || g->scenes == NULL) return NULL;
+  shot_take(g);
   const SpriteShot* hit = shot_cached(g, mode, fid, flags);
   if(hit != NULL) return hit;
-  scenes_sprite_request(g->scenes, mode, fid, flags);
-  const SpriteShot* got = scenes_sprite_get(g->scenes, mode, fid, flags);
-  return got != NULL ? shot_keep(g, got) : NULL;
+  shot_ask(g, mode, fid, flags);
+  return NULL;
+}
+
+/* The frames either side of the one on screen, drawn in the idle slices the page
+ * already gives the scene machine, so walking the list does not wait. The plan
+ * for a neighbour is the plan the page would use for it: its own scene and its
+ * own flag word, with the flip the page is showing. */
+#define GAL_PREFETCH 3
+static void shot_prefetch(Gallery* g, int item) {
+  if(g->scenes == NULL || g->prePending || scenes_busy(g->scenes)) return;
+  static const int kOrder[2 * GAL_PREFETCH] = { 1, -1, 2, -2, 3, -3 };
+  for(int k = 0; k < 2 * GAL_PREFETCH; k++) {
+    int n = item + kOrder[k];
+    if(n < 0 || n >= g->liveCount) continue;
+    GalleryFramePlan plan;
+    if(!gallery_frame_plan(g, n, &plan)) continue;
+    uint16_t flags = (uint16_t) ((plan.flags & ~(SPRITE_FLIP_H | SPRITE_FLIP_V))
+                                 | flip_bits(g->spriteFlip));
+    if(shot_cached(g, plan.mode, plan.frameId, flags) != NULL) continue;
+    shot_ask(g, plan.mode, plan.frameId, flags);
+    return;
+  }
 }
 
 /* Blit a shot centred in the box. A pixel the same colour as the backdrop is a
@@ -1574,7 +1782,6 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
    * the game's own render, with the reconstruction on B as "file layout". */
   bool rendered = !alt && g->spriteView == 0;
   int near = alt && g->altNearest != NULL ? g->altNearest[idx] : -1;
-  if(alt && g->spriteView == 0 && near >= 0) rendered = true;
 
   FrameInfo fi;
   memset(&fi, 0, sizeof(fi));
@@ -1586,8 +1793,10 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
    * so the nearest evidence is the palette its own OAM records carry. */
   PalCand cand[GAL_MAX_CAND];
   int palIdx = alt && near >= 0 ? near : idx;
-  int nauto = alt && near < 0 ? (ok && fi.nrec > 0 ? 1 : 0)
-                              : frame_pal_candidates(g, palIdx, cand);
+  /* An alternate frame has no palette at all: nothing in the ROM reads these
+   * bytes, so no CGRAM ever holds their colours. The page draws them through a
+   * neutral ramp and offers the named rows only as an explicit override. */
+  int nauto = alt ? 1 : frame_pal_candidates(g, palIdx, cand);
   /* In the rendered view the picker is not offered: the game cannot be made to
    * draw a frame through a palette block it never uploads. */
   int total = nauto + (rendered ? 0 : pal_total(kMainPals, MAIN_PAL_N));
@@ -1599,28 +1808,32 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
   int mode = 0, pal = 0;
   uint16_t flags = 0;
   int source = GAL_SRC_GUESS;
-  if(sel < nauto && !(alt && near < 0)) {
+  int via = 0;
+  if(sel < nauto && !alt) {
     mode = cand[sel].mode;
     pal = cand[sel].pal;
     source = cand[sel].source;
     flags = (uint16_t) ((cand[sel].flags & ~(SPRITE_FLIP_H | SPRITE_FLIP_V))
                         | flip_bits(g->spriteFlip));
     pal_from_cgram(g, mode, 0x80 + 16 * pal, 16, rgb);
-    static const char* const kSrcName[3] = { "OBSERVED", "DERIVED", "GUESS" };
-    snprintf(palLine, sizeof(palLine), "%s pal %d = CGRAM $%02X, %s",
-             kSrcName[source], pal, 0x80 + 16 * pal, kGalleryModeName[mode]);
+    static const char* const kSrcName[4] = { "OBSERVED", "OBSERVED", "DERIVED", "GUESS" };
+    via = cand[sel].via;
+    if(source == GAL_SRC_SCRIPT)
+      snprintf(palLine, sizeof(palLine), "OBSERVED via script %d, pal %d = $%02X, %s",
+               via * 2, pal, 0x80 + 16 * pal, kGalleryModeName[mode]);
+    else
+      snprintf(palLine, sizeof(palLine), "%s pal %d = CGRAM $%02X, %s",
+               kSrcName[source], pal, 0x80 + 16 * pal, kGalleryModeName[mode]);
     char t[32];
     types_str(cand[sel].types, t, sizeof(t));
+    static const char* const kWho[4] = { "seen in OAM,", "another frame of it,",
+                                         "entity", "no entity," };
     snprintf(whoLine, sizeof(whoLine), "%s types %s   %d/%d",
-             source == GAL_SRC_OBSERVED ? "seen in OAM,"
-                                        : (source == GAL_SRC_DERIVED ? "entity" : "no entity,"),
-             t, sel + 1, nauto);
+             kWho[source], t, sel + 1, nauto);
   } else if(sel < nauto) {
-    pal = fi.altPal;
-    pal_from_cgram(g, 0, 0x80 + 16 * pal, 16, rgb);
-    snprintf(palLine, sizeof(palLine), "ATTR pal %d = CGRAM $%02X, %s",
-             pal, 0x80 + 16 * pal, kGalleryModeName[0]);
-    snprintf(whoLine, sizeof(whoLine), "no frame-table entry: its own attr");
+    neutral_ramp(rgb);
+    snprintf(palLine, sizeof(palLine), "no palette information in the ROM");
+    snprintf(whoLine, sizeof(whoLine), "unreferenced; Winning Run baseball sprites (visual id)");
     rendered = false;
   } else {
     pal_override(g, sel - nauto, rgb, palLine, sizeof(palLine));
@@ -1630,12 +1843,25 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
     rendered = false;
   }
 
+  /* Nothing of the frame is drawn until the game has drawn it. The file layout
+   * is a different picture at a different size, so putting it up first and
+   * replacing it moves the image under the eye; the box stays empty and says
+   * what it is waiting for instead. The file layout is still there, on B. */
   const SpriteShot* shot = NULL;
   if(rendered) {
     uint16_t fid = g->frameId != NULL ? g->frameId[palIdx] : 0;
     shot = shot_for(g, mode, fid, flags);
-    if(shot != NULL && shot->w > 0) shot_draw(fb, shot, 4, 12, 248, 136);
-    else if(ok) canvas_draw(g, fb, &fi, rgb, 4, 12, 248, 136);
+    if(shot != NULL && shot->w > 0) {
+      shot_draw(fb, shot, 4, 12, 248, 136);
+      if(!alt) shot_prefetch(g, st->item);
+    } else {
+      fb_fill(fb, 4, 12, 248, 1, C_RULE);
+      fb_fill(fb, 4, 147, 248, 1, C_RULE);
+      fb_fill(fb, 4, 12, 1, 136, C_RULE);
+      fb_fill(fb, 251, 12, 1, 136, C_RULE);
+      const char* why = shot != NULL && shot->why[0] ? shot->why : "rendering";
+      fb_text(fb, 8, 76, why, C_MARK);
+    }
   } else if(ok) {
     canvas_draw(g, fb, &fi, rgb, 4, 12, 248, 136);
   }
@@ -1650,17 +1876,20 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
     return;
   }
   if(alt) {
-    fb_textf(fb, 3, y, C_TEXT, "%d recs  %d tiles  %d spill  hdr %02X %02X %02X",
-             fi.nrec, fi.ntiles, fi.spill, fi.hdr[0], fi.hdr[1], fi.hdr[2]);
+    fb_textf(fb, 3, y, C_TEXT, "%dx16 + %d 8x8  %d tiles  %d-byte recs",
+             fi.n1, fi.n2 + fi.unk1, fi.ntiles, fi.recSize);
     y += LINE;
-    if(near >= 0)
-      fb_textf(fb, 3, y, C_TEXT, "nearest live frame %u, %d/%d tiles",
-               (unsigned) (g->frameId[near] / 4), g->altShared[idx], fi.ntiles);
-    else if(g->altShared != NULL && g->altShared[idx] > 0)
-      fb_textf(fb, 3, y, C_DIM, "%d tile(s) recur in a live frame: not a match",
-               g->altShared[idx]);
+    if(fi.extra != 0)
+      fb_textf(fb, 3, y, C_MARK, "header accounts for %d of %u bytes: %d more",
+               fi.declared, asset_size(idx), fi.extra);
+    else if(fi.altAttr >= 0)
+      fb_textf(fb, 3, y, C_DIM, "attr $%02X  hdr %02X %02X %02X %02X %02X %02X %02X %02X",
+               fi.altAttr, fi.hdr[0], fi.hdr[1], fi.hdr[2], fi.hdr[3], fi.hdr[4],
+               fi.hdr[5], fi.hdr[6], fi.hdr[7]);
     else
-      fb_text(fb, 3, y, "no live frame shares a tile with it", C_DIM);
+      fb_textf(fb, 3, y, C_DIM, "no attr byte  hdr %02X %02X %02X %02X %02X %02X %02X %02X",
+               fi.hdr[0], fi.hdr[1], fi.hdr[2], fi.hdr[3], fi.hdr[4],
+               fi.hdr[5], fi.hdr[6], fi.hdr[7]);
   } else if(rendered && shot != NULL && shot->w > 0) {
     fb_textf(fb, 3, y, C_TEXT, "%d OAM entries  %dx%d  flags %04X",
              shot->sprites, shot->w, shot->h, shot->flags);
@@ -1694,11 +1923,29 @@ static void draw_sprites(Gallery* g, uint32_t* fb, bool alt) {
       snprintf(line, sizeof(line), "%.34s", scenes_status(g->scenes));
       fb_text(fb, 3, y, line, C_MARK);
     } else {
-      int o = 0, d = 0, u = 0;
-      frame_pal_tally(g, &o, &d, &u);
-      fb_textf(fb, 3, y, C_DIM, "obs %d  derived %d  unknown %d", o, d, u);
+      GalleryPalTally t;
+      frame_pal_tally(g, &t);
+      fb_textf(fb, 3, y, C_DIM, "obs %d  via script %d  derived %d  guess %d",
+               t.observed, t.viaScript, t.derived, t.guess);
     }
   }
+  if(alt) {
+    set_source(g, "frame %06X (%.22s), unread by the game",
+               kGalleryAssets[idx].start, asset_file(idx));
+    set_source2(g, "second sprite format, no table points at it");
+  } else {
+    char who[24];
+    types_str(sel < nauto ? cand[sel].types : 0, who, sizeof(who));
+    static const char* const kHow[4] = { "observed", "observed via a script",
+                                         "derived", "best guess" };
+    set_source(g, "frame %u: file %06X (%.18s)",
+               (unsigned) (g->frameId != NULL ? g->frameId[idx] / 4 : 0),
+               kGalleryAssets[idx].start, asset_file(idx));
+    set_source2(g, "drawn by the game in %s, type %.10s pal %d (%s)",
+                kGalleryModeName[mode], who, pal,
+                sel < nauto ? kHow[source] : "override");
+  }
+  draw_source_foot(g, fb);
   draw_foot(fb, alt ? "dpad frame+palette  LR x25  A back"
                     : "dpad frame+palette  B layout  Y flip  LR x25  A back");
 }
@@ -1812,6 +2059,24 @@ static void draw_bg_vram(Gallery* g, uint32_t* fb) {
     fb_text(fb, 3, y, "8bpp: the pixel byte is the CGRAM index", C_DIM);
   else
     fb_text(fb, 3, y, "row per tile, voted from its maps", C_DIM);
+  {
+    const GalleryVramUpload* firstV = NULL;
+    const GalleryPalUpload* firstP = NULL;
+    for(unsigned i = 0; i < kGalleryVramUploadCount && firstV == NULL; i++)
+      if(kGalleryVramUploads[i].mode == mode && kGalleryVramUploads[i].src != GAL_VRAM_FILL)
+        firstV = &kGalleryVramUploads[i];
+    for(unsigned i = 0; i < kGalleryPalUploadCount && firstP == NULL; i++)
+      if(kGalleryPalUploads[i].mode == mode) firstP = &kGalleryPalUploads[i];
+    unsigned nup = 0;
+    for(unsigned i = 0; i < kGalleryVramUploadCount; i++)
+      if(kGalleryVramUploads[i].mode == mode) nup++;
+    set_source(g, "VRAM as %s leaves it: %u uploads replayed",
+               kGalleryModeName[mode], nup);
+    set_source2(g, "first %06X -> $%04X (%s), CGRAM from %06X",
+                firstV != NULL ? firstV->src : 0, firstV != NULL ? firstV->vram : 0,
+                firstV != NULL ? firstV->site : "", firstP != NULL ? firstP->src : 0);
+  }
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad scene/pal  LR page  B view  A back");
 }
 
@@ -1899,6 +2164,11 @@ static void draw_bg_raw(Gallery* g, uint32_t* fb) {
     snprintf(note, sizeof(note), "%.34s", animNote);
     fb_text(fb, 3, y, note, C_MARK);
   }
+  set_source(g, "one manifest asset in file order: %06X (%.20s)",
+             start, asset_file(idx));
+  set_source2(g, "%s, %d tiles, through one palette row",
+              kGalleryKindName[kGalleryAssets[idx].kind], ntiles);
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad set/pal  LR page  B view  A back");
 }
 
@@ -1913,7 +2183,6 @@ static void draw_bg_raw(Gallery* g, uint32_t* fb) {
  * which build_metatile_column_580 walks a column at a time ($00/$08/$10/$18).
  * -------------------------------------------------------------------------- */
 #define META_PX 32
-#define META_WORDS 16
 
 static const GalleryBgTileset* meta_set_of(int mode) {
   for(unsigned i = 0; i < kGalleryBgTilesetCount; i++) {
@@ -1935,9 +2204,10 @@ static uint32_t meta_map_start(const GalleryBgTileset* bt, uint32_t* end) {
   return 0;
 }
 
-/* One 32x32 metatile into the framebuffer, or into `out` when `out` is given
- * (which is what the pixel check against a composed scene uses). */
-static void meta_draw(const Gallery* g, uint32_t* fb, uint32_t* out, uint8_t* opaque,
+/* One 32x32 metatile into the framebuffer at (px0, py0). A tile pixel of zero is
+ * the transparent index, and what a level draws there is whatever is behind it,
+ * so the page shows the checker rather than pretending it is a colour. */
+static void meta_draw(const Gallery* g, uint32_t* fb,
                       int mode, const GalleryBgTileset* bt, int index, int px0, int py0) {
   uint32_t rgb[256];
   pal_from_cgram(g, mode, 0, 256, rgb);
@@ -1954,14 +2224,7 @@ static void meta_draw(const Gallery* g, uint32_t* fb, uint32_t* out, uint8_t* op
         for(int x = 0; x < 8; x++) {
           uint8_t v = px[(vf ? 7 - y : y) * 8 + (hf ? 7 - x : x)];
           int dx = px0 + c * 8 + x, dy = py0 + r * 8 + y;
-          uint32_t col = v == 0 ? checker(dx, dy) : pal[v];
-          if(out != NULL) {
-            size_t o = (size_t) (r * 8 + y) * META_PX + (c * 8 + x);
-            out[o] = v == 0 ? rgb[0] : pal[v];
-            if(opaque != NULL) opaque[o] = (uint8_t) (v != 0);
-          } else {
-            fb_px(fb, dx, dy, col);
-          }
+          fb_px(fb, dx, dy, v == 0 ? checker(dx, dy) : pal[v]);
         }
     }
 }
@@ -1992,7 +2255,7 @@ static void draw_bg_meta(Gallery* g, uint32_t* fb) {
     for(int c = 0; c < cols; c++) {
       int i = first + r * cols + c;
       if(i >= count) continue;
-      meta_draw(g, fb, NULL, NULL, mode, bt, i, c * META_PX, 12 + r * META_PX);
+      meta_draw(g, fb, mode, bt, i, c * META_PX, 12 + r * META_PX);
     }
 
   uint32_t rgb[256];
@@ -2010,6 +2273,11 @@ static void draw_bg_meta(Gallery* g, uint32_t* fb) {
   fb_text(fb, 3, y, "4x4 tilemap words, each with its own row", C_DIM);
   y += LINE;
   fb_text(fb, 3, y, "the level map is a grid of these", C_DIM);
+  set_source(g, "metatiles %06X (%.20s), 32 bytes each", start,
+             asset_file(asset_at(start)));
+  set_source2(g, "through %s VRAM at $%04X and its CGRAM",
+              kGalleryModeName[mode], bt->charBase);
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad scene  LR page  B view  A back");
 }
 
@@ -2080,6 +2348,96 @@ static bool tile_blank(const Gallery* g, uint32_t tilesOff, int i) {
   return true;
 }
 
+/* ---- the picture strips' own VRAM layout, found by brute force -------------
+ *
+ * Nothing uploads these three maps or their tilesets, so the tile index a map
+ * word carries counts from a VRAM base no code states. The earlier reading took
+ * the base from a convention (the index the map pads with names an all-zero tile
+ * of the set, or failing that the lowest index the map uses). That is right for
+ * strips 1 and 3 and wrong for strip 2, whose set holds no all-zero tile at all:
+ * the convention put it ten tiles out and the caption came apart.
+ *
+ * So the base is measured instead. A caption is a picture, and a picture's tiles
+ * agree along the edges they share: for every base the map can be read at, the
+ * whole map is laid out and the pixels either side of every tile seam are
+ * compared. Two scores, because one does not separate every case:
+ *
+ *   coarse   every seam pixel pair, background included, counted as agreeing
+ *            when the two indices are within three of each other. A caption is a
+ *            ramp, so a correct base makes almost every pair agree.
+ *   fine     only the pairs where at least one side has ink, counted as agreeing
+ *            when both do and are within two. This is what separates a base that
+ *            merely keeps the background quiet from one that joins the letters.
+ *
+ * The coarse score picks the base; where two bases are within half a percent of
+ * each other on it, the fine score breaks the tie. That gives $44, $45 and $43,
+ * and all three captions read. L and R nudge the base by hand and the page shows
+ * what it is using, so the measurement can be argued with.
+ *
+ * The maps are 32 columns of a tilemap, and a tilemap wraps: strip 2's caption
+ * sits in columns 21-31 and 0-10, and strip 3's runs off the right and comes
+ * back on the left. The rotation is measured the same way: whichever rotation
+ * leaves the least ink in the two edge columns, with the inked span centred to
+ * break a tie. That is 0, 16 and 16.
+ * -------------------------------------------------------------------------- */
+
+#define STRIP_WORDS 128
+#define STRIP_COLS  32
+
+/* The pixels of the tile a map word names, or NULL when the base puts it outside
+ * the set. */
+static bool strip_tile(const Gallery* g, uint32_t tOff, int ntiles, uint16_t w,
+                       int base, uint8_t* px) {
+  int idx = (w & 0x3FF) - base;
+  if(idx < 0 || idx >= ntiles) return false;
+  uint8_t raw[64];
+  tile_pixels(g, tOff + (uint32_t) (idx * 32), 4, raw);
+  bool hf = (w & 0x4000u) != 0, vf = (w & 0x8000u) != 0;
+  for(int y = 0; y < 8; y++)
+    for(int x = 0; x < 8; x++) px[y * 8 + x] = raw[(vf ? 7 - y : y) * 8 + (hf ? 7 - x : x)];
+  return true;
+}
+
+/* The two seam scores, in thousandths, and how many content words the base puts
+ * outside the set (the pad is allowed to miss: that is what a pad is for). */
+static void strip_score(const Gallery* g, uint32_t mapOff, int words, uint32_t tOff,
+                        int ntiles, int base, int pad, int* coarse, int* fine,
+                        int* missed, int* placed) {
+  static uint8_t px[STRIP_WORDS][64];
+  static uint8_t have[STRIP_WORDS];
+  int miss = 0, n = 0;
+  for(int i = 0; i < words && i < STRIP_WORDS; i++) {
+    uint16_t w = rd16(g, mapOff + (uint32_t) (2 * i));
+    if((w & 0x3FF) == 0) { have[i] = 0; continue; }
+    have[i] = (uint8_t) (strip_tile(g, tOff, ntiles, w, base, px[i]) ? 1 : 0);
+    if(have[i]) n++;
+    else if((w & 0x3FF) != pad) miss++;
+  }
+  int cg = 0, ct = 0, fg = 0, ft = 0;
+  for(int i = 0; i < words && i < STRIP_WORDS; i++) {
+    if(!have[i]) continue;
+    int c = i % STRIP_COLS;
+    for(int d = 0; d < 2; d++) {
+      int j = d == 0 ? i + 1 : i + STRIP_COLS;
+      if(d == 0 && c == STRIP_COLS - 1) continue;
+      if(j >= words || j >= STRIP_WORDS || !have[j]) continue;
+      for(int k = 0; k < 8; k++) {
+        int a = d == 0 ? px[i][k * 8 + 7] : px[i][7 * 8 + k];
+        int b = d == 0 ? px[j][k * 8 + 0] : px[j][0 * 8 + k];
+        ct++;
+        if(a - b <= 3 && b - a <= 3) cg++;
+        if(a == 0 && b == 0) continue;
+        ft++;
+        if(a != 0 && b != 0 && a - b <= 2 && b - a <= 2) fg++;
+      }
+    }
+  }
+  *coarse = ct > 0 ? cg * 1000 / ct : 0;
+  *fine = ft > 0 ? fg * 1000 / ft : 0;
+  *missed = miss;
+  *placed = n;
+}
+
 /* The index a map pads with: whichever it uses most. */
 static int strip_pad(const Gallery* g, uint32_t mapOff, int words) {
   int bestIdx = 0, bestN = 0;
@@ -2091,6 +2449,59 @@ static int strip_pad(const Gallery* g, uint32_t mapOff, int words) {
     if(n > bestN) { bestN = n; bestIdx = v; }
   }
   return bestIdx;
+}
+
+static int strip_find_base(const Gallery* g, uint32_t mapOff, int words, uint32_t tOff,
+                          int ntiles, int pad, int* coarseOut, int* fineOut) {
+  int best = pad, bestC = -1, bestF = -1;
+  for(int base = -32; base < ntiles; base++) {
+    int c = 0, f = 0, miss = 0, placed = 0;
+    strip_score(g, mapOff, words, tOff, ntiles, base, pad, &c, &f, &miss, &placed);
+    if(miss > 1 || placed < words / 4) continue;
+    /* within half a percent of the best coarse score is a tie, and the fine
+     * score breaks it */
+    if(c > bestC + 5 || (c + 5 >= bestC && c - 5 <= bestC && f > bestF)) {
+      if(c > bestC) bestC = c;
+      bestF = f;
+      best = base;
+    }
+  }
+  if(coarseOut != NULL) *coarseOut = bestC;
+  if(fineOut != NULL) *fineOut = bestF;
+  return best;
+}
+
+/* How much ink each column of the laid-out map holds. */
+static void strip_col_ink(const Gallery* g, uint32_t mapOff, int words, uint32_t tOff,
+                          int ntiles, int base, int* ink) {
+  uint8_t px[64];
+  for(int c = 0; c < STRIP_COLS; c++) ink[c] = 0;
+  for(int i = 0; i < words && i < STRIP_WORDS; i++) {
+    uint16_t w = rd16(g, mapOff + (uint32_t) (2 * i));
+    if((w & 0x3FF) == 0 || !strip_tile(g, tOff, ntiles, w, base, px)) continue;
+    for(int k = 0; k < 64; k++) if(px[k] != 0) ink[i % STRIP_COLS]++;
+  }
+}
+
+static int strip_rotation(const Gallery* g, uint32_t mapOff, int words, uint32_t tOff,
+                          int ntiles, int base) {
+  int ink[STRIP_COLS];
+  strip_col_ink(g, mapOff, words, tOff, ntiles, base, ink);
+  int best = 0, bestEdge = -1, bestGap = -1;
+  for(int rot = 0; rot < STRIP_COLS; rot++) {
+    int edge = ink[rot % STRIP_COLS] + ink[(rot + STRIP_COLS - 1) % STRIP_COLS];
+    /* the tie-break: how much blank the rotation leaves at the two ends */
+    int lead = 0, trail = 0;
+    while(lead < STRIP_COLS && ink[(rot + lead) % STRIP_COLS] == 0) lead++;
+    while(trail < STRIP_COLS && ink[(rot + STRIP_COLS - 1 - trail) % STRIP_COLS] == 0) trail++;
+    int gap = lead < trail ? lead : trail;
+    if(bestEdge < 0 || edge < bestEdge || (edge == bestEdge && gap > bestGap)) {
+      bestEdge = edge;
+      bestGap = gap;
+      best = rot;
+    }
+  }
+  return best;
 }
 
 /* Every all-zero tile in the set, each of which starts a block. */
@@ -2143,6 +2554,11 @@ static void draw_fonts(Gallery* g, uint32_t* fb) {
     y += LINE;
     fb_text(fb, 3, y, "2bpp: only values 0 and 1 occur", C_DIM);
     draw_palette_strip(fb, rgb, 4, 3, 158);
+    set_source(g, "font %06X (%.20s), 2bpp, 96 glyphs", ROM_FONT_OFF,
+               asset_file(idx));
+    set_source2(g, "no code uploads it; the app is lettered with it");
+    draw_source_foot(g, fb);
+  draw_source_foot(g, fb);
     draw_foot(fb, "dpad item+palette guess  A back");
     return;
   }
@@ -2160,53 +2576,69 @@ static void draw_fonts(Gallery* g, uint32_t* fb) {
 
   int blocks[16];
   int nblocks = strip_blocks(g, tOff, tEnd, blocks, 16);
-  int block = nblocks > 0 ? wrap(st->page, nblocks) : 0;
   int pad = strip_pad(g, mapOff, words);
-  int base;
-  if(nblocks > 0) {
-    base = pad - blocks[block];
-  } else {
-    base = 0x400;
-    for(int i = 0; i < words; i++) {
-      int v = rd16(g, mapOff + (uint32_t) (2 * i)) & 0x3FF;
-      if(v != pad && v != 0 && v < base) base = v;
-    }
-    if(base > 0x3FF) base = pad;
+
+  /* Measured once per strip and kept: the brute force is 350 layouts of a
+   * 128-word map and is not worth repeating sixty times a second. */
+  if(!g->stripDone[sIdx]) {
+    int coarse = 0, fine = 0;
+    g->stripBase[sIdx] = strip_find_base(g, mapOff, words, tOff, ntiles, pad,
+                                         &coarse, &fine);
+    g->stripRot[sIdx] = strip_rotation(g, mapOff, words, tOff, ntiles,
+                                       g->stripBase[sIdx]);
+    g->stripCoarse[sIdx] = coarse;
+    g->stripFine[sIdx] = fine;
+    g->stripDone[sIdx] = true;
   }
+  int base = g->stripBase[sIdx] + st->page;      /* L/R nudges it by hand */
+  int rot = g->stripRot[sIdx];
 
   /* how many words this base leaves outside the set: with the right base, none */
   int outside = 0;
   for(int i = 0; i < words; i++) {
-    int v = (rd16(g, mapOff + (uint32_t) (2 * i)) & 0x3FF) - base;
-    if(v == pad - base || v == 0 - base) continue;      /* the pads are meant to miss */
-    if(v < 0 || v >= ntiles) outside++;
+    int v = (rd16(g, mapOff + (uint32_t) (2 * i)) & 0x3FF);
+    if(v == pad || v == 0) continue;            /* the pads are meant to miss */
+    if(v - base < 0 || v - base >= ntiles) outside++;
   }
 
-  guess_pal(g, st->pal, 0, rgb, palLine, sizeof(palLine));
-  draw_tilemap(g, fb, mapOff, words, tOff, tEnd, rgb, false, base, 32, 0, 12);
-  int mapH = ((words + 31) / 32) * 8;
-  fb_text(fb, 3, 12 + mapH + 4, "tileset from the block base:", C_DIM);
-  int rows = (152 - (12 + mapH + 14)) / 8;
-  if(rows > 0)
-    draw_tile_grid(g, fb, tOff + (uint32_t) (nblocks > 0 ? blocks[block] * 32 : 0), tEnd,
-                   4, rgb, 0, 12 + mapH + 14, 32, rows, 0);
-  draw_palette_strip(fb, rgb, 16, 3, 154);
+  /* No palette. Nothing in the ROM references these strips, so no CGRAM ever
+   * holds their colours and there is nothing to derive one from: they are drawn
+   * through a neutral ramp, index 0 transparent and 1-15 an even grey. The named
+   * rows are still reachable, as an explicit override that says so. */
+  int over = st->pal % (pal_total(kMainPals, MAIN_PAL_N) + 1);
+  if(over == 0) {
+    neutral_ramp(rgb);
+    snprintf(palLine, sizeof(palLine), "no palette in the ROM: neutral ramp");
+  } else {
+    pal_override(g, over - 1, rgb, palLine, sizeof(palLine));
+  }
 
-  int y = 162;
+  draw_tilemap_rot(g, fb, mapOff, words, tOff, tEnd, rgb, false, base, STRIP_COLS,
+                   0, 12, rot);
+  int mapH = ((words + 31) / 32) * 8;
+  fb_text(fb, 3, 12 + mapH + 4, "tileset from the measured base:", C_DIM);
+  int rows = (144 - (12 + mapH + 14)) / 8;
+  if(rows > 0)
+    draw_tile_grid(g, fb, tOff, tEnd, 4, rgb, 0, 12 + mapH + 14, 32, rows, 0);
+  draw_palette_strip(fb, rgb, 16, 3, 146);
+
+  int y = 154;
   fb_textf(fb, 3, y, C_TEXT, "strip %d map %06X %dw tiles %06X", sIdx + 1,
            mapOff, words, tOff);
   y += LINE;
-  fb_textf(fb, 3, y, C_TEXT, "base $%02X pad $%02X  %d tiles  %d out",
-           base & 0xFF, pad, ntiles, outside);
+  fb_textf(fb, 3, y, C_TEXT, "base $%02X%s rot %d  %d tiles  %d out",
+           base & 0xFF, st->page != 0 ? "*" : " ", rot, ntiles, outside);
   y += LINE;
-  fb_text(fb, 3, y, palLine, C_MARK);
+  fb_textf(fb, 3, y, over == 0 ? C_DIM : C_MARK, "%s", palLine);
   y += LINE;
-  if(nblocks > 1)
-    fb_textf(fb, 3, y, C_DIM, "block %d/%d at tile %d (map fits blk 1)",
-             block + 1, nblocks, blocks[block]);
-  else
-    fb_text(fb, 3, y, "one block: the set has no blank tile", C_DIM);
-  draw_foot(fb, "dpad item+palette  LR block  A back");
+  fb_textf(fb, 3, y, C_DIM, "seam fit %d.%d%% / %d.%d%%, %d blank tile(s)",
+           g->stripCoarse[sIdx] / 10, g->stripCoarse[sIdx] % 10,
+           g->stripFine[sIdx] / 10, g->stripFine[sIdx] % 10, nblocks);
+  set_source(g, "bank $C1 leftovers, referenced by nothing");
+  set_source2(g, "map %06X (%.14s), tiles %06X (%.14s)", mapOff, asset_file(mapIdx),
+              tOff, asset_file(tilesIdx));
+  draw_source_foot(g, fb);
+  draw_foot(fb, "dpad item+palette  LR nudge base  A back");
 }
 
 static void draw_prev_build(Gallery* g, uint32_t* fb) {
@@ -2284,6 +2716,10 @@ static void draw_prev_build(Gallery* g, uint32_t* fb) {
     y += LINE;
     fb_text(fb, 3, y, "older copy of the anim table", C_DIM);
   }
+  set_source(g, "stale image 000000-008000: an older assembly");
+  set_source2(g, "tiles %06X, palette %06X, anim table %06X",
+              PREV_TILES_OFF, PREV_PAL_OFF, PREV_ANIM_OFF);
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad view+palette  LR page  A back");
 }
 
@@ -2377,6 +2813,21 @@ static void draw_music(Gallery* g, uint32_t* fb) {
   }
   y += LINE;
   fb_text(fb, 3, y, "cmd $FB (fade+song) is never sent", C_DIM);
+  if(st->item < songs) {
+    int idx = g->song[st->item];
+    set_source(g, "song block %06X (%.20s)", kGalleryAssets[idx].start,
+               asset_file(idx));
+    set_source2(g, "uploaded to SPC $1300 by spc_command(%d)", st->item);
+  } else if(st->item < songs + n1) {
+    set_source(g, "sfx bank 1 at %06X, pointer SPC $%04X", SFX_BANK1_OFF,
+               0x2412 + 2 * (st->item - songs));
+    set_source2(g, "sent through sfx_command_dispatch, dest SPC $2410");
+  } else {
+    set_source(g, "sfx bank 2 at %06X, pointer SPC $%04X", SFX_BANK2_OFF,
+               0x2E96 + 2 * (st->item - songs - n1));
+    set_source2(g, "dest SPC $2E94; sfx_start takes id >= $60 here");
+  }
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad entry  LR x10  B play  A back");
 }
 
@@ -2440,6 +2891,12 @@ static void draw_samples(Gallery* g, uint32_t* fb) {
     fb_text(fb, 3, y, "no song's sample list names it", C_MARK);
   else
     fb_text(fb, 3, y, "a song's sample list names it", C_DIM);
+  set_source(g, "BRR record %d at %06X (%.20s)", st->item,
+             kGalleryAssets[idx].start, asset_file(idx));
+  set_source2(g, "decoded here; %s", (st->item < 256 && !g->brrUsed[st->item])
+              ? "no song's sample list names it"
+              : "a song's sample list names it");
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad sample  LR x10  B play  A back");
 }
 
@@ -2485,6 +2942,10 @@ static void draw_stale(Gallery* g, uint32_t* fb) {
     snprintf(line, sizeof(line), "%.33s", note + 33);
     fb_text(fb, 3, y, line, C_DIM);
   }
+  set_source(g, "stale region %06X-%06X (%.16s)", kGalleryAssets[idx].start,
+             kGalleryAssets[idx].end, asset_file(idx));
+  set_source2(g, "the manifest note names the live region it shadows");
+  draw_source_foot(g, fb);
   draw_foot(fb, "dpad region  LR x5  A back");
 }
 
@@ -2496,7 +2957,9 @@ static void draw_stale(Gallery* g, uint32_t* fb) {
  * "the palettes the game gives this item, then the override picker". */
 static void clamp_state(Gallery* g) {
   for(int s = 0; s < GALLERY_SECTION_COUNT; s++) {
-    if(g->st[s].page < 0) g->st[s].page = 0;
+    /* the Fonts page's `page` is the picture strips' own base nudge, which is
+     * allowed to go either way */
+    if(g->st[s].page < 0 && s != GALLERY_SEC_FONTS) g->st[s].page = 0;
     if(g->st[s].item < 0) g->st[s].item = 0;
   }
 }
@@ -2537,38 +3000,6 @@ static void move_item(Gallery* g, int d) {
   if(g->section == GALLERY_SEC_SAMPLES && g->brrCount > 0) brr_decode(g, g->brr[st->item]);
 }
 
-/* The scenes page has its own controls: the d-pad walks the window over an image
- * that is bigger than the screen instead of walking a list. */
-static void apply_scenes(Gallery* g, uint16_t press) {
-  SceneState* st = &g->scene;
-  if(press & BIT(GALLERY_BTN_LEFT)) st->sx -= 16;
-  if(press & BIT(GALLERY_BTN_RIGHT)) st->sx += 16;
-  if(press & BIT(GALLERY_BTN_UP)) st->sy -= 16;
-  if(press & BIT(GALLERY_BTN_DOWN)) st->sy += 16;
-  if(press & (BIT(GALLERY_BTN_L) | BIT(GALLERY_BTN_R))) {
-    st->mode = wrap(st->mode + ((press & BIT(GALLERY_BTN_R)) ? 1 : -1), SCENE_MODE_COUNT);
-    st->sx = 0;
-    st->sy = 0;
-    st->zoom = 0;                 /* back to "fit the height" for the new scene */
-    st->view = SCENE_VIEW_ALL;
-  }
-  if(press & BIT(GALLERY_BTN_B)) {
-    /* the next view the composition actually holds: all layers, then each BG the
-     * mode's TM enables, on its own */
-    for(int i = 0; i < SCENE_VIEW_COUNT; i++) {
-      int v = wrap(st->view + 1 + i, SCENE_VIEW_COUNT);
-      if(v == SCENE_VIEW_ALL || scenes_view_available(g->scenes, v)) { st->view = v; break; }
-    }
-  }
-  if(press & BIT(GALLERY_BTN_Y)) {
-    st->zoom = st->zoom >= 16 ? 0 : (st->zoom < 1 ? 1 : st->zoom * 2);
-    st->sx = 0;
-    st->sy = 0;
-  }
-  if(st->sx < 0) st->sx = 0;
-  if(st->sy < 0) st->sy = 0;
-}
-
 static void apply(Gallery* g, uint16_t press) {
   if(g->section < 0 || g->section >= GALLERY_SECTION_COUNT) return;
   SecState* st = &g->st[g->section];
@@ -2576,8 +3007,6 @@ static void apply(Gallery* g, uint16_t press) {
               g->section == GALLERY_SEC_MUSIC;
 
   if(press & BIT(GALLERY_BTN_A)) { gallery_close(g); return; }
-
-  if(g->section == GALLERY_SEC_SCENES) { apply_scenes(g, press); return; }
 
   if(list) {
     int step = g->section == GALLERY_SEC_STALE ? 5 : 10;
@@ -2642,6 +3071,11 @@ static void apply(Gallery* g, uint16_t press) {
   if(g->section == GALLERY_SEC_SPRITES || g->section == GALLERY_SEC_SPRITES_ALT) {
     if(press & BIT(GALLERY_BTN_L)) move_item(g, -step);
     if(press & BIT(GALLERY_BTN_R)) move_item(g, +step);
+  } else if(g->section == GALLERY_SEC_FONTS) {
+    /* L and R nudge the measured tile base by hand rather than paging: the base
+     * is a measurement and this is how it is argued with. */
+    if(press & BIT(GALLERY_BTN_L)) st->page--;
+    if(press & BIT(GALLERY_BTN_R)) st->page++;
   } else {
     if(press & BIT(GALLERY_BTN_L)) st->page = st->page > 0 ? st->page - 1 : 0;
     if(press & BIT(GALLERY_BTN_R)) st->page++;
@@ -2678,7 +3112,6 @@ bool gallery_input(Gallery* g, uint16_t held) {
 /* ---- public -------------------------------------------------------------------- */
 
 static const char* const kSectionNames[GALLERY_SECTION_COUNT] = {
-  "Scenes",
   "Sprite frames (live)",
   "Sprite frames (alternate)",
   "Backgrounds",
@@ -2691,7 +3124,7 @@ static const char* const kSectionNames[GALLERY_SECTION_COUNT] = {
 
 /* Short names for the hidden --gallery flag. */
 static const char* const kSectionKeys[GALLERY_SECTION_COUNT] = {
-  "scenes", "sprites", "alt", "backgrounds", "fonts", "prev", "music", "samples", "stale",
+  "sprites", "alt", "backgrounds", "fonts", "prev", "music", "samples", "stale",
 };
 
 const char* gallery_section_name(int section) {
@@ -2712,57 +3145,6 @@ void gallery_set_scenes(Gallery* g, struct Scenes* sc) {
   if(g != NULL) g->scenes = (Scenes*) sc;
 }
 
-int gallery_metatile_count(const Gallery* g, int mode) {
-  const GalleryBgTileset* bt = g != NULL ? meta_set_of(mode) : NULL;
-  if(bt == NULL) return 0;
-  uint32_t end = 0, start = meta_map_start(bt, &end);
-  return (int) ((end - start) / 32u);
-}
-
-bool gallery_metatile(const Gallery* g, int mode, int index, unsigned flip, uint32_t* out,
-                      uint8_t* opaque) {
-  const GalleryBgTileset* bt = g != NULL ? meta_set_of(mode) : NULL;
-  if(bt == NULL || out == NULL || index < 0 || index >= gallery_metatile_count(g, mode))
-    return false;
-  meta_draw(g, NULL, out, opaque, mode, bt, index, 0, 0);
-  /* The level map word flips the whole metatile, which the blitter does by
-   * reading its four words backwards and complementing their own flip bits. */
-  if(flip & 0x4000u)
-    for(int y = 0; y < META_PX; y++)
-      for(int x = 0; x < META_PX / 2; x++) {
-        int a = y * META_PX + x, b = y * META_PX + (META_PX - 1 - x);
-        uint32_t t = out[a];
-        out[a] = out[b];
-        out[b] = t;
-        if(opaque != NULL) { uint8_t u = opaque[a]; opaque[a] = opaque[b]; opaque[b] = u; }
-      }
-  if(flip & 0x8000u)
-    for(int y = 0; y < META_PX / 2; y++)
-      for(int x = 0; x < META_PX; x++) {
-        int a = y * META_PX + x, b = (META_PX - 1 - y) * META_PX + x;
-        uint32_t t = out[a];
-        out[a] = out[b];
-        out[b] = t;
-        if(opaque != NULL) { uint8_t u = opaque[a]; opaque[a] = opaque[b]; opaque[b] = u; }
-      }
-  return true;
-}
-
-
-/* Which of the eight palette rows a metatile's sixteen tilemap words name. */
-unsigned gallery_metatile_rows(const Gallery* g, int mode, int index) {
-  const GalleryBgTileset* bt = g != NULL ? meta_set_of(mode) : NULL;
-  if(bt == NULL || index < 0 || index >= gallery_metatile_count(g, mode)) return 0;
-  uint32_t base = meta_map_start(bt, NULL) + (uint32_t) (index * 32);
-  unsigned rows = 0;
-  for(int i = 0; i < META_WORDS; i++) rows |= 1u << ((rd16(g, base + (uint32_t) (2 * i)) >> 10) & 7);
-  return rows;
-}
-
-uint16_t gallery_cgram_entry(const Gallery* g, int mode, int entry) {
-  if(g == NULL || mode < 0 || mode >= GAL_MODE_COUNT || entry < 0 || entry >= 256) return 0;
-  return g->cgram[mode][entry];
-}
 
 int gallery_live_count(const Gallery* g) { return g != NULL ? g->liveCount : 0; }
 
@@ -2778,6 +3160,24 @@ bool gallery_frame_plan(const Gallery* g, int item, GalleryFramePlan* out) {
   return true;
 }
 
+/* How many of the alternate frames the manifest lists have a header that
+ * accounts for their length exactly, and how many bytes the rest have beyond
+ * what their header declares (another frame starts there). */
+void gallery_alt_header_fit(Gallery* g, int* exact, int* total, int* beyond) {
+  int ex = 0, n = 0, over = 0;
+  if(g != NULL)
+    for(int i = 0; i < g->altCount; i++) {
+      FrameInfo fi;
+      n++;
+      if(!frame_build_alt(g, g->alt[i], &fi)) continue;
+      if(fi.extra == 0) ex++;
+      else over += fi.extra;
+    }
+  if(exact != NULL) *exact = ex;
+  if(total != NULL) *total = n;
+  if(beyond != NULL) *beyond = over;
+}
+
 void gallery_alt_counts(const Gallery* g, int* total, int* withNearest, int* sharedTiles) {
   if(total != NULL) *total = g != NULL ? g->altCount : 0;
   if(withNearest != NULL) *withNearest = alt_nearest_count(g);
@@ -2790,13 +3190,12 @@ void gallery_alt_counts(const Gallery* g, int* total, int* withNearest, int* sha
   }
 }
 
-void gallery_frame_pal_counts(const Gallery* g, int* observed, int* derived,
-                              int* unknown, int* firstObserved) {
-  int o = 0, d = 0, u = 0;
-  if(g != NULL) frame_pal_tally(g, &o, &d, &u);
-  if(observed != NULL) *observed = o;
-  if(derived != NULL) *derived = d;
-  if(unknown != NULL) *unknown = u;
+void gallery_frame_pal_counts(const Gallery* g, GalleryPalTally* out,
+                              int* firstObserved) {
+  if(out != NULL) {
+    memset(out, 0, sizeof(*out));
+    if(g != NULL) frame_pal_tally(g, out);
+  }
   if(firstObserved != NULL) {
     *firstObserved = 0;
     if(g != NULL)
@@ -2809,16 +3208,16 @@ void gallery_frame_pal_counts(const Gallery* g, int* observed, int* derived,
   }
 }
 
+/* The sprite page is the one that needs a machine, for the forced render and the
+ * OAM palette observation. */
 bool gallery_wants_scenes(const Gallery* g) {
   if(g == NULL || !g->open) return false;
-  return g->section == GALLERY_SEC_SCENES || g->section == GALLERY_SEC_SPRITES;
+  return g->section == GALLERY_SEC_SPRITES;
 }
 
 Gallery* gallery_create(const uint8_t* rom, size_t romLen) {
   Gallery* g = calloc(1, sizeof(Gallery));
   if(g == NULL) return NULL;
-  g->scene.view = SCENE_VIEW_ALL;
-  g->scene.zoom = 0;      /* 0 = fit the level height */
   g->rom = rom;
   g->romLen = (uint32_t) romLen;
   g->pcmAsset = -1;
@@ -2837,7 +3236,16 @@ Gallery* gallery_create(const uint8_t* rom, size_t romLen) {
     return NULL;
   }
   g->frameId = calloc((size_t) kGalleryAssetCount, sizeof(uint16_t));
-  if(g->frameId == NULL) { gallery_destroy(g); return NULL; }
+  g->frameAnimN = calloc((size_t) kGalleryAssetCount, 1);
+  g->frameAnim = calloc((size_t) kGalleryAssetCount, GAL_MAX_FRAME_ANIM);
+  g->animNext = calloc((size_t) kGalleryAssetCount, sizeof(int));
+  if(g->frameId == NULL || g->frameAnimN == NULL || g->frameAnim == NULL ||
+     g->animNext == NULL) {
+    gallery_destroy(g);
+    return NULL;
+  }
+  for(unsigned i = 0; i < GX_ANIM_COUNT; i++) g->animHead[i] = -1;
+  for(unsigned i = 0; i < kGalleryAssetCount; i++) g->animNext[i] = -1;
   brr_scan_usage(g);
   build_mode_cgram(g);
   build_mode_vram(g);
@@ -2868,6 +3276,9 @@ void gallery_destroy(Gallery* g) {
   free(g->claimed);
   free(g->framePal);
   free(g->frameId);
+  free(g->frameAnimN);
+  free(g->frameAnim);
+  free(g->animNext);
   free(g);
 }
 
@@ -2911,7 +3322,6 @@ bool gallery_take_pcm(Gallery* g, const int16_t** pcm, int* count) {
 void gallery_render(Gallery* g, uint32_t* fb) {
   if(g == NULL) return;
   switch(g->section) {
-    case GALLERY_SEC_SCENES:      draw_scenes(g, fb); break;
     case GALLERY_SEC_SPRITES:     draw_sprites(g, fb, false); break;
     case GALLERY_SEC_SPRITES_ALT: draw_sprites(g, fb, true); break;
     case GALLERY_SEC_BACKGROUNDS: draw_backgrounds(g, fb); break;

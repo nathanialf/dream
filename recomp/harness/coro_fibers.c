@@ -4,8 +4,9 @@
  * register state to enter it, switched cooperatively and never scheduled by the
  * OS. The mapping is one to one.
  *
- *   coro_new     CreateFiberEx with the stack size the caller asked for
- *   coro_start   SwitchToFiber into a fiber whose proc has not begun fn yet
+ *   coro_new     record the stack size; the fiber itself is created lazily
+ *   coro_start   CreateFiberEx with that stack size on the first call, then
+ *                SwitchToFiber into a fiber whose proc has not begun fn yet
  *   coro_resume  SwitchToFiber into a fiber parked in coro_yield
  *   coro_yield   SwitchToFiber back to the fiber that switched in
  *   coro_free    DeleteFiber, which frees the stack of a suspended fiber

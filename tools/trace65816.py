@@ -12,9 +12,17 @@ the M/X flags through rep/sep, and reads jump tables behind `jsr (abs,X)` /
   out/dream.asm       listing: traced code disassembled, gaps as data
 
 Usage: trace65816.py DREAM.sfc out/
+
+The ROM is validated the way tools/extract.py validates it, by size and SHA-1, before
+anything is traced. Without that a 512-byte copier header shifts every offset in the
+trace by 512, `make regen` emits a src/ built on those offsets, and only the SHA-1 gate
+at the end of the rebuild notices.
 """
-import sys, os, struct
+import sys, os, struct, hashlib
 from collections import deque
+
+EXPECTED_SHA1 = '2675d7afe886f20462337aa1ee3aa5c3135fff3a'
+EXPECTED_SIZE = 0x200000
 
 ROM = None
 ROMSIZE = 0
@@ -541,10 +549,39 @@ def write_outputs(outdir):
                 else:
                     fp.write(f'  {file2addr(start):06X}  .incbin "DREAM.sfc" ${start:06X} ${n:X}   ; {n} bytes data\n')
 
-def main():
+def load_rom(path):
+    """The same three checks tools/extract.py makes, in the same order."""
+    rom = open(path, 'rb').read()
+    if len(rom) == EXPECTED_SIZE + 512:           # copier header
+        rom = rom[512:]
+    if len(rom) != EXPECTED_SIZE:
+        sys.exit(f'{path}: expected {EXPECTED_SIZE} bytes, got {len(rom)}')
+    sha1 = hashlib.sha1(rom).hexdigest()
+    if sha1 != EXPECTED_SHA1:
+        sys.exit(f'{path}: sha1 {sha1} does not match {EXPECTED_SHA1}')
+    return rom
+
+
+def reset_state():
+    """Every table here is module-level, so a second main() in one process would
+    compound the first run's results. tools/progress.py calls main() in-process."""
+    global covered
+    insns.clear(); labels.clear(); subs.clear(); locs.clear()
+    datarefs.clear(); tables.clear(); fn_exits.clear(); fn_active.clear()
+    seen_state.clear(); table_bases.clear()
+    RAM_LABELS.clear()
+    conflicts.clear(); pending_tables.clear()
+    queue.clear()
+    covered = None
+
+
+def main(write=True):
     global ROM, ROMSIZE, covered
+    if len(sys.argv) < 3:
+        sys.exit(f'usage: {sys.argv[0]} <rom> <outdir> [ADDR[:name] ...]')
     rom_path, outdir = sys.argv[1], sys.argv[2]
-    ROM = open(rom_path, 'rb').read()
+    reset_state()
+    ROM = load_rom(rom_path)
     ROMSIZE = len(ROM)
     covered = bytearray(ROMSIZE)
     vec = {
@@ -602,7 +639,12 @@ def main():
     trace_all()
     # second pass: jsl targets referenced from data-ish regions are not followed; fine.
     build_labels(seed)
-    write_outputs(outdir)
+    # progress.py --check is documented as read-only and is a gate in the pre-push hook.
+    # It calls this in-process purely for the routine sizes, and rewriting out/codemap.txt,
+    # out/symbols.txt, out/dream.mlb, out/dream.sym and out/dream.asm from a gate is a
+    # side effect nobody asked for.
+    if write:
+        write_outputs(outdir)
     code = sum(1 for v in covered if v == 1)
     print(f'instructions={len(insns)} code_bytes={code} subs={len(subs)} locs={len(locs)} tables={len(tables)} labels={len(labels)}')
     for t, es in sorted(tables.items()):

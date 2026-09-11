@@ -10,14 +10,23 @@ BUILD    := build/dream.sfc
 SHA1     := 2675d7afe886f20462337aa1ee3aa5c3135fff3a
 HALVES   := $(addprefix data/,$(shell python3 -c "print(' '.join('%02X.bin'%i for i in range(64)))"))
 
-.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-check-units recomp-check-nocpu recomp-profile app sdl3 app-win sdl3-win win-dlls
+.PHONY: all check extract regen clean spc roundtrip harness recomp-check recomp-check-units recomp-check-nocpu recomp-profile app app-check sdl3 app-win sdl3-win win-dlls
 
 all: check
 
-$(HALVES): $(ROM) tools/extract.py
+# One extraction, not one per file. As a plain multi-target rule, `$(HALVES): ...` tells
+# make the recipe builds *one* of those 64 files, so `make -j8` starts eight or nine
+# extract.py processes at once and they truncate each other's output (tools/extract.py
+# opens every file with 'wb'). A stamp target is the portable spelling of GNU make 4.3's
+# grouped target `&:`. config/assets.txt is a prerequisite because extract.py writes the
+# 1920 named assets from it as well as the 64 half-banks.
+data/.extracted: $(ROM) tools/extract.py config/assets.txt
 	python3 tools/extract.py $(ROM) data
+	@touch $@
 
-extract: $(HALVES)
+$(HALVES): data/.extracted ;
+
+extract: data/.extracted
 
 $(BUILD): src/*.asm $(HALVES) | build
 	python3 -c "open('$(BUILD)','wb').write(b'\0'*0x200000)"
@@ -100,24 +109,11 @@ app-win: sdl3-win
 	$(MAKE) win-dlls
 
 # Every DLL the two executables import, and a refusal if one of them is not a
-# Windows system DLL (the release zip ships no DLLs at all).
+# Windows system DLL (the release zip ships no DLLs at all). The allowlist lives in
+# tools/check_dlls.sh, which the ci.yml and release.yml windows jobs call as well, so
+# the three places cannot drift apart.
 win-dlls:
-	@ok=0; \
-	for exe in build/win/dream.exe build/win/dream_harness.exe; do \
-	    test -f $$exe || continue; \
-	    echo "$$exe imports:"; \
-	    $(MINGW_OBJDUMP) -p $$exe | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u | \
-	    while read -r dll; do \
-	        case $$(echo $$dll | tr A-Z a-z) in \
-	          advapi32.dll|gdi32.dll|imm32.dll|kernel32.dll|msvcrt.dll|ole32.dll|\
-	          oleaut32.dll|setupapi.dll|shell32.dll|user32.dll|version.dll|winmm.dll|\
-	          ucrtbase.dll|api-ms-win-*|hid.dll|dwmapi.dll|shcore.dll|ws2_32.dll) \
-	              echo "    $$dll" ;; \
-	          *) echo "    $$dll   <-- NOT a system DLL"; exit 1 ;; \
-	        esac; \
-	    done || ok=1; \
-	done; \
-	if [ $$ok -ne 0 ]; then echo "make: the Windows build imports a non-system DLL"; exit 1; fi
+	@OBJDUMP=$(MINGW_OBJDUMP) tools/check_dlls.sh build/win/dream.exe build/win/dream_harness.exe
 
 sdl3-win: build/sdl3-win/lib/cmake/SDL3/SDL3Config.cmake
 
@@ -135,8 +131,13 @@ build/sdl3-win/lib/cmake/SDL3/SDL3Config.cmake: $(MINGW_TOOLCHAIN)
 # Recomp gate: build the harness, then run every input script under
 # recomp/harness/inputs/ in lockstep with the C routines installed. Fails if any
 # script mismatches; reports the per-routine hook call counts either way.
+#
+# --check also runs the routine-level gate and then refuses if the set of routines
+# the two gates credit is not the set config/recomp.txt names. That file is written
+# only by --update, so without this a routine that was deleted, renamed or made
+# unreachable keeps its credit and its traced bytes in the `recomp` figure.
 recomp-check: harness
-	python3 tools/recomp_verify.py
+	python3 tools/recomp_verify.py --check
 
 # The routine-level gate: the routines no input script can reach, each run from
 # the seeded states in config/recomp_units.txt with the ROM's own code and the C
@@ -150,6 +151,38 @@ recomp-check-units: harness
 # See recomp/README.md, "Running without the CPUs".
 recomp-check-nocpu: harness
 	python3 tools/recomp_verify.py --no-cpu
+
+# The gallery's own gates, and the proof that the app is the harness plus SDL.
+# docs/RECOMP.md calls `dream --sprite-verify` the gate on the sprite pages and the
+# `dream --frames` / `dream_harness --hooks on` parity the proof of the platform layer;
+# neither had a target, so both were a manual check and nothing noticed when
+# config/assets.txt or the hand-transcribed tables in recomp/app/gen_gallery_table.py
+# drifted from the C they were read off.
+#
+# Three checks: every forced and live sprite render against the game that drew it, a run
+# with the gallery walked through every page against the same run without it, and the
+# app's frame line against the harness's. The dummy SDL drivers are what let all three
+# run with no display and no sound card. Minutes, so it is its own target rather than
+# part of recomp-check.
+APP_CHECK_INPUT  := recomp/harness/inputs/level_walk_jump.txt
+APP_CHECK_FRAMES := 400
+app-check: app harness
+	@mkdir -p build
+	SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./build/recomp/dream --sprite-verify
+	@echo "app-check: a walk through every gallery page changes no emulation state ..."
+	@SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./build/recomp/dream \
+	    --frames $(APP_CHECK_FRAMES) --input $(APP_CHECK_INPUT) \
+	    | grep '^frame' | tail -1 > build/app-check-plain.txt
+	@SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./build/recomp/dream \
+	    --frames $(APP_CHECK_FRAMES) --input $(APP_CHECK_INPUT) --gallery-toggle 150,60 \
+	    | grep '^frame' | tail -1 > build/app-check-toggled.txt
+	@diff -u build/app-check-plain.txt build/app-check-toggled.txt
+	@echo "app-check: dream --frames is dream_harness --hooks on ..."
+	@./build/recomp/dream_harness --hooks on --spc-hooks on \
+	    --frames $(APP_CHECK_FRAMES) --input $(APP_CHECK_INPUT) \
+	    | grep '^frame' | tail -1 > build/app-check-harness.txt
+	@diff -u build/app-check-plain.txt build/app-check-harness.txt
+	@echo "app-check: OK"
 
 # Re-measure config/recomp_cycles.txt (the per-routine cycle charge). Only needed
 # when a routine is added that does not model its own timing; see recomp/README.md.

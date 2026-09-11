@@ -8,9 +8,16 @@ name: release
 # (recomp/app/README.md, "Windows"). The staging step counts the files before
 # zipping, so "no data" is a gate rather than a promise.
 #
-# The Windows build is MSYS2/UCRT64 with -static, so dream.exe imports only
-# Windows' own DLLs and the zip needs no runtime next to it; the same build is
-# reproducible from Linux with `make app-win` (recomp/cmake/mingw-w64.cmake).
+# The Windows build is MSYS2/UCRT64 with -static, so dream.exe imports only Windows' own
+# DLLs (tools/check_dlls.sh is the gate, shared with `make win-dlls` and ci.yml) and the
+# zip needs no runtime next to it. `make app-win` cross-builds the same sources from Linux
+# with mingw-w64 (recomp/cmake/mingw-w64.cmake), but it is not the same build: that
+# toolchain targets x86_64-w64-mingw32, whose CRT is msvcrt.dll, where UCRT64 links
+# ucrtbase.dll. The two differ in their C runtime and their imports.
+#
+# The Windows job also uploads dream.map as a workflow artefact. It is not in the zip, and
+# it is the only way a "dream+0xRVA" line in a player's dream.log can be resolved back to
+# a function (recomp/app/dlog.c, recomp/app/README.md).
 on:
   push:
     tags: ['v*']
@@ -109,13 +116,8 @@ jobs:
         run: ./build/recomp/dream_harness.exe --test-coro
       - name: the game imports only system DLLs
         shell: msys2 {0}
-        run: |
-          set -e
-          objdump -p build/recomp/dream.exe | sed -n 's/^[[:space:]]*DLL Name: //p' | sort -u
-          if objdump -p build/recomp/dream.exe | grep -Eiq 'DLL Name: *(lib|SDL3\.dll)'; then
-            echo "dream.exe imports a non-system DLL; the zip ships no runtime"
-            exit 1
-          fi
+        # tools/check_dlls.sh holds the allowlist, shared with `make win-dlls` and ci.yml.
+        run: bash tools/check_dlls.sh build/recomp/dream.exe
       - name: stage and zip
         shell: msys2 {0}
         env:
@@ -133,6 +135,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.create-release.outputs.tag }}
         run: gh release upload "$env:TAG" "dist/dream-$env:TAG-windows-x86_64.zip" --clobber
+
+      - name: keep the link map for this build
+        # The Windows crash block in recomp/app/dlog.c prints "dream+0xRVA (map 0x...)"
+        # and tells the player to look it up in dream.map, and recomp/app/README.md builds
+        # the whole address-recovery procedure on that file. It is not in the zip, because
+        # the zip is three files, so without this step the map for the exact build a
+        # player is running exists only on a runner that is about to be destroyed, and a
+        # crash log from that build can never be resolved. An artefact, not a release
+        # asset: it is for whoever reads the crash log, not for the player.
+        uses: actions/upload-artifact@v4
+        with:
+          name: dream-map-windows-${{ needs.create-release.outputs.tag }}
+          path: build/recomp/dream.map
+          if-no-files-found: error
+          retention-days: 90
 
   macos:
     needs: create-release

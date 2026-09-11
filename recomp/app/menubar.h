@@ -21,7 +21,8 @@ typedef enum {
   MENU_ACT_ASPECT,          /* arg = 0: 8:7 square pixels, 1: 4:3 */
   MENU_ACT_FULLSCREEN,
   MENU_ACT_GALLERY,         /* arg = gallery section */
-  MENU_ACT_GALLERY_CLOSE
+  MENU_ACT_GALLERY_CLOSE,
+  MENU_ACT_SCREENSHOT       /* save the viewport as a PNG (also F12) */
 } MenuActionKind;
 
 typedef struct {
@@ -53,6 +54,10 @@ void menubar_close(Menubar* mb);
  * action the user picked, or MENU_ACT_NONE. */
 bool menubar_event(Menubar* mb, SDL_Renderer* renderer, SDL_Event* ev,
                    const MenuModel* model, MenuAction* out);
+
+/* Say something in the bar for a few seconds: the file a screenshot went to, or
+ * why it did not. The text is copied. */
+void menubar_notice(Menubar* mb, const char* text);
 
 void menubar_draw(Menubar* mb, SDL_Renderer* renderer, int outW, const MenuModel* model);
 

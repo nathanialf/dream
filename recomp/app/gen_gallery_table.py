@@ -160,7 +160,7 @@ BG_TILESETS = [
 #
 # The metatile blitter's own column writes to VRAM $7800 are not here: they are
 # not init uploads, they are one column per frame as the camera moves
-# (recomp/src/vram_stream.c). The Scenes page is where those are shown.
+# (recomp/src/vram_stream.c), so nothing here replays them.
 VRAM_FILL = 0xFFFFFFFF
 
 VRAM_UPLOADS = [

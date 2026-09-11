@@ -430,9 +430,13 @@ static void dsp_decodeBrr(Dsp* dsp, int ch) {
     }
     if(s > 7) s -= 16;
     if(shift <= 0xc) {
-      s = (s << shift) >> 1;
+      // dream: s is negative for half the nibbles and C11 6.5.7p4 leaves a left
+      // shift of a negative value undefined, which UBSan reports on an ordinary
+      // run. The unsigned round trip is the same value on two's-complement
+      // hardware, and every value here fits in 16 bits, so nothing wraps.
+      s = (int) ((uint32_t) s << shift) >> 1;
     } else {
-      s = (s >> 3) << 12;
+      s = (int) ((uint32_t) (s >> 3) << 12); // dream: same, see above
     }
     switch(filter) {
       case 1: s += old + (-old >> 4); break;

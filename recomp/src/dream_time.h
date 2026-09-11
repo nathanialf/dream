@@ -90,6 +90,37 @@ static inline bool t_step_rep(SnesState* ss, uint8_t pb, uint16_t addr, uint8_t 
 #define SEP(addr, b) do { if(t_step_sep(ss, pb, (uint16_t) (addr), (b), a, x, y)) return; } while(0)
 #define REP(addr, b) do { if(t_step_rep(ss, pb, (uint16_t) (addr), (b), a, x, y)) return; } while(0)
 
+/* An immediate operand is not fetched by the addressing mode: cpu_adrImm only
+ * advances the pc, and the opcode's own data read *is* the operand read. So the
+ * latch sits between the two bytes of a 16-bit operand
+ * (`cpu_readWord(low, high, true)`) and before the single byte of an 8-bit one
+ * (`cpu_checkInt(cpu); cpu_read(cpu, low)`), not after the operand. Every
+ * immediate opcode in the core has that shape: lda, ldx, ldy, cmp, cpx, cpy,
+ * adc, sbc, and, ora, eor and bit, in both widths.
+ *
+ * In normal operation this ROM takes its NMI while the CPU is parked on the wai
+ * at $C0:A4FD, and cpu_runNonInstruction's waiting branch tests nmiWanted rather
+ * than intWanted, so the park path never notices the difference. It matters when
+ * a frame's work overruns into vblank, which is exactly when timing is already
+ * marginal, so the port models it everywhere rather than only where a divergence
+ * has been observed. */
+#define SIMM16(addr) do { if(t_step(ss, pb, (uint16_t) (addr), 2, a, x, y)) return; \
+                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+#define SIMM8(addr)  do { if(t_step(ss, pb, (uint16_t) (addr), 1, a, x, y)) return; \
+                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+
+/* jmp abs. LakeSnes' case 0x4c is `cpu->pc = cpu_readOpcodeWord(cpu, true);`, so the
+ * two operand bytes are fetched with a cpu_checkInt() between them; a plain three-byte
+ * step issues all three fetches with no latch, and an NMI that rises during the operand
+ * is then seen one instruction late. That matters most for a bare tail jump, where the
+ * body sets the pc and returns and nothing later re-latches. The body names the
+ * destination itself, so this only spends the instruction.
+ *
+ * `jmp (abs,X)` and `jmp (abs)` are not this shape: the core fetches their pointer with
+ * intCheck false and takes the latch on the indirect read instead. */
+#define SJMP(addr)   do { if(t_step(ss, pb, (uint16_t) (addr), 2, a, x, y)) return; \
+                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+
 /* Hand the rest of the routine back to the ROM at `addr` outside a step, for a
  * body that is at an instruction boundary the macros do not cover. */
 static inline bool t_yield(SnesState* ss, uint8_t pb, uint16_t addr) {
@@ -129,6 +160,54 @@ static inline uint16_t t_read16(SnesState* ss, uint32_t adr) {
   ss_check_int(ss);
   uint8_t hi = ss_bus_r8(ss, (adr + 1) & 0xffffff);
   return (uint16_t) (lo | (hi << 8));
+}
+
+/* ---- the direct page ---------------------------------------------------
+ * A direct-page effective address is formed in 16 bits and wraps there. LakeSnes'
+ * cpu_adrDp is `*low = (cpu->dp + adr) & 0xffff` with the high byte at
+ * `(cpu->dp + adr + 1) & 0xffff`, and cpu_adrDpx adds the index inside the same
+ * mask, so a 16-bit access whose low byte is at $FFFF takes its high byte from
+ * $0000 rather than from bank 1. t_read16 and t_write16 above are the absolute
+ * forms: they carry into the bank byte, which is right there and wrong here.
+ *
+ * This ROM keeps D at $0000 and every direct-page offset is one byte, so nothing
+ * wraps today and dream_alu.h records why. These exist so that the masking lives
+ * in one place instead of being remembered at six hundred call sites: before
+ * them, 164 sites added the offset unmasked and 388 cast, and a routine converted
+ * later that runs with D set would have inherited whichever the author copied.
+ * Every direct-page access in recomp/src goes through one of them, either as the
+ * accessor or, where a body's own read-modify-write helper takes a formed address,
+ * as t_dp() on the way in. The helpers that are shared with absolute callers
+ * (t_rmw_r16 / t_rmw_w16 in entities_ai.c, anim_scripts.c, mode_init.c,
+ * sound_iface.c and top_level.c, t_inc16 in top_level.c) keep the 24-bit carry
+ * their absolute callers need, so the one case they would still get wrong is a
+ * 16-bit read-modify-write whose low byte lands exactly on $FFFF.
+ */
+static inline uint32_t t_dp(uint16_t dp, uint32_t off) {
+  return (uint32_t) (uint16_t) (dp + off);
+}
+
+static inline uint8_t t_read8_dp(SnesState* ss, uint16_t dp, uint32_t off) {
+  ss_check_int(ss);
+  return ss_bus_r8(ss, t_dp(dp, off));
+}
+
+static inline uint16_t t_read16_dp(SnesState* ss, uint16_t dp, uint32_t off) {
+  uint8_t lo = ss_bus_r8(ss, t_dp(dp, off));
+  ss_check_int(ss);
+  uint8_t hi = ss_bus_r8(ss, t_dp(dp, off + 1));
+  return (uint16_t) (lo | (hi << 8));
+}
+
+static inline void t_write8_dp(SnesState* ss, uint16_t dp, uint32_t off, uint8_t v) {
+  ss_check_int(ss);
+  ss_bus_w8(ss, t_dp(dp, off), v);
+}
+
+static inline void t_write16_dp(SnesState* ss, uint16_t dp, uint32_t off, uint16_t v) {
+  ss_bus_w8(ss, t_dp(dp, off), (uint8_t) v);
+  ss_check_int(ss);
+  ss_bus_w8(ss, t_dp(dp, off + 1), (uint8_t) (v >> 8));
 }
 
 /* A conditional branch. The opcode fetch is the step above; this covers the

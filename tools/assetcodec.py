@@ -609,152 +609,216 @@ def encode_sprite_table(kind, primary, outpath):
 
 
 # ======================================================================================
-# sprite_frame  <->  assembled-frame PNG + JSON sidecar
+# sprite_frame / sprite_frame_alt  <->  assembled-frame PNG + JSON sidecar
 # ======================================================================================
 #
-# Live format (docs/data_formats.md 1b, sub_C0A538 / oam_emit_frame_2row at $C0A772):
-#   header  n1, n2, tile_off, unk1, unk2, ntiles1, vram_off, ntiles2|flags
-#   n1+n2   2-byte OAM records {x, y}
-#   tiles   (ntiles1 + (ntiles2 & 0x7F)) * 32 bytes of 4bpp tiles
-#   trailer 0-40 bytes no traced code reads
-# Every sprite is 16x16 (the size bit from data_C0A6D3/data_C0A6D7 is always set), and the
-# emitter walks tile numbers with `tile += 2; if tile & 0x10: tile += 0x10`, i.e. a
-# 16-tile-wide VRAM grid where a sprite owns tiles t, t+1, t+16, t+17.  Group 1 starts at
-# tile 0, group 2 at header byte 2 (tile_off); group 1's blob occupies grid slots
-# 0..ntiles1-1 and group 2's starts at grid slot vram_off (header byte 6).
+# Shared container (docs/data_formats.md 1b/1c; recomp/app/gallery.c's frame_build_alt,
+# recomp/src/oam_emit.c's three OAM "rows"): an 8-byte header, `n1 + n2 + n3` OAM records
+# (2 bytes each in the live format; 3, {x, y, attr}, in the alternate format when hdr[0]
+# bit 7 is set), then `nt1 + nt2` tiles, 32 bytes of 4bpp each:
+#
+#   hdr[0]  bit 7   records carry a third byte, the OAM attribute (alternate format only;
+#                   always clear in the live format, whose records are always 2 bytes)
+#           bits0-6 n1, the count of 16x16 sprites
+#   hdr[1]  n2, 8x8 sprites      hdr[2]  off2, the VRAM tile they start at
+#   hdr[3]  n3, 8x8 sprites      hdr[4]  off3, the VRAM tile they start at
+#   hdr[5]  nt1, tiles in the first DMA chunk, which lands at VRAM tile 0
+#   hdr[6]  vo2, where the second chunk lands   hdr[7]  nt2, its tile count
+#
+#   length = 8 + (3 or 2) * (n1 + n2 + n3) + 32 * (nt1 + nt2)
+#
+# and nt1 + nt2 == 4*n1 + n2 + n3 always: a 16x16 sprite is four tiles in the PPU's own
+# name-table arrangement (t, t+1, t+16, t+17 across a sixteen-tile VRAM row; the i'th of
+# the n1 of them sits at 2*(i%8) + 32*(i//8)), and each of the n2+n3 8x8 sprites is one
+# tile, at off2 then off3 in file order. Every tile the header declares is used by exactly
+# one sprite and none is left over: assembly has no spill strip, in either format.
+#
+# Validated against baserom/DREAM.sfc: every tile of every one of the 120 alternate-format
+# frames is claimed exactly once; so is every tile of 1550 of the 1555 live frames (the
+# other 5 declare, via n3/off3, more record bytes than the asset holds - table entries
+# whose true extent a neighbour's data overlaps - and fall back to verbatim storage, same
+# as a frame whose header does not parse at all).
 
 TILE_SEQ_STEP = 0x10
 
 
-def _next_tile(t):
-    t += 2
-    if t & 0x10:
-        t += 0x10
-    return t
+def _container_header(data):
+    """Decode the 8-byte header shared by both sprite-frame formats."""
+    h = data[0:8]
+    return {
+        'n1': h[0] & 0x7F, 'wide': (h[0] & 0x80) != 0,
+        'n2': h[1], 'off2': h[2],
+        'n3': h[3], 'off3': h[4],
+        'nt1': h[5], 'vo2': h[6], 'nt2': h[7],
+    }
 
 
-def _frame_layout(data):
-    """Parse the live header; raise CodecError if the frame does not chain."""
+def _container_layout(data, force_rsz=None):
+    """Parse one sprite-frame container (live or alternate) fully: header, OAM records and
+    the tile each record claims. Raises CodecError if the header/record/tile bytes do not
+    fit in `data`, the nt1+nt2==4*n1+n2+n3 invariant fails, or a tile is claimed twice or
+    not at all - i.e. whenever `data` is not really one exact frame in this container.
+
+    Returns {'header', 'rsz', 'records': [(x, y, attr_or_None), ...], 'tiles': int,
+    'tiles_start', 'tiles_end', 'origin': (ox, oy), 'canvas': (cw, ch),
+    'placements': {tile_index: (px, py)}} with px/py relative to the origin."""
     if len(data) < 8:
         raise CodecError('short frame')
-    n1, n2, tile_off, unk1, unk2, ntiles1, vram_off, flags = data[0:8]
-    ntiles2 = flags & 0x7F
-    noam = n1 + n2
-    tiles_start = 8 + 2 * noam
-    ntiles = ntiles1 + ntiles2
-    tiles_end = tiles_start + 32 * ntiles
+    hf = _container_header(data)
+    n1, n2, n3 = hf['n1'], hf['n2'], hf['n3']
+    off2, off3, nt1, vo2, nt2 = hf['off2'], hf['off3'], hf['nt1'], hf['vo2'], hf['nt2']
+    tiles = nt1 + nt2
+    if tiles != 4 * n1 + n2 + n3:
+        raise CodecError(f'nt1+nt2 ({tiles}) != 4*n1+n2+n3 ({4 * n1 + n2 + n3})')
+    rsz = force_rsz if force_rsz is not None else (3 if hf['wide'] else 2)
+    recs = n1 + n2 + n3
+    rec_end = 8 + rsz * recs
+    tiles_end = rec_end + 32 * tiles
     if tiles_end > len(data):
-        raise CodecError('tile blob runs past the asset')
+        raise CodecError('record/tile blob runs past the asset')
     trailer_len = len(data) - tiles_end
     if trailer_len > 64:
-        # documented live-format trailers are 2-40 bytes; anything larger means the
-        # 8-byte header does not apply (the alternate-format regions).
-        raise CodecError('trailer too long for the live format')
-    oam = []
-    t = 0
-    for i in range(n1):
-        oam.append((data[8 + 2 * i], data[9 + 2 * i], t))
-        t = _next_tile(t)
-    t = tile_off
-    for i in range(n1, noam):
-        oam.append((data[8 + 2 * i], data[9 + 2 * i], t))
-        t = _next_tile(t)
-    grid = {}
-    for i in range(ntiles1):
-        grid[i] = i
-    for i in range(ntiles2):
-        grid[vram_off + i] = ntiles1 + i
-    return {'n1': n1, 'n2': n2, 'tile_off': tile_off, 'unk1': unk1, 'unk2': unk2,
-            'ntiles1': ntiles1, 'vram_off': vram_off, 'flags_byte': flags,
-            'ntiles2': ntiles2, 'oam': oam, 'grid': grid, 'ntiles': ntiles,
-            'tiles_start': tiles_start, 'tiles_end': tiles_end}
+        # documented trailers are 2-40 bytes; anything larger means this header does not
+        # really apply here.
+        raise CodecError('trailer too long for this container')
+
+    records = []
+    for i in range(recs):
+        x, y = data[8 + rsz * i], data[9 + rsz * i]
+        attr = data[10 + rsz * i] if rsz == 3 else None
+        records.append((x, y, attr))
+
+    sizes = [16 if i < n1 else 8 for i in range(recs)]
+    if records:
+        ox = min(r[0] for r in records)
+        oy = min(r[1] for r in records)
+        cw = max(r[0] + sz for (r, sz) in zip(records, sizes)) - ox
+        ch = max(r[1] + sz for (r, sz) in zip(records, sizes)) - oy
+    else:
+        ox = oy = cw = ch = 0
+
+    placements = {}
+    for i, (x, y, _attr) in enumerate(records):
+        if i < n1:
+            v, quad = 2 * (i % 8) + 32 * (i // 8), 4
+        elif i < n1 + n2:
+            v, quad = off2 + (i - n1), 1
+        else:
+            v, quad = off3 + (i - n1 - n2), 1
+        for q in range(quad):
+            tv = v + (q & 1) + ((q >> 1) * 16)
+            f = tv if tv < nt1 else nt1 + (tv - vo2)
+            if f < 0 or f >= tiles:
+                raise CodecError(f'record {i} names tile {f}, outside 0..{tiles - 1}')
+            if f in placements:
+                raise CodecError(f'tile {f} claimed by more than one record')
+            placements[f] = (x - ox + (q & 1) * 8, y - oy + (q >> 1) * 8)
+    if len(placements) != tiles:
+        missing = [i for i in range(tiles) if i not in placements]
+        raise CodecError(f'{len(missing)} tile(s) claimed by no record: {missing[:5]}')
+
+    return {'header': hf, 'rsz': rsz, 'records': records, 'tiles': tiles,
+            'tiles_start': rec_end, 'tiles_end': tiles_end,
+            'origin': (ox, oy), 'canvas': (cw, ch), 'placements': placements}
 
 
-def decode_sprite_frame(kind, data, outdir, stem):
+def _alt_attr_decode(attr):
+    return {'vflip': bool(attr & 0x80), 'hflip': bool(attr & 0x40),
+            'priority': (attr >> 4) & 3, 'palette': (attr >> 1) & 7, 'name_bit': attr & 1}
+
+
+def _alt_attr_encode(a):
+    return ((0x80 if a['vflip'] else 0) | (0x40 if a['hflip'] else 0) |
+            ((a['priority'] & 3) << 4) | ((a['palette'] & 7) << 1) | (a['name_bit'] & 1))
+
+
+def _decode_container(kind, data, outdir, stem, fmt, note, wide_attrs):
+    """Shared decode body for sprite_frame ('live') and sprite_frame_alt ('alt'). Draws
+    every tile at the one rect _container_layout gives it - no spill strip, in either
+    format - and keeps that rect list in the sidecar as the round-trip authority."""
     try:
-        L = _frame_layout(data)
+        L = _container_layout(data)
     except CodecError:
-        # the two alternate-format regions (1CC6AA / 1F2E14) and the ROM tail: the live
-        # header does not apply and their own header semantics are not established, so
-        # they are kept verbatim (documented in docs/data_formats.md).
         blob = os.path.join(outdir, stem + '.raw.bin')
         with open(blob, 'wb') as fp:
             fp.write(data)
         js = os.path.join(outdir, stem + '.json')
-        _save_json(js, {'kind': 'sprite_frame', 'format': 'raw',
-                        'note': 'alternate-format frames, not read by the live code; header '
-                                'semantics uncertain, so the bytes are kept verbatim',
+        _save_json(js, {'kind': kind, 'format': 'raw',
+                        'note': "this frame's header does not account for its bytes "
+                                '(docs/data_formats.md 1b/1c), so it is kept verbatim',
                         'bytes_file': os.path.basename(blob), 'size': len(data)})
         return js, [js, blob]
 
-    tiles = [tile_to_pixels(data, L['tiles_start'] + 32 * i, 4) for i in range(L['ntiles'])]
+    cw, ch = L['canvas']
+    ox, oy = L['origin']
+    tiles = [tile_to_pixels(data, L['tiles_start'] + 32 * i, 4) for i in range(L['tiles'])]
 
-    # canvas bounding box over the 16x16 sprites (frame-local, x/y are raw header bytes)
-    if L['oam']:
-        ox = min(r[0] for r in L['oam'])
-        oy = min(r[1] for r in L['oam'])
-        cw = max(r[0] for r in L['oam']) + 16 - ox
-        chh = max(r[1] for r in L['oam']) + 16 - oy
-    else:
-        ox = oy = cw = chh = 0
-
+    # Every tile above already has exactly one sprite that claims it - no unclaimed-tile
+    # spill, unlike the old grid. But sprites can still overlap *on screen* (two different
+    # 16x16 or 8x8 boxes a pixel or two apart is ordinary in this art), and two tiles
+    # cannot both occupy the same pixels on one flat canvas without one of them becoming
+    # unrecoverable. So placement is claimed at pixel granularity, ascending tile index
+    # first (i.e. n1's 16x16 sprites, then n2's and n3's 8x8 ones): the first tile to touch
+    # a pixel is drawn there and keeps that rect; a tile that loses the pixels it would
+    # naturally sit at keeps its own copy in a small overflow strip below the canvas
+    # instead, so it stays exactly recoverable. This is the live decoder's own
+    # pixel-granularity claim (sprite positions are not 8-aligned), now needed for the
+    # tiles that truly overlap on screen rather than for tiles with nowhere to go.
+    claimed = bytearray(cw * ch) if cw and ch else bytearray()
     rect = {}
-    canvas = bytearray(cw * chh) if cw and chh else bytearray()
-    claimed = bytearray(cw * chh) if cw and chh else bytearray()
-    for (x, y, t) in L['oam']:
-        for dy in (0, 1):
-            for dx in (0, 1):
-                gi = t + dx + dy * TILE_SEQ_STEP
-                bi = L['grid'].get(gi)
-                if bi is None:
-                    continue
-                px, py = x - ox + dx * 8, y - oy + dy * 8
-                # sprite positions are not 8-aligned, so claim at pixel granularity:
-                # the first tile to own a pixel keeps it and stays readable back.
-                if any(claimed[(py + r) * cw + px + c] for r in range(8) for c in range(8)):
-                    continue
-                for r in range(8):
-                    o = (py + r) * cw + px
-                    claimed[o:o + 8] = b'\x01' * 8
-                _blit(canvas, cw, px, py, tiles[bi])
-                if bi not in rect:
-                    rect[bi] = (px, py)
+    overflow = []
+    for i, (px, py) in sorted(L['placements'].items()):
+        if any(claimed[(py + r) * cw + px + c] for r in range(8) for c in range(8)):
+            overflow.append(i)
+            continue
+        for r in range(8):
+            o = (py + r) * cw + px
+            claimed[o:o + 8] = b'\x01' * 8
+        rect[i] = (px, py)
 
-    # every tile without an authoritative rect on the canvas goes into a spill strip
-    spill = [i for i in range(L['ntiles']) if i not in rect]
-    gap = 1 if (chh and spill) else 0
-    srows = (len(spill) + 15) // 16
-    w = max(cw, 16 * 8 if spill else 0, 8)
-    h = chh + gap + srows * 8
-    out = bytearray(w * h)
-    for y in range(chh):
-        out[y * w:y * w + cw] = canvas[y * cw:(y + 1) * cw]
-    for k, bi in enumerate(spill):
-        px, py = (k % 16) * 8, chh + gap + (k // 16) * 8
-        _blit(out, w, px, py, tiles[bi])
-        rect[bi] = (px, py)
+    gap = 1 if (ch and overflow) else 0
+    orows = (len(overflow) + 15) // 16
+    w = max(cw, 16 * 8 if overflow else 0, 8)
+    h = ch + gap + orows * 8
+    canvas = bytearray(w * h)
+    for i, (px, py) in rect.items():
+        _blit(canvas, w, px, py, tiles[i])
+    for k, i in enumerate(overflow):
+        px, py = (k % 16) * 8, ch + gap + (k // 16) * 8
+        _blit(canvas, w, px, py, tiles[i])
+        rect[i] = (px, py)
 
     png = os.path.join(outdir, stem + '.png')
-    write_png_indexed(png, w, h, out, grey_plte(15))
+    write_png_indexed(png, w, h, canvas, grey_plte(15))
+    hdr = L['header']
+    header_js = {'n1': hdr['n1'], 'n2': hdr['n2'], 'off2': hdr['off2'],
+                'n3': hdr['n3'], 'off3': hdr['off3'], 'nt1': hdr['nt1'],
+                'vo2': hdr['vo2'], 'nt2': hdr['nt2']}
+    if wide_attrs:
+        header_js['wide'] = hdr['wide']
+    records_js = []
+    for (x, y, attr) in L['records']:
+        r = {'x': x, 'y': y}
+        if wide_attrs and attr is not None:
+            r.update(attr=attr, **_alt_attr_decode(attr))
+        records_js.append(r)
     js = os.path.join(outdir, stem + '.json')
     _save_json(js, {
-        'kind': 'sprite_frame', 'format': 'live',
-        'note': 'PNG = the assembled frame (16x16 sprites at their OAM positions) with any '
-                'tile the assembly could not place uniquely spilled into the strip below. '
-                '"tiles" gives the authoritative 8x8 source rect of every VRAM tile.',
-        'header': {'n1': L['n1'], 'n2': L['n2'], 'tile_off': L['tile_off'],
-                   'unk1': L['unk1'], 'unk2': L['unk2'], 'ntiles1': L['ntiles1'],
-                   'vram_off': L['vram_off'], 'flags_byte': L['flags_byte']},
-        'canvas': {'origin_x': ox, 'origin_y': oy, 'width': cw, 'height': chh,
-                   'png_width': w, 'png_height': h, 'spill_tiles': len(spill)},
-        'oam': [{'x': x, 'y': y, 'tile_number': t} for (x, y, t) in L['oam']],
-        'tiles': [{'i': i, 'x': rect[i][0], 'y': rect[i][1]} for i in range(L['ntiles'])],
+        'kind': kind, 'format': fmt, 'note': note,
+        'header': header_js,
+        'canvas': {'origin_x': ox, 'origin_y': oy, 'width': cw, 'height': ch,
+                   'png_width': w, 'png_height': h, 'overlap_tiles': len(overflow)},
+        'records': records_js,
+        'tiles': [{'i': i, 'x': rect[i][0], 'y': rect[i][1]} for i in range(L['tiles'])],
         'trailer': _hex(data[L['tiles_end']:]),
     })
     return png, [png, js]
 
 
-def encode_sprite_frame(kind, primary, outpath):
+def _encode_container(primary, outpath, wide_attrs):
+    """Shared encode body: rebuild the header, the OAM records and the tile blob from the
+    sidecar and PNG; append the trailer verbatim. Byte-exact by construction, since the
+    header fields, records and tile rects are exactly what decode read off the ROM."""
     base = primary
     for ext in ('.png', '.json'):
         if base.endswith(ext):
@@ -769,11 +833,20 @@ def encode_sprite_frame(kind, primary, outpath):
             fp.write(data)
         return
     hdr = meta['header']
+    wide = wide_attrs and hdr.get('wide', False)
+    out = bytearray((
+        (hdr['n1'] & 0x7F) | (0x80 if wide else 0),
+        hdr['n2'] & 0xFF, hdr['off2'] & 0xFF,
+        hdr['n3'] & 0xFF, hdr['off3'] & 0xFF,
+        hdr['nt1'] & 0xFF, hdr['vo2'] & 0xFF, hdr['nt2'] & 0xFF,
+    ))
+    for r in meta['records']:
+        if wide:
+            attr = r['attr'] if 'attr' in r else _alt_attr_encode(r)
+            out += bytes((r['x'] & 0xFF, r['y'] & 0xFF, attr & 0xFF))
+        else:
+            out += bytes((r['x'] & 0xFF, r['y'] & 0xFF))
     w, h, px = read_png_indexed(base + '.png')
-    out = bytearray((hdr['n1'], hdr['n2'], hdr['tile_off'], hdr['unk1'],
-                     hdr['unk2'], hdr['ntiles1'], hdr['vram_off'], hdr['flags_byte']))
-    for r in meta['oam']:
-        out += bytes((r['x'] & 0xFF, r['y'] & 0xFF))
     for t in meta['tiles']:
         out += pixels_to_tile(_grab(px, w, t['x'], t['y']), 4)
     out += _unhex(meta.get('trailer', ''))
@@ -781,151 +854,32 @@ def encode_sprite_frame(kind, primary, outpath):
         fp.write(out)
 
 
-# ======================================================================================
-# sprite_frame_alt  <->  assembled-frame PNG + JSON sidecar
-# ======================================================================================
-#
-# Alternate format (docs/data_formats.md 1b-alt): unreferenced by any live code or table, so
-# there is no traced emitter to follow. Frame boundaries were established structurally by
-# tools/gen_assets.py's parse_sprite_frame_alt_region (a header-scan chain walk: the 8 bytes
-# before a maximal run of >=8 consecutive 3-byte {x,y,attr} records are a frame's header, and
-# the frame runs to the next one's header), which reproduces exactly 82 frames in
-# 1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5: 113 total, matching the manual header-scan count.
-# Each config/assets.txt sprite_frame_alt asset is already exactly one such frame (or, for
-# frame_alt_tail, a partial one truncated by the ROM's end), so decode only has to re-run the
-# same record-run scan locally to recover n; it always reproduces the same n the asset was
-# split on, since that scan is a pure function of the frame's own bytes.
-#
-#   header  8 bytes; byte 3 is 0x00 in every frame observed, the rest correlate loosely with
-#           the record/tile counts but not through one clean invertible formula (kept verbatim,
-#           not decoded, so nothing is lost)
-#   records n x 3 bytes {x, y, attr}; attr is a standard SNES OBJ low-attribute byte,
-#           vhoopppN: bit7 v-flip, bit6 h-flip, bits5-4 priority, bits3-1 palette, bit0 tile
-#           index bit 8. Decomposed losslessly below (the 5 fields cover all 8 bits with no
-#           overlap, so decode+encode round-trips any byte value even though the corpus only
-#           uses 0x1E/0x20, i.e. v=h=0 throughout: no observed frame is flipped)
-#   tiles   4bpp, 32 bytes each; the tile *count* is not stored redundantly anywhere useful, so
-#           it is "whatever floors evenly out of the bytes left after the header and
-#           records", with 0-31 leftover bytes (rare) kept as a trailer; same convention as
-#           the live format's undecoded trailer
-#
-# Tile-to-sprite assignment: the live format's known rule (4 tiles/16x16 sprite, `tile += 2`
-# wrapping every 16) does not fit here: these frames average ~2.4 tiles per record, far
-# short of 4/record, so each record is instead assigned exactly one 8x8 tile, in sequence
-# (record i -> tile i); any tiles beyond the record count are unclaimed and, as in the live
-# decoder, spilled into the strip below the canvas. This is a rendering guess, unvalidated by
-# any code (nothing reads this format), but it does not affect round-trip exactness: the
-# `tiles` array in the sidecar is authoritative, exactly like decode_sprite_frame.
-
-ALT_ATTR_LO, ALT_ATTR_HI = 0x1C, 0x22
+def decode_sprite_frame(kind, data, outdir, stem):
+    return _decode_container(
+        kind, data, outdir, stem, 'live',
+        note='PNG = the assembled frame: n1 16x16 sprites (4 tiles each, in the name-table '
+             'arrangement) and n2+n3 8x8 sprites, each at its OAM position. No spill strip: '
+             'every tile the header declares is claimed by exactly one sprite.',
+        wide_attrs=False)
 
 
-def _alt_record_run(data, off, limit=200):
-    n = 0
-    while n < limit:
-        p = off + n * 3
-        if p + 2 >= len(data) or not (ALT_ATTR_LO <= data[p + 2] <= ALT_ATTR_HI):
-            break
-        n += 1
-    return n
-
-
-def _alt_attr_decode(attr):
-    return {'vflip': bool(attr & 0x80), 'hflip': bool(attr & 0x40),
-            'priority': (attr >> 4) & 3, 'palette': (attr >> 1) & 7, 'name_bit': attr & 1}
-
-
-def _alt_attr_encode(a):
-    return ((0x80 if a['vflip'] else 0) | (0x40 if a['hflip'] else 0) |
-            ((a['priority'] & 3) << 4) | ((a['palette'] & 7) << 1) | (a['name_bit'] & 1))
+def encode_sprite_frame(kind, primary, outpath):
+    _encode_container(primary, outpath, wide_attrs=False)
 
 
 def decode_sprite_frame_alt(kind, data, outdir, stem):
-    if len(data) < 8:
-        raise CodecError('short alt frame')
-    header = data[0:8]
-    n = _alt_record_run(data, 8)
-    rec_end = 8 + 3 * n
-    if rec_end > len(data):
-        raise CodecError('alt record run runs past the asset')
-    tile_bytes = len(data) - rec_end
-    ntiles = tile_bytes // 32
-    tile_trailer = data[rec_end + 32 * ntiles:]
-    oam = [(data[8 + 3 * i], data[8 + 3 * i + 1], data[8 + 3 * i + 2]) for i in range(n)]
-    tiles_start = rec_end
-    tiles = [tile_to_pixels(data, tiles_start + 32 * i, 4) for i in range(ntiles)]
-
-    if oam:
-        ox = min(r[0] for r in oam)
-        oy = min(r[1] for r in oam)
-        cw = max(r[0] for r in oam) + 8 - ox
-        chh = max(r[1] for r in oam) + 8 - oy
-    else:
-        ox = oy = cw = chh = 0
-
-    rect = {}
-    canvas = bytearray(cw * chh) if cw and chh else bytearray()
-    claimed = bytearray(cw * chh) if cw and chh else bytearray()
-    for i, (x, y, attr) in enumerate(oam):
-        if i >= ntiles:
-            break
-        px, py = x - ox, y - oy
-        if any(claimed[(py + r) * cw + px + c] for r in range(8) for c in range(8)):
-            continue
-        for r in range(8):
-            o = (py + r) * cw + px
-            claimed[o:o + 8] = b'\x01' * 8
-        _blit(canvas, cw, px, py, tiles[i])
-        rect[i] = (px, py)
-
-    spill = [i for i in range(ntiles) if i not in rect]
-    gap = 1 if (chh and spill) else 0
-    srows = (len(spill) + 15) // 16
-    w = max(cw, 16 * 8 if spill else 0, 8)
-    h = chh + gap + srows * 8
-    out = bytearray(w * h)
-    for y in range(chh):
-        out[y * w:y * w + cw] = canvas[y * cw:(y + 1) * cw]
-    for k, bi in enumerate(spill):
-        px, py = (k % 16) * 8, chh + gap + (k // 16) * 8
-        _blit(out, w, px, py, tiles[bi])
-        rect[bi] = (px, py)
-
-    png = os.path.join(outdir, stem + '.png')
-    write_png_indexed(png, w, h, out, grey_plte(15))
-    js = os.path.join(outdir, stem + '.json')
-    _save_json(js, {
-        'kind': 'sprite_frame_alt', 'format': 'alt',
-        'note': 'PNG = a best-effort assembly (one 8x8 tile per OAM record, in order; unclaimed '
-                'tiles spilled below) of a frame from the alternate sprite format, unreferenced '
-                'by any live code; see docs/data_formats.md 1b-alt. "tiles" is authoritative '
-                'for round-tripping regardless of the assembly guess.',
-        'header': _hex(header),
-        'canvas': {'origin_x': ox, 'origin_y': oy, 'width': cw, 'height': chh,
-                   'png_width': w, 'png_height': h, 'spill_tiles': len(spill)},
-        'oam': [dict(x=x, y=y, attr=attr, **_alt_attr_decode(attr)) for (x, y, attr) in oam],
-        'tiles': [{'i': i, 'x': rect[i][0], 'y': rect[i][1]} for i in range(ntiles)],
-        'tile_trailer': _hex(tile_trailer),
-    })
-    return png, [png, js]
+    return _decode_container(
+        kind, data, outdir, stem, 'alt',
+        note='Alternate-format sprite frame (docs/data_formats.md 1c), unreferenced by any '
+             'live code: the same container as sprite_frame, with 3-byte {x, y, attr} '
+             'records. PNG = the assembled frame, no spill strip. Colour: none - nothing '
+             'uploads a palette for these frames, so the attribute byte\'s palette bits '
+             'name a row the ROM never fills in.',
+        wide_attrs=True)
 
 
 def encode_sprite_frame_alt(kind, primary, outpath):
-    base = primary
-    for ext in ('.png', '.json'):
-        if base.endswith(ext):
-            base = base[:-len(ext)]
-    meta = _load_json(base + '.json')
-    w, h, px = read_png_indexed(base + '.png')
-    out = bytearray(_unhex(meta['header']))
-    for r in meta['oam']:
-        attr = r['attr'] if 'attr' in r else _alt_attr_encode(r)
-        out += bytes((r['x'] & 0xFF, r['y'] & 0xFF, attr & 0xFF))
-    for t in meta['tiles']:
-        out += pixels_to_tile(_grab(px, w, t['x'], t['y']), 4)
-    out += _unhex(meta.get('tile_trailer', ''))
-    with open(outpath, 'wb') as fp:
-        fp.write(out)
+    _encode_container(primary, outpath, wide_attrs=True)
 
 
 # ======================================================================================

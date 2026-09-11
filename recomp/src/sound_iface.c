@@ -72,13 +72,8 @@
 
 /* ---- instruction shapes this bank needs that dream_time.h lacks --------- */
 
-/* An immediate operand is not fetched by the addressing mode: the opcode's own
- * data read *is* the operand read, so the interrupt latch sits between the two
- * operand bytes rather than after them (cpu_adrImm + cpu_lda in the core). */
-#define SIMM16(addr) do { if(t_step(ss, pb, (uint16_t) (addr), 2, a, x, y)) return; \
-                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
-#define SIMM8(addr)  do { if(t_step(ss, pb, (uint16_t) (addr), 1, a, x, y)) return; \
-                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+/* SIMM16 and SIMM8 (immediate operands) live in dream_time.h now; this file used
+ * to carry its own identical copy. */
 
 /* jsr abs to a routine this file also converts: the operand word (in the step),
  * an internal cycle, then the return address, high byte first with the latch in
@@ -167,9 +162,9 @@ static uint16_t t_lsr16_abs(SnesState* ss, uint32_t adr) {
 static uint32_t t_idl_ptr(SnesState* ss, uint16_t dpoff) {
   const uint16_t dp = ss_dp(ss);
   if(dp & 0xff) ss_idle(ss);      /* dpr low byte not 0: 1 extra cycle */
-  uint32_t p = ss_bus_r8(ss, (uint16_t) (dp + dpoff));
-  p |= (uint32_t) ss_bus_r8(ss, (uint16_t) (dp + dpoff + 1)) << 8;
-  p |= (uint32_t) ss_bus_r8(ss, (uint16_t) (dp + dpoff + 2)) << 16;
+  uint32_t p = ss_bus_r8(ss, t_dp(dp, dpoff));
+  p |= (uint32_t) ss_bus_r8(ss, t_dp(dp, dpoff + 1)) << 8;
+  p |= (uint32_t) ss_bus_r8(ss, t_dp(dp, dpoff + 2)) << 16;
   return p;
 }
 
@@ -1019,7 +1014,7 @@ static void spc_command(SnesState* ss) {
  * cmd_table, so $F9 is cmd1_set_E7 (parameter into $E7, which nothing else in
  * the traced driver reads, per spc/spc_map.txt) and $FB is cmd3_fade_and_song.
  * Nothing calls either: no jsr, jsl or table word anywhere in out/dream.asm
- * names either address, and config/recomp_order.txt marks them cold. Only one
+ * names either address. Only one
  * of the two is traced as code at a time (the tracer's orphan sweep reaches
  * whichever the label file forces), so both are converted and both are
  * credited by the unit gate rather than by a script (config/recomp_units.txt,

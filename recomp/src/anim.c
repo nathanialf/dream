@@ -28,6 +28,20 @@
 #include "dream_alu.h"
 #include "dream_time.h"
 
+/* The return-address push of a `jsl`. LakeSnes' case 0x22 is
+ * `cpu_pushWord(cpu, cpu->pc - 1, true)`, and cpu_pushWord's intCheck puts a
+ * cpu_checkInt() between the high byte and the low byte, so an NMI that rises
+ * during those two cycles is latched before the callee's first instruction.
+ * ss_push16 writes high then low with nothing in between. Every other jsl and
+ * jsr in the port models the latch with this helper (entities_ai.c,
+ * anim_scripts.c, top_level.c, oam_emit.c, vram_stream.c, scroll.c,
+ * mode_init.c); the jsl below used to be the one site that did not. */
+static void t_push16(SnesState* ss, uint16_t v) {
+  ss_push8(ss, (uint8_t) (v >> 8));
+  ss_check_int(ss);
+  ss_push8(ss, (uint8_t) v);
+}
+
 /* anim_rate_store: $C0:99D4, the shared tail. It is also an entry in its own
  * right: the beq at $99A9 in entity_update_tick reaches it directly when the
  * type has no handler for its state, so a hook installed here fires for that
@@ -37,7 +51,7 @@ static void anim_rate_store_body(SnesState* ss, uint16_t a) {
   uint16_t x = ss_x(ss), y = ss_y(ss);
 
   S(0x99D4, 3); t_index(ss);                /* C099D4 sta entity_anim_rate,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_anim_rate + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_anim_rate + x)), a);
 
   S(0x99D7, 1);                             /* C099D7 plb */
   ss_idle(ss);
@@ -56,7 +70,7 @@ static void anim_rate_store_body(SnesState* ss, uint16_t a) {
   ss_push8(ss, pb);
   ss_idle(ss);
   ss_fetch(ss, 1);
-  ss_push16(ss, (uint16_t) (ss_pc(ss) - 1));
+  t_push16(ss, (uint16_t) (ss_pc(ss) - 1));
   ss_set_pc(ss, 0x80, 0xAEC8);
   /* anim_update runs from here, as a hook or as ROM code. It can reach
    * a block upload thousands of cycles long, so let it be interrupted the way it
@@ -82,11 +96,11 @@ static void anim_rate_3_8_body(SnesState* ss, uint16_t a) {
   SI(0x99BA); a = alu_lsr16(ss, a);         /* C099BA lsr A */
   SI(0x99BB); a = alu_lsr16(ss, a);         /* C099BB lsr A */
   S(0x99BC, 2);                             /* C099BC sta $18 */
-  t_write16(ss, ss_dp(ss) + scratch_18, a);
+  t_write16_dp(ss, ss_dp(ss), scratch_18, a);
   SI(0x99BE); a = alu_lsr16(ss, a);         /* C099BE lsr A */
   SI(0x99BF); ss_set_c(ss, false);          /* C099BF clc */
   S(0x99C0, 2);                             /* C099C0 adc $18 */
-  a = alu_adc16(ss, a, t_read16(ss, ss_dp(ss) + scratch_18));
+  a = alu_adc16(ss, a, t_read16_dp(ss, ss_dp(ss), scratch_18));
   S(0x99C2, 1); t_branch(ss, true);         /* C099C2 bra anim_rate_store */
   anim_rate_store_body(ss, a);
 }
@@ -115,11 +129,11 @@ void anim_rate_3_32(SnesState* ss) {
   SI(0x99C6); a = alu_lsr16(ss, a);         /* C099C6 lsr A */
   SI(0x99C7); a = alu_lsr16(ss, a);         /* C099C7 lsr A */
   S(0x99C8, 2);                             /* C099C8 sta $18 */
-  t_write16(ss, ss_dp(ss) + scratch_18, a);
+  t_write16_dp(ss, ss_dp(ss), scratch_18, a);
   SI(0x99CA); a = alu_lsr16(ss, a);         /* C099CA lsr A */
   SI(0x99CB); ss_set_c(ss, false);          /* C099CB clc */
   S(0x99CC, 2);                             /* C099CC adc $18 */
-  a = alu_adc16(ss, a, t_read16(ss, ss_dp(ss) + scratch_18));
+  a = alu_adc16(ss, a, t_read16_dp(ss, ss_dp(ss), scratch_18));
   S(0x99CE, 1); t_branch(ss, true);         /* C099CE bra anim_rate_store */
   anim_rate_store_body(ss, a);
 }

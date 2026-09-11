@@ -181,18 +181,11 @@ static inline uint16_t alu_dec8(SnesState* ss, uint16_t a) {
 
 /* ---- instruction shapes dream_time.h does not cover --------------------- */
 
-/* An immediate operand is not fetched by the addressing mode: the opcode's own
- * data read *is* the operand read, so the interrupt latch sits between the two
- * operand bytes rather than after them (cpu_adrImm + cpu_lda in the core). */
-#define SIMM16(addr) do { if(t_step(ss, pb, (uint16_t) (addr), 2, a, x, y)) return; \
-                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
-#define SIMM8(addr)  do { if(t_step(ss, pb, (uint16_t) (addr), 1, a, x, y)) return; \
-                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+/* SIMM16 and SIMM8 (immediate operands) now live in dream_time.h: 860 sites in
+ * twelve other files were spelling them as a plain step and losing the latch. */
 
-/* jmp abs: opcode, low byte, latch, high byte (LakeSnes case 0x4c). The body
- * names the destination itself, so this only spends the instruction. */
-#define SJMP(addr)   do { if(t_step(ss, pb, (uint16_t) (addr), 2, a, x, y)) return; \
-                          ss_check_int(ss); ss_fetch(ss, 1); } while(0)
+/* SJMP (jmp abs) now lives in dream_time.h, because 33 sites in seven other files
+ * were spelling it as a plain three-byte step and losing the latch. */
 
 /* A 16-bit read-modify-write (inc/dec abs, inc/dec dp): the read takes no
  * interrupt latch between its bytes, an internal cycle sits between read and
@@ -339,8 +332,7 @@ static void t_dpx_w16(SnesState* ss, uint16_t off, uint16_t x, uint16_t v) {
  * all.
  *
  * Nothing calls it: no jsr, jsl or table word anywhere in out/dream.asm names
- * the address, and config/recomp_order.txt marks it cold. It is credited by the
- * unit gate rather than by a script (config/recomp_units.txt,
+ * the address. It is credited by the unit gate rather than by a script (config/recomp_units.txt,
  * `dream_harness --unit`).
  *
  * Entry: nothing, and it takes the direct page with it; tcd loads D from the
@@ -603,7 +595,7 @@ static void nmi_install_handler(SnesState* ss) {
   const uint16_t dp = ss_dp(ss);
 
   S(0xA4E9, 2);                             /* C0A4E9 sta nmi_handler_ptr */
-  t_write16(ss, (uint16_t) (dp + nmi_handler_ptr), a);
+  t_write16_dp(ss, dp, nmi_handler_ptr, a);
   SEP(0xA4EB, 0x20);                        /* C0A4EB sep #$20 */
   S(0xA4ED, 3);                             /* C0A4ED lda RDNMI */
   { uint8_t v = t_read8(ss, ss_abs(ss, RDNMI));
@@ -638,7 +630,7 @@ static void nmi_park(SnesState* ss) {
 
   if(m8) {
     S(0xA4F5, 2);                           /* C0A4F5 lda nmitimen_shadow */
-    { uint8_t v = t_read8(ss, (uint16_t) (dp + nmitimen_shadow));
+    { uint8_t v = t_read8_dp(ss, dp, nmitimen_shadow);
       a = (uint16_t) ((a & 0xff00) | v); ss_set_nz8(ss, v); }
     S(0xA4F7, 3);                           /* C0A4F7 sta NMITIMEN */
     t_write8(ss, ss_abs(ss, NMITIMEN), (uint8_t) a);
@@ -646,7 +638,7 @@ static void nmi_park(SnesState* ss) {
     t_write8(ss, ss_abs(ss, JOYSER0), 0);
   } else {
     S(0xA4F5, 2);                           /* C0A4F5 lda nmitimen_shadow */
-    a = t_read16(ss, (uint16_t) (dp + nmitimen_shadow));
+    a = t_read16_dp(ss, dp, nmitimen_shadow);
     ss_set_nz16(ss, a);
     S(0xA4F7, 3);                           /* C0A4F7 sta NMITIMEN (and WRIO) */
     t_write16(ss, ss_abs(ss, NMITIMEN), a);
@@ -716,7 +708,7 @@ static void nmi_handler_gameplay(SnesState* ss) {
   SI(0x80F7); ss_set_sp(ss, x);                        /* C080F7 txs */
   S(0x80F8, 3); t_write16(ss, ss_abs(ss, OAMADDL), 0); /* C080F8 stz OAMADDL */
   S(0x80FB, 2);                                        /* C080FB lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x80FD); a = alu_asl16(ss, a);                    /* C080FD asl A */
   SI(0x80FE); x = a; ss_set_nz16(ss, x);               /* C080FE tax */
   JSR_IAX(0x80FF, 0x8272);                             /* C080FF jsr (jtbl_C08272,X) */
@@ -727,13 +719,13 @@ static void nmi_handler_gameplay(SnesState* ss) {
   SEP(0x810B, 0x20);                                   /* C0810B sep #$20 */
   S(0x810D, 3); t_write8(ss, ss_abs(ss, NMITIMEN), 0); /* C0810D stz NMITIMEN */
   S(0x8110, 2);                                        /* C08110 lda pause_flag */
-  { uint8_t b = t_read8(ss, (uint16_t) (dp + pause_flag));
+  { uint8_t b = t_read8_dp(ss, dp, pause_flag);
     a = (uint16_t) ((a & 0xff00) | b); ss_set_nz8(ss, b); }
   { const bool taken = (a & 0xff) != 0;
     S(0x8112, 1); t_branch(ss, taken);                 /* C08112 bne loc_C08116 */
     if(!taken) {
       S(0x8114, 2);                                    /* C08114 lda inidisp_shadow */
-      uint8_t b = t_read8(ss, (uint16_t) (dp + inidisp_shadow));
+      uint8_t b = t_read8_dp(ss, dp, inidisp_shadow);
       a = (uint16_t) ((a & 0xff00) | b); ss_set_nz8(ss, b);
     } }
   /* loc_C08116 */
@@ -741,7 +733,7 @@ static void nmi_handler_gameplay(SnesState* ss) {
   REP(0x8119, 0x20);                                   /* C08119 rep #$20 */
 
   S(0x811B, 2);                                        /* C0811B lda fade_delta */
-  a = t_read16(ss, (uint16_t) (dp + fade_delta)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, fade_delta); ss_set_nz16(ss, a);
   { const bool taken = a == 0;
     S(0x811D, 1); t_branch(ss, taken);                 /* C0811D beq loc_C08133 */
     if(taken) goto loc_C08133; }
@@ -749,7 +741,7 @@ static void nmi_handler_gameplay(SnesState* ss) {
     S(0x811F, 1); t_branch(ss, taken);                 /* C0811F bpl loc_C08127 */
     if(taken) goto loc_C08127; }
   S(0x8121, 2);                                        /* C08121 adc fade_level */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + fade_level)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, fade_level));
   { const bool taken = a != 0;
     S(0x8123, 1); t_branch(ss, taken);                 /* C08123 bne loc_C08131 */
     if(taken) goto loc_C08131; }
@@ -759,40 +751,40 @@ static void nmi_handler_gameplay(SnesState* ss) {
 loc_C08127:
   SI(0x8127); ss_set_c(ss, false);                     /* C08127 clc */
   S(0x8128, 2);                                        /* C08128 adc fade_level */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + fade_level)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, fade_level));
   SIMM16(0x812A); alu_cmp16(ss, a, 0x0F00);            /* C0812A cmp #$0F00 */
   { const bool taken = !ss_c(ss);
     S(0x812D, 1); t_branch(ss, taken);                 /* C0812D bcc loc_C08131 */
     if(taken) goto loc_C08131; }
 
 loc_C0812F:
-  S(0x812F, 2); t_write16(ss, (uint16_t) (dp + fade_delta), 0);  /* stz fade_delta */
+  S(0x812F, 2); t_write16_dp(ss, dp, fade_delta, 0);  /* stz fade_delta */
 
 loc_C08131:
-  S(0x8131, 2); t_write16(ss, (uint16_t) (dp + fade_level), a);  /* sta fade_level */
+  S(0x8131, 2); t_write16_dp(ss, dp, fade_level, a);  /* sta fade_level */
 
 loc_C08133:
   S(0x8133, 2);                                        /* C08133 lda fade_delta */
-  a = t_read16(ss, (uint16_t) (dp + fade_delta)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, fade_delta); ss_set_nz16(ss, a);
   { const bool taken = a != 0;
     S(0x8135, 1); t_branch(ss, taken);                 /* C08135 bne loc_C08147 */
     if(taken) goto loc_C08147; }
   S(0x8137, 2);                                        /* C08137 lda joy1_pressed */
-  a = t_read16(ss, (uint16_t) (dp + joy1_pressed)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, joy1_pressed); ss_set_nz16(ss, a);
   S(0x8139, 2);                                        /* C08139 ora joy2_pressed */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + joy2_pressed)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, joy2_pressed));
   SIMM16(0x813B); alu_bit_imm16(ss, a, 0x1000);        /* C0813B bit #$1000 (Select) */
   { const bool taken = ss_z(ss);
     S(0x813E, 1); t_branch(ss, taken);                 /* C0813E beq loc_C08147 */
     if(taken) goto loc_C08147; }
   S(0x8140, 2);                                        /* C08140 lda pause_flag */
-  a = t_read16(ss, (uint16_t) (dp + pause_flag)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, pause_flag); ss_set_nz16(ss, a);
   SIMM16(0x8142); a = alu_eor16(ss, a, 0x000A);        /* C08142 eor #$000A */
-  S(0x8145, 2); t_write16(ss, (uint16_t) (dp + pause_flag), a);  /* sta pause_flag */
+  S(0x8145, 2); t_write16_dp(ss, dp, pause_flag, a);  /* sta pause_flag */
 
 loc_C08147:
   S(0x8147, 2);                                        /* C08147 lda pause_flag */
-  a = t_read16(ss, (uint16_t) (dp + pause_flag)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, pause_flag); ss_set_nz16(ss, a);
   { const bool taken = a == 0;
     S(0x8149, 1); t_branch(ss, taken);                 /* C08149 beq loc_C0814E */
     if(!taken) { SJMP(0x814B); goto loc_C0822B; } }    /* C0814B jmp loc_C0822B */
@@ -802,27 +794,27 @@ loc_C08147:
   JSR(0x8151, 0x9E83);                                 /* jsr build_metatile_column_500 */
   JSR(0x8154, 0x9FB7);                                 /* jsr build_metatile_column_580 */
   S(0x8157, 2);                                        /* C08157 lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x8159); a = alu_asl16(ss, a);                    /* C08159 asl A */
   SI(0x815A); x = a; ss_set_nz16(ss, x);               /* C0815A tax */
   JSR_IAX(0x815B, 0x827A);                             /* jsr (jtbl_C0827A,X) */
 
   S(0x815E, 2);                                        /* C0815E lda $78 */
-  a = t_read16(ss, (uint16_t) (dp + 0x0078)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, 0x0078); ss_set_nz16(ss, a);
   { const bool taken = a == 0;
     S(0x8160, 1); t_branch(ss, taken);                 /* C08160 beq loc_C08192 */
     if(taken) goto loc_C08192; }
-  S(0x8162, 2); v = t_inc16(ss, (uint16_t) (dp + 0x0078), -1);   /* C08162 dec $78 */
+  S(0x8162, 2); v = t_inc16(ss, t_dp(dp, 0x0078), -1);   /* C08162 dec $78 */
   { const bool taken = v != 0;
     S(0x8164, 1); t_branch(ss, taken);                 /* C08164 bne loc_C08192 */
     if(taken) goto loc_C08192; }
   S(0x8166, 2);                                        /* C08166 lda walk_cycle_timer */
-  a = t_read16(ss, (uint16_t) (dp + 0x0070)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, 0x0070); ss_set_nz16(ss, a);
   { const bool taken = a != 0;
     S(0x8168, 1); t_branch(ss, taken);                 /* C08168 bne loc_C08192 */
     if(taken) goto loc_C08192; }
   SIMM16(0x816A); a = 0x003C; ss_set_nz16(ss, a);      /* C0816A lda #$003C */
-  S(0x816D, 2); t_write16(ss, (uint16_t) (dp + 0x0070), a);      /* sta walk_cycle_timer */
+  S(0x816D, 2); t_write16_dp(ss, dp, 0x0070, a);      /* sta walk_cycle_timer */
   S(0x816F, 3); t_write16(ss, ss_abs(ss, 0x0C1F), 0);  /* C0816F stz $0C1F */
   SIMM16(0x8172); a = 0x0004; ss_set_nz16(ss, a);      /* C08172 lda #$0004 */
   S(0x8175, 3); t_write16(ss, ss_abs(ss, 0x0C21), a);  /* C08175 sta $0C21 */
@@ -832,14 +824,14 @@ loc_C08147:
   SIMM16(0x8181); a = 0x0080; ss_set_nz16(ss, a);      /* C08181 lda #$0080 */
   S(0x8184, 3); t_write16(ss, ss_abs(ss, 0x0C25), a);  /* C08184 sta $0C25 */
   S(0x8187, 2);                                        /* C08187 lda camera_x */
-  a = t_read16(ss, (uint16_t) (dp + camera_x)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_x); ss_set_nz16(ss, a);
   S(0x8189, 3); t_write16(ss, ss_abs(ss, 0x0C27), a);  /* C08189 sta $0C27 */
   SIMM16(0x818C); a = 0x0001; ss_set_nz16(ss, a);      /* C0818C lda #$0001 */
   S(0x818F, 3); t_write16(ss, ss_abs(ss, 0x0C2B), a);  /* C0818F sta $0C2B */
 
 loc_C08192:
   S(0x8192, 2);                                        /* C08192 ldx walk_cycle_timer */
-  x = t_read16(ss, (uint16_t) (dp + 0x0070)); ss_set_nz16(ss, x);
+  x = t_read16_dp(ss, dp, 0x0070); ss_set_nz16(ss, x);
   { const bool taken = x == 0;
     S(0x8194, 1); t_branch(ss, taken);                 /* C08194 beq loc_C081A6 */
     if(taken) goto loc_C081A6; }
@@ -848,20 +840,20 @@ loc_C08192:
     S(0x8199, 1); t_branch(ss, taken);                 /* C08199 bne loc_C0819E */
     if(!taken) JSR(0x819B, 0xB075); }                  /* jsr play_footstep_sound */
   /* loc_C0819E */
-  S(0x819E, 2); t_inc16(ss, (uint16_t) (dp + 0x0070), -1);   /* C0819E dec walk_cycle_timer */
-  S(0x81A0, 2); t_inc16(ss, (uint16_t) (dp + 0x0070), -1);   /* C081A0 dec walk_cycle_timer */
+  S(0x819E, 2); t_inc16(ss, t_dp(dp, 0x0070), -1);   /* C0819E dec walk_cycle_timer */
+  S(0x81A0, 2); t_inc16(ss, t_dp(dp, 0x0070), -1);   /* C081A0 dec walk_cycle_timer */
   SI(0x81A2); a = x; ss_set_nz16(ss, a);               /* C081A2 txa */
   S(0x81A3, 2);                                        /* C081A3 ora walk_cycle_parity */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + 0x0072)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, 0x0072));
   SI(0x81A5); x = a; ss_set_nz16(ss, x);               /* C081A5 tax */
 
 loc_C081A6:
   S(0x81A6, 4);                                        /* C081A6 lda data_C46A88,X */
   a = t_read16(ss, (0xC46A88u + x) & 0xffffff); ss_set_nz16(ss, a);
-  S(0x81AA, 2); t_write16(ss, (uint16_t) (dp + 0x0074), a);  /* C081AA sta $74 */
+  S(0x81AA, 2); t_write16_dp(ss, dp, 0x0074, a);  /* C081AA sta $74 */
   SIMM16(0x81AC); alu_cmp16(ss, a, 0x8000);            /* C081AC cmp #$8000 */
   SI(0x81AF); a = alu_ror16(ss, a);                    /* C081AF ror A */
-  S(0x81B0, 2); t_write16(ss, (uint16_t) (dp + 0x0076), a);  /* C081B0 sta $76 */
+  S(0x81B0, 2); t_write16_dp(ss, dp, 0x0076, a);  /* C081B0 sta $76 */
   S(0x81B2, 3);                                        /* C081B2 lda $0C1B */
   a = t_read16(ss, ss_abs(ss, 0x0C1B)); ss_set_nz16(ss, a);
   { const bool taken = a == 0;
@@ -881,21 +873,21 @@ loc_C081A6:
     SI(0x81C8); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);   /* inx */
     SI(0x81C9); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);   /* inx */
     S(0x81CA, 2);                                      /* C081CA cpx $A6 */
-    alu_cpx16(ss, x, t_read16(ss, (uint16_t) (dp + 0x00A6)));
+    alu_cpx16(ss, x, t_read16_dp(ss, dp, 0x00A6));
     { const bool taken = !ss_c(ss);
       S(0x81CC, 1); t_branch(ss, taken);               /* C081CC bcc loc_C081C5 */
       if(!taken) break; }
   }
 
   S(0x81CE, 2);                                        /* C081CE lda fade_level */
-  a = t_read16(ss, (uint16_t) (dp + fade_level)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, fade_level); ss_set_nz16(ss, a);
   S(0x81D0, 2);                                        /* C081D0 ora fade_delta */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + fade_delta)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, fade_delta));
   { const bool taken = a == 0;
     S(0x81D2, 1); t_branch(ss, taken);                 /* C081D2 beq loc_C08209 */
     if(taken) goto loc_C08209; }
   S(0x81D4, 2);                                        /* C081D4 lda joy1_pressed */
-  a = t_read16(ss, (uint16_t) (dp + joy1_pressed)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, joy1_pressed); ss_set_nz16(ss, a);
   SIMM16(0x81D6); alu_bit_imm16(ss, a, 0x0040);        /* C081D6 bit #$0040 */
   { const bool taken = ss_z(ss);
     S(0x81D9, 1); t_branch(ss, taken);                 /* C081D9 beq loc_C081F5 */
@@ -917,35 +909,35 @@ loc_C081A6:
 
 loc_C081F5:
   S(0x81F5, 2);                                        /* C081F5 lda joy1_pressed */
-  a = t_read16(ss, (uint16_t) (dp + joy1_pressed)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, joy1_pressed); ss_set_nz16(ss, a);
   S(0x81F7, 2);                                        /* C081F7 ora joy2_pressed */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + joy2_pressed)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, joy2_pressed));
   SIMM16(0x81F9); alu_bit_imm16(ss, a, 0x2000);        /* C081F9 bit #$2000 (Start) */
   { const bool taken = ss_z(ss);
     S(0x81FC, 1); t_branch(ss, taken);                 /* C081FC beq loc_C08229 */
     if(taken) goto loc_C08229; }
   S(0x81FE, 2);                                        /* C081FE lda fade_delta */
-  a = t_read16(ss, (uint16_t) (dp + fade_delta)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, fade_delta); ss_set_nz16(ss, a);
   { const bool taken = a != 0;
     S(0x8200, 1); t_branch(ss, taken);                 /* C08200 bne loc_C08229 */
     if(taken) goto loc_C08229; }
   SIMM16(0x8202); a = 0xFF00; ss_set_nz16(ss, a);      /* C08202 lda #$FF00 */
-  S(0x8205, 2); t_write16(ss, (uint16_t) (dp + fade_delta), a);  /* sta fade_delta */
+  S(0x8205, 2); t_write16_dp(ss, dp, fade_delta, a);  /* sta fade_delta */
   S(0x8207, 1); t_branch(ss, true);                    /* C08207 bra loc_C08229 */
   goto loc_C08229;
 
 loc_C08209:
   S(0x8209, 2);                                        /* C08209 lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x820B); a = alu_inc16(ss, a);                    /* C0820B inc A */
   SIMM16(0x820C); alu_cmp16(ss, a, 0x0004);            /* C0820C cmp #$0004 */
   { const bool taken = !ss_c(ss);
     S(0x820F, 1); t_branch(ss, taken);                 /* C0820F bcc loc_C08212 */
     if(!taken) { SI(0x8211); a = ss_dp(ss); ss_set_nz16(ss, a); } }  /* tdc */
   /* loc_C08212 */
-  S(0x8212, 2); t_write16(ss, (uint16_t) (dp + game_mode), a);   /* sta game_mode */
-  S(0x8214, 2); t_write16(ss, (uint16_t) (dp + joy1_pressed), 0);/* stz $8C */
-  S(0x8216, 2); t_write16(ss, (uint16_t) (dp + joy2_pressed), 0);/* stz $90 */
+  S(0x8212, 2); t_write16_dp(ss, dp, game_mode, a);   /* sta game_mode */
+  S(0x8214, 2); t_write16_dp(ss, dp, joy1_pressed, 0);/* stz $8C */
+  S(0x8216, 2); t_write16_dp(ss, dp, joy2_pressed, 0);/* stz $90 */
   SEP(0x8218, 0x20);                                   /* C08218 sep #$20 */
   SIMM8(0x821A); a = (uint16_t) ((a & 0xff00) | 0x01); ss_set_nz8(ss, 0x01);
   S(0x821C, 3); t_write8(ss, ss_abs(ss, NMITIMEN), 0x01);   /* sta NMITIMEN */
@@ -956,32 +948,32 @@ loc_C08209:
   TAIL(pb, 0x805E);
 
 loc_C08229:
-  S(0x8229, 2); t_inc16(ss, (uint16_t) (dp + frame_counter), 1);  /* C08229 inc $5E */
+  S(0x8229, 2); t_inc16(ss, t_dp(dp, frame_counter), 1);  /* C08229 inc $5E */
 
 loc_C0822B:
   JSR(0x822B, 0xA2DE);                                 /* jsr read_joypads */
   S(0x822E, 2);                                        /* C0822E lda pause_flag */
-  a = t_read16(ss, (uint16_t) (dp + pause_flag)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, pause_flag); ss_set_nz16(ss, a);
   { const bool taken = a != 0;
     S(0x8230, 1); t_branch(ss, taken);                 /* C08230 bne loc_C08267 */
     if(taken) goto loc_C08267; }
   JSR(0x8232, 0xAE1F);                                 /* jsr entity_sort_draw_order */
   JSR(0x8235, 0xA500);                                 /* jsr clear_sprite_table */
   S(0x8238, 2);                                        /* C08238 lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x823A); a = alu_asl16(ss, a);                    /* C0823A asl A */
   SI(0x823B); x = a; ss_set_nz16(ss, x);               /* C0823B tax */
   JSR_IAX(0x823C, 0x828A);                             /* jsr (jtbl_C0828A,X) */
   JSL(0x823F, 0x80, 0xA538);                           /* jsl entity_build_oam_frame */
   S(0x8243, 2);                                        /* C08243 lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x8245); a = alu_asl16(ss, a);                    /* C08245 asl A */
   SI(0x8246); x = a; ss_set_nz16(ss, x);               /* C08246 tax */
   JSR_IAX(0x8247, 0x8282);                             /* jsr (jtbl_C08282,X) */
   JSR(0x824A, 0xADE7);                                 /* jsr oam_hide_unused_sprites */
   JSR(0x824D, 0xADFD);                                 /* jsr oam_dma_upload */
   S(0x8250, 2);                                        /* C08250 lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   { const bool taken = a != 0;
     S(0x8252, 1); t_branch(ss, taken);                 /* C08252 bne loc_C08267 */
     if(taken) goto loc_C08267; }
@@ -1069,7 +1061,7 @@ loc_C08BE4:
   SI(0x8BE7); a = alu_asl16(ss, a);                    /* C08BE7 asl A */
   SI(0x8BE8); x = a; ss_set_nz16(ss, x);               /* C08BE8 tax */
   S(0x8BE9, 2);                                        /* C08BE9 lda camera_x */
-  a = t_read16(ss, (uint16_t) (dp + camera_x)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_x); ss_set_nz16(ss, a);
   SI(0x8BEB); ss_set_c(ss, true);                      /* C08BEB sec */
   S(0x8BEC, 3);                                        /* C08BEC sbc $0C0F */
   a = alu_sbc16(ss, a, t_read16(ss, ss_abs(ss, 0x0C0F)));
@@ -1096,7 +1088,7 @@ loc_C08BFD:
   S(0x8C06, 3); t_write16(ss, ss_abs(ss, 0x0C13), 0);  /* C08C06 stz $0C13 */
 
 loc_C08C09:
-  S(0x8C09, 2); t_write16(ss, (uint16_t) (dp + ptr_04), a);   /* C08C09 sta ptr_04 */
+  S(0x8C09, 2); t_write16_dp(ss, dp, ptr_04, a);   /* C08C09 sta ptr_04 */
   S(0x8C0B, 3);                                        /* C08C0B ldy $0C11 */
   y = t_read16(ss, ss_abs(ss, 0x0C11)); ss_set_nz16(ss, y);
   { const bool taken = y == 0;
@@ -1236,7 +1228,7 @@ loc_C08CC1:
     if(taken) goto loc_C08CF7; }
   S(0x8CC6, 3); t_write16(ss, ss_abs(ss, 0x0C0C), a);  /* C08CC6 sta $0C0C */
   S(0x8CC9, 2);                                        /* C08CC9 ldy $1A */
-  y = t_read16(ss, (uint16_t) (dp + scratch_1A)); ss_set_nz16(ss, y);
+  y = t_read16_dp(ss, dp, scratch_1A); ss_set_nz16(ss, y);
   SIMM16(0x8CCB); alu_cmp16(ss, y, 0x0030);            /* C08CCB cpy #$0030 */
   { const bool taken = ss_c(ss);
     S(0x8CCE, 1); t_branch(ss, taken);                 /* C08CCE bcs loc_C08CFA */
@@ -1256,11 +1248,11 @@ loc_C08CC1:
 
 loc_C08CE6:
   SIMM16(0x8CE6); a = 0x003C; ss_set_nz16(ss, a);      /* C08CE6 lda #$003C */
-  S(0x8CE9, 2); t_write16(ss, (uint16_t) (dp + 0x0070), a);  /* sta walk_cycle_timer */
+  S(0x8CE9, 2); t_write16_dp(ss, dp, 0x0070, a);  /* sta walk_cycle_timer */
   SIMM16(0x8CEB); a = 0x0080; ss_set_nz16(ss, a);      /* C08CEB lda #$0080 */
-  S(0x8CEE, 2); t_write16(ss, (uint16_t) (dp + 0x0072), a);  /* sta walk_cycle_parity */
-  S(0x8CF0, 2); t_write16(ss, (uint16_t) (dp + 0x0074), 0);  /* C08CF0 stz $74 */
-  S(0x8CF2, 2); t_write16(ss, (uint16_t) (dp + 0x0076), 0);  /* C08CF2 stz $76 */
+  S(0x8CEE, 2); t_write16_dp(ss, dp, 0x0072, a);  /* sta walk_cycle_parity */
+  S(0x8CF0, 2); t_write16_dp(ss, dp, 0x0074, 0);  /* C08CF0 stz $74 */
+  S(0x8CF2, 2); t_write16_dp(ss, dp, 0x0076, 0);  /* C08CF2 stz $76 */
   SIMM16(0x8CF4); a = 0x3F00; ss_set_nz16(ss, a);      /* C08CF4 lda #$3F00 */
 
 loc_C08CF7:
@@ -1268,7 +1260,7 @@ loc_C08CF7:
 
 loc_C08CFA:
   S(0x8CFA, 2);                                        /* C08CFA ldy $1A */
-  y = t_read16(ss, (uint16_t) (dp + scratch_1A)); ss_set_nz16(ss, y);
+  y = t_read16_dp(ss, dp, scratch_1A); ss_set_nz16(ss, y);
   SIMM16(0x8CFC); alu_cmp16(ss, y, 0x0030);            /* C08CFC cpy #$0030 */
   { const bool taken = !ss_c(ss);
     S(0x8CFF, 1); t_branch(ss, taken);                 /* C08CFF bcc loc_C08D27 */
@@ -1278,7 +1270,7 @@ loc_C08CFA:
   SIMM16(0x8D04); a = alu_and16(ss, a, 0xCFFF);        /* C08D04 and #$CFFF */
   SIMM16(0x8D07); a = alu_ora16(ss, a, 0x2000);        /* C08D07 ora #$2000 */
   S(0x8D0A, 2);                                        /* C08D0A ldy $20 */
-  y = t_read16(ss, (uint16_t) (dp + scratch_20)); ss_set_nz16(ss, y);
+  y = t_read16_dp(ss, dp, scratch_20); ss_set_nz16(ss, y);
   { const bool taken = (y & 0x8000) == 0;
     S(0x8D0C, 1); t_branch(ss, taken);                 /* C08D0C bpl loc_C08D11 */
     if(!taken) { SIMM16(0x8D0E); a = alu_ora16(ss, a, 0x3000); } }  /* ora #$3000 */
@@ -1324,7 +1316,7 @@ loc_C08D27:
 
 loc_C08D48:
   S(0x8D48, 2);                                        /* C08D48 lda camera_y */
-  a = t_read16(ss, (uint16_t) (dp + camera_y)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_y); ss_set_nz16(ss, a);
   SI(0x8D4A); ss_set_c(ss, true);                      /* C08D4A sec */
   SIMM16(0x8D4B); a = alu_sbc16(ss, a, 0x0076);        /* C08D4B sbc #$0076 */
   SI(0x8D4E); ss_set_c(ss, false);                     /* C08D4E clc */
@@ -1350,14 +1342,14 @@ loc_C08D5F:
 loc_C08D67:
   SI(0x8D67); y = a; ss_set_nz16(ss, y);               /* C08D67 tay */
   SI(0x8D68); a = alu_inc16(ss, a);                    /* C08D68 inc A */
-  S(0x8D69, 2); t_write16(ss, (uint16_t) (dp + scratch_18), a);  /* C08D69 sta $18 */
+  S(0x8D69, 2); t_write16_dp(ss, dp, scratch_18, a);  /* C08D69 sta $18 */
   S(0x8D6B, 4);                                        /* C08D6B lda data_C46B88,X */
   a = t_read16(ss, (0xC46B88u + x) & 0xffffff); ss_set_nz16(ss, a);
   S(0x8D6F, 3); t_write16(ss, ss_abs(ss, 0x0C0A), a);  /* C08D6F sta $0C0A */
   SIMM16(0x8D72); a = 0x0012; ss_set_nz16(ss, a);      /* C08D72 lda #$0012 */
   S(0x8D75, 3); t_write16(ss, ss_abs(ss, 0x0C08), a);  /* C08D75 sta $0C08 */
   S(0x8D78, 2);                                        /* C08D78 lda camera_y */
-  a = t_read16(ss, (uint16_t) (dp + camera_y)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_y); ss_set_nz16(ss, a);
   SI(0x8D7A); ss_set_c(ss, true);                      /* C08D7A sec */
   SIMM16(0x8D7B); a = alu_sbc16(ss, a, 0x007F);        /* C08D7B sbc #$007F */
   SI(0x8D7E); ss_set_c(ss, false);                     /* C08D7E clc */
@@ -1376,16 +1368,16 @@ loc_C08D67:
       SI(0x8D93); a = alu_inc16(ss, a);                /* C08D93 inc A */
     } }
   /* loc_C08D94 */
-  S(0x8D94, 2); t_write16(ss, (uint16_t) (dp + scratch_0C), a);  /* C08D94 sta $0C */
+  S(0x8D94, 2); t_write16_dp(ss, dp, scratch_0C, a);  /* C08D94 sta $0C */
   SI(0x8D96); ss_set_c(ss, false);                     /* C08D96 clc */
   S(0x8D97, 2);                                        /* C08D97 adc ptr_04 */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + ptr_04)));
-  S(0x8D99, 2); t_write16(ss, (uint16_t) (dp + ptr_04), a);  /* C08D99 sta ptr_04 */
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, ptr_04));
+  S(0x8D99, 2); t_write16_dp(ss, dp, ptr_04, a);  /* C08D99 sta ptr_04 */
   SIMM16(0x8D9B); x = 0x003E; ss_set_nz16(ss, x);      /* C08D9B ldx #$003E */
   SIMM16(0x8D9E); a = 0x007F; ss_set_nz16(ss, a);      /* C08D9E lda #$007F */
   SI(0x8DA1); ss_set_c(ss, true);                      /* C08DA1 sec */
   S(0x8DA2, 2);                                        /* C08DA2 sbc $18 */
-  a = alu_sbc16(ss, a, t_read16(ss, (uint16_t) (dp + scratch_18)));
+  a = alu_sbc16(ss, a, t_read16_dp(ss, dp, scratch_18));
   { const bool taken = a == 0;
     S(0x8DA4, 1); t_branch(ss, taken);                 /* C08DA4 beq loc_C08DAB */
     if(taken) goto loc_C08DAB; }
@@ -1405,12 +1397,12 @@ loc_C08DAE:
   /* loc_C08DB6 */
   S(0x8DB6, 1); a = t_xba(ss, a);                        /* C08DB6 xba */
   S(0x8DB7, 3); t_write16(ss, ss_abs(ss, 0x0C00), a);  /* C08DB7 sta $0C00 */
-  S(0x8DBA, 2); t_write16(ss, (uint16_t) (dp + scratch_1A), x);  /* C08DBA stx $1A */
+  S(0x8DBA, 2); t_write16_dp(ss, dp, scratch_1A, x);  /* C08DBA stx $1A */
   S(0x8DBC, 4);                                        /* C08DBC lda $7F00D3 */
   a = t_read16(ss, 0x7F00D3); ss_set_nz16(ss, a);
   SIMM16(0x8DC0); a = alu_and16(ss, a, 0xFF00);        /* C08DC0 and #$FF00 */
   S(0x8DC3, 2);                                        /* C08DC3 ora $1A */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + scratch_1A)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, scratch_1A));
   S(0x8DC5, 3); t_write16(ss, ss_abs(ss, 0x0C02), a);  /* C08DC5 sta $0C02 */
   SI(0x8DC8); a = y; ss_set_nz16(ss, a);               /* C08DC8 tya */
   SI(0x8DC9); a = alu_inc16(ss, a);                    /* C08DC9 inc A */
@@ -1450,13 +1442,13 @@ loc_C08DE8:
   SIMM16(0x8DF7); a = alu_adc16(ss, a, 0x0000);        /* C08DF7 adc #$0000 */
   S(0x8DFA, 3); t_write16(ss, ss_abs(ss, 0x0C2F), a);  /* C08DFA sta $0C2F */
   S(0x8DFD, 2);                                        /* C08DFD lda ptr_04 */
-  a = t_read16(ss, (uint16_t) (dp + ptr_04)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, ptr_04); ss_set_nz16(ss, a);
   SIMM16(0x8DFF); a = alu_and16(ss, a, 0x01FF);        /* C08DFF and #$01FF */
   SIMM16(0x8E02); x = 0x0186; ss_set_nz16(ss, x);      /* C08E02 ldx #$0186 */
 
   for(;;) {                                            /* loc_C08E05 */
     S(0x8E05, 3); t_index(ss);                         /* C08E05 sta $0DB9,X */
-    t_write16(ss, ss_abs(ss, (uint16_t) (0x0DB9 + x)), a);
+    t_write16(ss, ss_abs(ss, (0x0DB9 + x)), a);
     SI(0x8E08); x = (uint16_t) (x - 1); ss_set_nz16(ss, x);   /* C08E08 dex */
     SI(0x8E09); x = (uint16_t) (x - 1); ss_set_nz16(ss, x);   /* C08E09 dex */
     SIMM16(0x8E0A); alu_cpx16(ss, x, 0x00DE);          /* C08E0A cpx #$00DE */
@@ -1467,7 +1459,7 @@ loc_C08DE8:
   SI(0x8E0F); ss_set_c(ss, false);                     /* C08E0F clc */
   for(;;) {                                            /* loc_C08E10 */
     S(0x8E10, 3); t_index(ss);                         /* C08E10 sta $0DB9,X */
-    t_write16(ss, ss_abs(ss, (uint16_t) (0x0DB9 + x)), a);
+    t_write16(ss, ss_abs(ss, (0x0DB9 + x)), a);
     S(0x8E13, 3);                                      /* C08E13 adc $0C2F */
     a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, 0x0C2F)));
     SIMM16(0x8E16); a = alu_adc16(ss, a, 0x0000);      /* C08E16 adc #$0000 */
@@ -1480,17 +1472,17 @@ loc_C08DE8:
   SIMM16(0x8E1D); a = 0xFF00; ss_set_nz16(ss, a);      /* C08E1D lda #$FF00 */
   S(0x8E20, 3); t_write16(ss, ss_abs(ss, 0x0C04), a);  /* C08E20 sta $0C04 */
   S(0x8E23, 2);                                        /* C08E23 ldx ptr_04 */
-  x = t_read16(ss, (uint16_t) (dp + ptr_04)); ss_set_nz16(ss, x);
+  x = t_read16_dp(ss, dp, ptr_04); ss_set_nz16(ss, x);
   SIMM16(0x8E25); a = 0x6C69; ss_set_nz16(ss, a);      /* C08E25 lda #$6C69 */
   SJMP(0x8E28); goto loc_C08E7F;                       /* C08E28 jmp loc_C08E7F */
 
 loc_C08E2B:
   S(0x8E2B, 2);                                        /* C08E2B lda camera_y */
-  a = t_read16(ss, (uint16_t) (dp + camera_y)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_y); ss_set_nz16(ss, a);
   SI(0x8E2D); a = alu_lsr16(ss, a);                    /* C08E2D lsr A */
   SI(0x8E2E); ss_set_c(ss, false);                     /* C08E2E clc */
   S(0x8E2F, 2);                                        /* C08E2F adc camera_y */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + camera_y)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, camera_y));
   SI(0x8E31); ss_set_c(ss, true);                      /* C08E31 sec */
   SIMM16(0x8E32); a = alu_sbc16(ss, a, 0x0048);        /* C08E32 sbc #$0048 */
   { const bool taken = (a & 0x8000) != 0;
@@ -1501,11 +1493,11 @@ loc_C08E2B:
 
 loc_C08E39:
   S(0x8E39, 2);                                        /* C08E39 lda camera_y */
-  a = t_read16(ss, (uint16_t) (dp + camera_y)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_y); ss_set_nz16(ss, a);
   SI(0x8E3B); a = alu_lsr16(ss, a);                    /* C08E3B lsr A */
   SI(0x8E3C); ss_set_c(ss, false);                     /* C08E3C clc */
   S(0x8E3D, 2);                                        /* C08E3D adc camera_y */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + camera_y)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, camera_y));
   SI(0x8E3F); ss_set_c(ss, true);                      /* C08E3F sec */
   SIMM16(0x8E40); a = alu_sbc16(ss, a, 0x0048);        /* C08E40 sbc #$0048 */
   { const bool taken = (a & 0x8000) != 0;
@@ -1528,7 +1520,7 @@ loc_C08E4D:
   SIMM16(0x8E54); a = 0x1017; ss_set_nz16(ss, a);      /* C08E54 lda #$1017 */
   S(0x8E57, 3); t_write16(ss, ss_abs(ss, 0x0BDA), a);  /* C08E57 sta $0BDA */
   S(0x8E5A, 2);                                        /* C08E5A lda $5E */
-  a = t_read16(ss, (uint16_t) (dp + frame_counter)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, frame_counter); ss_set_nz16(ss, a);
   SIMM16(0x8E5C); a = alu_and16(ss, a, 0x00FF);        /* C08E5C and #$00FF */
   SI(0x8E5F); a = alu_asl16(ss, a);                    /* C08E5F asl A */
   SI(0x8E60); x = a; ss_set_nz16(ss, x);               /* C08E60 tax */
@@ -1540,20 +1532,20 @@ loc_C08E4D:
   SI(0x8E68); a = alu_lsr16(ss, a);                    /* C08E68 lsr A */
   SI(0x8E69); a = alu_lsr16(ss, a);                    /* C08E69 lsr A */
   SI(0x8E6A); a = alu_lsr16(ss, a);                    /* C08E6A lsr A */
-  S(0x8E6B, 2); t_write16(ss, (uint16_t) (dp + ptr_04), a);   /* C08E6B sta ptr_04 */
+  S(0x8E6B, 2); t_write16_dp(ss, dp, ptr_04, a);   /* C08E6B sta ptr_04 */
   SI(0x8E6D); a = alu_lsr16(ss, a);                    /* C08E6D lsr A */
-  S(0x8E6E, 2); t_write16(ss, (uint16_t) (dp + 0x0006), a);   /* C08E6E sta $06 */
+  S(0x8E6E, 2); t_write16_dp(ss, dp, 0x0006, a);   /* C08E6E sta $06 */
   SI(0x8E70); a = y; ss_set_nz16(ss, a);               /* C08E70 tya */
   SI(0x8E71); ss_set_c(ss, false);                     /* C08E71 clc */
   S(0x8E72, 2);                                        /* C08E72 adc $06 */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + 0x0006)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, 0x0006));
   SI(0x8E74); y = a; ss_set_nz16(ss, y);               /* C08E74 tay */
   S(0x8E75, 2);                                        /* C08E75 lda camera_x */
-  a = t_read16(ss, (uint16_t) (dp + camera_x)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, camera_x); ss_set_nz16(ss, a);
   SI(0x8E77); a = alu_asl16(ss, a);                    /* C08E77 asl A */
   SI(0x8E78); ss_set_c(ss, false);                     /* C08E78 clc */
   S(0x8E79, 2);                                        /* C08E79 adc ptr_04 */
-  a = alu_adc16(ss, a, t_read16(ss, (uint16_t) (dp + ptr_04)));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, ptr_04));
   SI(0x8E7B); x = a; ss_set_nz16(ss, x);               /* C08E7B tax */
   SIMM16(0x8E7C); a = 0x7171; ss_set_nz16(ss, a);      /* C08E7C lda #$7171 */
 
@@ -1622,7 +1614,7 @@ static void title_init(SnesState* ss) {
   S(0xBBA2, 3); t_write16(ss, ss_abs(ss, 0x0F59), 0);
   SIMM16(0xBBA5); a = 0x0F41; ss_set_nz16(ss, a);      /* C0BBA5 lda #$0F41 */
   S(0xBBA8, 3); t_write16(ss, ss_abs(ss, 0x0F41), a);  /* C0BBA8 sta $0F41 */
-  S(0xBBAB, 2); t_write16(ss, (uint16_t) (dp + 0x00E3), 0);   /* C0BBAB stz $E3 */
+  S(0xBBAB, 2); t_write16_dp(ss, dp, 0x00E3, 0);   /* C0BBAB stz $E3 */
 
   SIMM16(0xBBAD); a = 0x0002; ss_set_nz16(ss, a);      /* C0BBAD lda #$0002 */
   S(0xBBB0, 4); t_write16(ss, 0x7F0F86, a);            /* C0BBB0 sta.l $7F0F86 */
@@ -1818,7 +1810,7 @@ static void title_init(SnesState* ss) {
   { const uint8_t v = t_read8(ss, ss_abs(ss, TIMEUP));
     a = (uint16_t) ((a & 0xff00) | v); ss_set_nz8(ss, v); }
   SIMM8(0xBD0A); a = (uint16_t) ((a & 0xff00) | 0x81); ss_set_nz8(ss, 0x81);
-  S(0xBD0C, 2); t_write8(ss, (uint16_t) (dp + nmitimen_shadow), 0x81);
+  S(0xBD0C, 2); t_write8_dp(ss, dp, nmitimen_shadow, 0x81);
   SIMM8(0xBD0E); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
   S(0xBD10, 3); t_write8(ss, ss_abs(ss, OAMADDH), 0x80);   /* C0BD10 sta OAMADDH */
   SIMM8(0xBD13); a = (uint16_t) ((a & 0xff00) | 0x01); ss_set_nz8(ss, 0x01);
@@ -1879,7 +1871,7 @@ static void nmi_handler_title_fade(SnesState* ss) {
   S(0xBD4B, 3); t_write8(ss, ss_abs(ss, DASH2), 0x02); /* C0BD4B sta DASH2 */
   SIMM8(0xBD4E); a = (uint16_t) ((a & 0xff00) | 0x04); ss_set_nz8(ss, 0x04);
   S(0xBD50, 2);                                        /* C0BD50 ora dma_pending_mask */
-  a = alu_ora8(ss, a, t_read8(ss, (uint16_t) (dp + dma_pending_mask)));
+  a = alu_ora8(ss, a, t_read8_dp(ss, dp, dma_pending_mask));
   S(0xBD52, 3); t_write8(ss, ss_abs(ss, MDMAEN), (uint8_t) a);  /* sta MDMAEN */
   S(0xBD55, 3);                                        /* C0BD55 lda $0B8A */
   { uint8_t b = t_read8(ss, ss_abs(ss, 0x0B8A));
@@ -1904,9 +1896,9 @@ static void nmi_handler_title_fade(SnesState* ss) {
   REP(0xBD6C, 0x30);                                   /* C0BD6C rep #$30 */
   JSR(0xBD6E, 0xA2DE);                                 /* jsr read_joypads */
   S(0xBD71, 2);                                        /* C0BD71 lda joy1_held */
-  a = t_read16(ss, (uint16_t) (dp + joy1_held)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, joy1_held); ss_set_nz16(ss, a);
   S(0xBD73, 2);                                        /* C0BD73 ora joy2_held */
-  a = alu_ora16(ss, a, t_read16(ss, (uint16_t) (dp + joy2_held)));
+  a = alu_ora16(ss, a, t_read16_dp(ss, dp, joy2_held));
   SIMM16(0xBD75); a = alu_and16(ss, a, 0x1000);        /* C0BD75 and #$1000 */
   { const bool taken = a == 0;
     S(0xBD78, 1); t_branch(ss, taken);                 /* C0BD78 beq loc_C0BD7D */
@@ -2153,9 +2145,9 @@ loc_C0BEA0:
   SIMM8(0xBEA7); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
   S(0xBEA9, 3); t_write8(ss, ss_abs(ss, INIDISP_), 0x80);   /* sta INIDISP */
   REP(0xBEAC, 0x30);                                   /* C0BEAC rep #$30 */
-  S(0xBEAE, 2); t_write16(ss, (uint16_t) (dp + joy1_pressed), 0);   /* stz $8C */
-  S(0xBEB0, 2); t_write16(ss, (uint16_t) (dp + joy2_pressed), 0);   /* stz $90 */
-  S(0xBEB2, 2); t_write16(ss, (uint16_t) (dp + dma_pending_mask), 0);/* stz $02 */
+  S(0xBEAE, 2); t_write16_dp(ss, dp, joy1_pressed, 0);   /* stz $8C */
+  S(0xBEB0, 2); t_write16_dp(ss, dp, joy2_pressed, 0);   /* stz $90 */
+  S(0xBEB2, 2); t_write16_dp(ss, dp, dma_pending_mask, 0);/* stz $02 */
   SJMP(0xBEB4);                                        /* C0BEB4 jmp loc_C08042 */
   TAIL(pb, 0x8042);
 
@@ -2486,9 +2478,9 @@ loc_C08012:
   REP(0x8030, 0x20);                                   /* C08030 rep #$20 */
   JSR(0x8032, 0xA385);                                 /* jsr ppu_init */
   SIMM16(0x8035); a = 0xAA55; ss_set_nz16(ss, a);      /* C08035 lda #$AA55 */
-  S(0x8038, 2); t_write16(ss, (uint16_t) (dp + init_magic_AA55), a);
+  S(0x8038, 2); t_write16_dp(ss, dp, init_magic_AA55, a);
   SIMM16(0x803A); a = 0xFFFF; ss_set_nz16(ss, a);      /* C0803A lda #$FFFF */
-  S(0x803D, 2); t_write16(ss, (uint16_t) (dp + init_magic_FFFF), a);
+  S(0x803D, 2); t_write16_dp(ss, dp, init_magic_FFFF, a);
   SJMP(0x803F);                                        /* C0803F jmp loc_C0BB81 */
   TAIL(pb, 0xBB81);
 }
@@ -2512,15 +2504,15 @@ static void reset_mode_restart(SnesState* ss, uint16_t entry) {
   SIMM16(0x804B); x = 0x01FF; ss_set_nz16(ss, x);      /* C0804B ldx #$01FF */
   SI(0x804E); ss_set_sp(ss, x);                        /* C0804E txs */
   SIMM16(0x804F); a = 0x0000; ss_set_nz16(ss, a);      /* C0804F lda #$0000 */
-  S(0x8052, 2); t_write16(ss, (uint16_t) (dp + game_mode), a);   /* sta game_mode */
+  S(0x8052, 2); t_write16_dp(ss, dp, game_mode, a);   /* sta game_mode */
   SIMM16(0x8054); a = 0xAA55; ss_set_nz16(ss, a);      /* C08054 lda #$AA55 */
-  S(0x8057, 2); t_write16(ss, (uint16_t) (dp + init_magic_AA55), a);
+  S(0x8057, 2); t_write16_dp(ss, dp, init_magic_AA55, a);
   SIMM16(0x8059); a = 0xFFFF; ss_set_nz16(ss, a);      /* C08059 lda #$FFFF */
-  S(0x805C, 2); t_write16(ss, (uint16_t) (dp + init_magic_FFFF), a);
+  S(0x805C, 2); t_write16_dp(ss, dp, init_magic_FFFF, a);
 
 loc_C0805E:
   S(0x805E, 2);                                        /* C0805E lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   { const bool taken = a == 0;
     S(0x8060, 1); t_branch(ss, taken);                 /* C08060 beq loc_C08065 */
     if(!taken) { SIMM16(0x8062); a = 0x0002; ss_set_nz16(ss, a); } }  /* lda #$0002 */
@@ -2528,7 +2520,7 @@ loc_C0805E:
   JSL(0x8065, 0x81, 0x83CE);                           /* jsl spc_command */
   JSR(0x8069, 0xA385);                                 /* jsr ppu_init */
   S(0x806C, 2);                                        /* C0806C lda game_mode */
-  a = t_read16(ss, (uint16_t) (dp + game_mode)); ss_set_nz16(ss, a);
+  a = t_read16_dp(ss, dp, game_mode); ss_set_nz16(ss, a);
   SI(0x806E); a = alu_asl16(ss, a);                    /* C0806E asl A */
   SI(0x806F); x = a; ss_set_nz16(ss, x);               /* C0806F tax */
   JSR_IAX(0x8070, 0x826A);                             /* jsr (game_mode_table,X) */
@@ -2538,7 +2530,7 @@ loc_C0805E:
 
   for(;;) {                                            /* loc_C0807C */
     S(0x807C, 3); t_index(ss);                         /* C0807C lda entity_type,X */
-    a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_type + x))); ss_set_nz16(ss, a);
+    a = t_read16(ss, ss_abs(ss, (entity_type + x))); ss_set_nz16(ss, a);
     SIMM16(0x807F); alu_cmp16(ss, a, 0x000E);          /* C0807F cmp #$000E */
     bool below = !ss_c(ss);
     S(0x8082, 1); t_branch(ss, below);                 /* C08082 bcc loc_C08089 */
@@ -2552,7 +2544,7 @@ loc_C0805E:
     SI(0x8089); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);   /* C08089 inx */
     SI(0x808A); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);   /* C0808A inx */
     S(0x808B, 2);                                      /* C0808B cpx $A6 */
-    alu_cpx16(ss, x, t_read16(ss, (uint16_t) (dp + 0x00A6)));
+    alu_cpx16(ss, x, t_read16_dp(ss, dp, 0x00A6));
     { const bool taken = !ss_c(ss);
       S(0x808D, 1); t_branch(ss, taken);               /* C0808D bcc loc_C0807C */
       if(!taken) break; }
@@ -2568,15 +2560,15 @@ loc_C08092:
   { uint8_t b = t_read8(ss, ss_abs(ss, TIMEUP));
     a = (uint16_t) ((a & 0xff00) | b); ss_set_nz8(ss, b); }
   SIMM8(0x80A0); a = (uint16_t) ((a & 0xff00) | 0x81); ss_set_nz8(ss, 0x81);
-  S(0x80A2, 2); t_write8(ss, (uint16_t) (dp + nmitimen_shadow), 0x81);
+  S(0x80A2, 2); t_write8_dp(ss, dp, nmitimen_shadow, 0x81);
   SIMM8(0x80A4); a = (uint16_t) ((a & 0xff00) | 0x80); ss_set_nz8(ss, 0x80);
   S(0x80A6, 3); t_write8(ss, ss_abs(ss, OAMADDH), 0x80);    /* sta OAMADDH */
   SIMM8(0x80A9); a = (uint16_t) ((a & 0xff00) | 0x01); ss_set_nz8(ss, 0x01);
   S(0x80AB, 3); t_write8(ss, ss_abs(ss, MEMSEL), 0x01);     /* sta MEMSEL */
   REP(0x80AE, 0x20);                                   /* C080AE rep #$20 */
-  S(0x80B0, 2); t_write16(ss, (uint16_t) (dp + fade_level), 0);   /* C080B0 stz $30 */
+  S(0x80B0, 2); t_write16_dp(ss, dp, fade_level, 0);   /* C080B0 stz $30 */
   SIMM16(0x80B2); a = 0x0080; ss_set_nz16(ss, a);      /* C080B2 lda #$0080 */
-  S(0x80B5, 2); t_write16(ss, (uint16_t) (dp + fade_delta), a);   /* sta $32 */
+  S(0x80B5, 2); t_write16_dp(ss, dp, fade_delta, a);   /* sta $32 */
   JSR(0x80B7, 0xADFD);                                 /* jsr oam_dma_upload */
   SIMM16(0x80BA); a = 0xFFFF; ss_set_nz16(ss, a);      /* C080BA lda #$FFFF */
   S(0x80BD, 3); t_write16(ss, ss_abs(ss, 0x0BC6), a);  /* C080BD sta $0BC6 */
@@ -2587,11 +2579,11 @@ loc_C08092:
   S(0x80CC, 3); t_write16(ss, ss_abs(ss, cgram_queue_index), 0);  /* stz $0B8A */
   S(0x80CF, 3); t_write16(ss, ss_abs(ss, 0x0BB8), 0);  /* C080CF stz $0BB8 */
   S(0x80D2, 3); t_write16(ss, ss_abs(ss, 0x0BBA), 0);  /* C080D2 stz $0BBA */
-  S(0x80D5, 2); t_write16(ss, (uint16_t) (dp + 0x0070), 0);  /* stz walk_cycle_timer */
-  S(0x80D7, 2); t_write16(ss, (uint16_t) (dp + 0x0072), 0);  /* stz walk_cycle_parity */
-  S(0x80D9, 2); t_write16(ss, (uint16_t) (dp + 0x0074), 0);  /* C080D9 stz $74 */
-  S(0x80DB, 2); t_write16(ss, (uint16_t) (dp + 0x0076), 0);  /* C080DB stz $76 */
-  S(0x80DD, 2); t_write16(ss, (uint16_t) (dp + 0x0078), 0);  /* C080DD stz $78 */
+  S(0x80D5, 2); t_write16_dp(ss, dp, 0x0070, 0);  /* stz walk_cycle_timer */
+  S(0x80D7, 2); t_write16_dp(ss, dp, 0x0072, 0);  /* stz walk_cycle_parity */
+  S(0x80D9, 2); t_write16_dp(ss, dp, 0x0074, 0);  /* C080D9 stz $74 */
+  S(0x80DB, 2); t_write16_dp(ss, dp, 0x0076, 0);  /* C080DB stz $76 */
+  S(0x80DD, 2); t_write16_dp(ss, dp, 0x0078, 0);  /* C080DD stz $78 */
   S(0x80DF, 3); t_write16(ss, ss_abs(ss, 0x0C15), 0);  /* C080DF stz $0C15 */
   S(0x80E2, 3); t_write16(ss, ss_abs(ss, 0x0C1B), 0);  /* C080E2 stz $0C1B */
   S(0x80E5, 3); t_write16(ss, ss_abs(ss, 0x0C1D), 0);  /* C080E5 stz $0C1D */

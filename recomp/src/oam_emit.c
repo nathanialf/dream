@@ -188,9 +188,9 @@ static inline uint16_t alu8_set(SnesState* ss, uint16_t a, uint8_t v) {
  * half is t_read8/t_read16, as for any other operand. */
 static inline uint32_t t_ily(SnesState* ss, uint16_t off, uint16_t y) {
   const uint16_t dp = ss_dp(ss);
-  const uint8_t p0 = ss_bus_r8(ss, (uint16_t) (dp + off));
-  const uint8_t p1 = ss_bus_r8(ss, (uint16_t) (dp + off + 1));
-  const uint8_t p2 = ss_bus_r8(ss, (uint16_t) (dp + off + 2));
+  const uint8_t p0 = ss_bus_r8(ss, t_dp(dp, off));
+  const uint8_t p1 = ss_bus_r8(ss, t_dp(dp, off + 1));
+  const uint8_t p2 = ss_bus_r8(ss, t_dp(dp, off + 2));
   const uint32_t ptr = (uint32_t) p0 | ((uint32_t) p1 << 8) | ((uint32_t) p2 << 16);
   return (ptr + y) & 0xffffff;
 }
@@ -199,8 +199,8 @@ static inline uint32_t t_ily(SnesState* ss, uint16_t off, uint16_t y) {
  * data bank supplies the high byte (cpu_adrIdp). */
 static inline uint32_t t_idp(SnesState* ss, uint16_t off) {
   const uint16_t dp = ss_dp(ss);
-  const uint8_t lo = ss_bus_r8(ss, (uint16_t) (dp + off));
-  const uint8_t hi = ss_bus_r8(ss, (uint16_t) (dp + off + 1));
+  const uint8_t lo = ss_bus_r8(ss, t_dp(dp, off));
+  const uint8_t hi = ss_bus_r8(ss, t_dp(dp, off + 1));
   return (((uint32_t) ss_db(ss) << 16) + (uint16_t) (lo | (hi << 8))) & 0xffffff;
 }
 
@@ -214,13 +214,17 @@ static inline uint8_t t_rmw8(SnesState* ss, uint32_t adr, int delta) {
   return v;
 }
 
-/* inc dp with a 16-bit accumulator: the write-back is reversed, high byte first. */
+/* inc dp with a 16-bit accumulator: the write-back is reversed, high byte first.
+ * Every caller is a direct-page site (the address comes from t_dp), so the high
+ * byte wraps inside bank 0 the way cpu_adrDp does rather than carrying into the
+ * bank byte. */
 static inline uint16_t t_rmw16(SnesState* ss, uint32_t adr, int delta) {
+  const uint32_t hiAdr = (adr + 1) & 0xffff;
   const uint8_t lo = ss_bus_r8(ss, adr);
-  const uint8_t hi = ss_bus_r8(ss, (adr + 1) & 0xffffff);
+  const uint8_t hi = ss_bus_r8(ss, hiAdr);
   const uint16_t v = (uint16_t) ((lo | (hi << 8)) + delta);
   ss_idle(ss);
-  ss_bus_w8(ss, (adr + 1) & 0xffffff, (uint8_t) (v >> 8));
+  ss_bus_w8(ss, hiAdr, (uint8_t) (v >> 8));
   ss_check_int(ss);
   ss_bus_w8(ss, adr, (uint8_t) v);
   ss_set_nz16(ss, v);
@@ -335,7 +339,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
 
   for(;;) {
     ES(L + 0x00, 2);                        /* dec $1C */
-    const bool last = (t_rmw8(ss, dp + oam_rows_0, -1) & 0x80) != 0;
+    const bool last = (t_rmw8(ss, t_dp(dp, oam_rows_0), -1) & 0x80) != 0;
     ES(L + 0x02, 1); t_branch(ss, last);    /* bmi (block 1's header) */
     if(last) return EMIT_RETURNED;
 
@@ -345,14 +349,14 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
     EREP(L + 0x06 + dy, 0x20);              /* rep #$20 */
     ES(L + 0x08 + dy, 3); a = alu_and16(ss, a, 0x00FF);           /* and #$00FF */
     ES(L + 0x0B + dy, 2);                   /* adc entity_screen_y (no clc here) */
-    a = alu_adc16(ss, a, t_read16(ss, dp + entity_screen_y));
+    a = alu_adc16(ss, a, t_read16_dp(ss, dp, entity_screen_y));
     ES(L + 0x0D + dy, 3); alu_cmp16(ss, a, 0x00F0);               /* cmp #$00F0 */
     const bool offscreen = ss_c(ss);
     ES(L + 0x10 + dy, 1); t_branch(ss, offscreen);                /* bcs */
     if(!offscreen) {
       ES(L + 0x12 + dy, 3); a = alu_sbc16(ss, a, 0x000F);         /* sbc #$000F */
       ES(L + 0x15 + dy, 2); t_index(ss);    /* sta $01,X: the Y and tile bytes */
-      t_write16(ss, (uint16_t) (dp + 0x0001 + x), a);
+      t_write16_dp(ss, dp, 0x0001 + x, a);
       ES(L + 0x17 + dy, 2);                 /* lda [sprite_frame_ptr],Y */
       a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
       ss_set_nz16(ss, a);
@@ -360,13 +364,13 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
       ES(L + 0x19 + dxy, 3); a = alu_and16(ss, a, 0x00FF);        /* and #$00FF */
       ESI(L + 0x1C + dxy); ss_set_c(ss, false);                   /* clc */
       ES(L + 0x1D + dxy, 2);                /* adc entity_screen_x */
-      a = alu_adc16(ss, a, t_read16(ss, dp + entity_screen_x));
+      a = alu_adc16(ss, a, t_read16_dp(ss, dp, entity_screen_x));
       ES(L + 0x1F + dxy, 3); alu_cmp16(ss, a, 0x0100);            /* cmp #$0100 */
       ESEP(L + 0x22 + dxy, 0x20);           /* sep #$20 */
       ES(L + 0x24 + dxy, 2); t_index(ss);   /* sta $00,X: the X byte */
-      t_write8(ss, (uint16_t) (dp + nmi_handler_ptr + x), (uint8_t) a);
+      t_write8_dp(ss, dp, nmi_handler_ptr + x, (uint8_t) a);
       ES(L + 0x26 + dxy, 2);                /* lda $24 */
-      a = alu8_set(ss, a, t_read8(ss, dp + oam_size_bits));
+      a = alu8_set(ss, a, t_read8_dp(ss, dp, oam_size_bits));
       const bool wide = ss_c(ss);           /* the cmp #$0100 above: bit 8 of X */
       ES(L + 0x28 + dxy, 1); t_branch(ss, wide);                  /* bcs */
       if(!wide) { ES(L + 0x2A + dxy, 2); a = alu8_and(ss, a, 0xAA); }
@@ -375,11 +379,11 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
       ES(L + 0x2E + dxy, 2);                /* sta (oam_entry_ptr) */
       t_write8(ss, t_idp(ss, oam_entry_ptr), (uint8_t) a);
       ES(L + 0x30 + dxy, 2);                /* lda $24 */
-      a = alu8_set(ss, a, t_read8(ss, dp + oam_size_bits));
+      a = alu8_set(ss, a, t_read8_dp(ss, dp, oam_size_bits));
       const bool rolled = ss_n(ss);         /* the pattern has walked off the byte */
       ES(L + 0x32 + dxy, 1); t_branch(ss, !rolled);               /* bpl */
       if(rolled) {
-        ES(L + 0x34 + dxy, 2); t_rmw8(ss, dp + oam_entry_ptr, +1); /* inc $54 */
+        ES(L + 0x34 + dxy, 2); t_rmw8(ss, t_dp(dp, oam_entry_ptr), +1); /* inc $54 */
         ES(L + 0x36 + dxy, 2); a = alu8_set(ss, a, 0x03);          /* lda #$03 */
         ESI(L + 0x38 + dxy); ss_set_c(ss, false);                  /* clc */
         ES(L + 0x39 + dxy, 1); t_branch(ss, true);                 /* bra */
@@ -387,13 +391,13 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
         ESI(L + 0x3B + dxy); a = alu8_asl(ss, a);                  /* asl A */
         ESI(L + 0x3C + dxy); a = alu8_asl(ss, a);                  /* asl A */
       }
-      ES(L + 0x3D + dxy, 2); t_write8(ss, dp + oam_size_bits, (uint8_t) a);
+      ES(L + 0x3D + dxy, 2); t_write8_dp(ss, dp, oam_size_bits, (uint8_t) a);
       EREP(L + 0x3F + dxy, 0x20);           /* rep #$20 */
       ES(L + 0x41 + dxy, 2);                /* lda $1A */
-      a = t_read16(ss, dp + oam_flag_cursor);
+      a = t_read16_dp(ss, dp, oam_flag_cursor);
       ss_set_nz16(ss, a);
       ES(L + 0x43 + dxy, 2); t_index(ss);   /* sta $02,X: tile and attribute */
-      t_write16(ss, (uint16_t) (dp + dma_pending_mask + x), a);
+      t_write16_dp(ss, dp, dma_pending_mask + x, a);
       ESI(L + 0x45 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x46 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x47 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
@@ -402,7 +406,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
     /* the "next sprite" tail, reached either way */
     ESI(L + 0x49 + dxy); ss_set_c(ss, false);                     /* clc */
     ES(L + 0x4A + dxy, 2);                  /* lda $1A */
-    a = t_read16(ss, dp + oam_flag_cursor);
+    a = t_read16_dp(ss, dp, oam_flag_cursor);
     ss_set_nz16(ss, a);
     ESI(L + 0x4C + dxy); a = alu_inc16(ss, a);                    /* inc A */
     ESI(L + 0x4D + dxy); a = alu_inc16(ss, a);                    /* inc A */
@@ -410,7 +414,7 @@ static EmitResult emit_loop_first(SnesState* ss, const EmitVariant* v, uint16_t 
     const bool nowrap = ss_z(ss);
     ES(L + 0x51 + dxy, 1); t_branch(ss, nowrap);                  /* beq */
     if(!nowrap) { ES(L + 0x53 + dxy, 3); a = alu_adc16(ss, a, 0x0010); }
-    ES(L + 0x56 + dxy, 2); t_write16(ss, dp + oam_flag_cursor, a);
+    ES(L + 0x56 + dxy, 2); t_write16_dp(ss, dp, oam_flag_cursor, a);
     ESEP(L + 0x58 + dxy, 0x20);             /* sep #$20 */
     ESI(L + 0x5A + dxy); y = (uint16_t) (y + 1); ss_set_nz16(ss, y);
     ESI(L + 0x5B + dxy); y = (uint16_t) (y + 1); ss_set_nz16(ss, y);
@@ -432,7 +436,7 @@ static EmitResult emit_loop_rest(SnesState* ss, const EmitVariant* v,
 
   for(;;) {
     ES(L + 0x00, 2);                        /* dec $1D / dec $1F */
-    const bool last = (t_rmw8(ss, dp + cnt, -1) & 0x80) != 0;
+    const bool last = (t_rmw8(ss, t_dp(dp, cnt), -1) & 0x80) != 0;
     ES(L + 0x02, 1); t_branch(ss, last);    /* bmi (the next block's header) */
     if(last) return EMIT_RETURNED;
 
@@ -443,14 +447,14 @@ static EmitResult emit_loop_rest(SnesState* ss, const EmitVariant* v,
     ES(L + 0x08 + dy, 3); a = alu_and16(ss, a, 0x00FF);           /* and #$00FF */
     ESI(L + 0x0B + dy); ss_set_c(ss, false);                      /* clc */
     ES(L + 0x0C + dy, 2);                   /* adc entity_screen_y */
-    a = alu_adc16(ss, a, t_read16(ss, dp + entity_screen_y));
+    a = alu_adc16(ss, a, t_read16_dp(ss, dp, entity_screen_y));
     ES(L + 0x0E + dy, 3); alu_cmp16(ss, a, 0x00F0);               /* cmp #$00F0 */
     const bool offscreen = ss_c(ss);
     ES(L + 0x11 + dy, 1); t_branch(ss, offscreen);                /* bcs */
     if(!offscreen) {
       ES(L + 0x13 + dy, 3); a = alu_sbc16(ss, a, 0x000F);         /* sbc #$000F */
       ES(L + 0x16 + dy, 2); t_index(ss);    /* sta $01,X */
-      t_write16(ss, (uint16_t) (dp + 0x0001 + x), a);
+      t_write16_dp(ss, dp, 0x0001 + x, a);
       ES(L + 0x18 + dy, 2);                 /* lda [sprite_frame_ptr],Y */
       a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
       ss_set_nz16(ss, a);
@@ -458,16 +462,16 @@ static EmitResult emit_loop_rest(SnesState* ss, const EmitVariant* v,
       ES(L + 0x1A + dxy, 3); a = alu_and16(ss, a, 0x00FF);        /* and #$00FF */
       ESI(L + 0x1D + dxy); ss_set_c(ss, false);                   /* clc */
       ES(L + 0x1E + dxy, 2);                /* adc entity_screen_x */
-      a = alu_adc16(ss, a, t_read16(ss, dp + entity_screen_x));
+      a = alu_adc16(ss, a, t_read16_dp(ss, dp, entity_screen_x));
       ES(L + 0x20 + dxy, 3); alu_bit_imm16(ss, a, 0x0100);        /* bit #$0100 */
       ESEP(L + 0x23 + dxy, 0x20);           /* sep #$20 */
       ES(L + 0x25 + dxy, 2); t_index(ss);   /* sta $00,X */
-      t_write8(ss, (uint16_t) (dp + nmi_handler_ptr + x), (uint8_t) a);
+      t_write8_dp(ss, dp, nmi_handler_ptr + x, (uint8_t) a);
       const bool narrow = ss_z(ss);         /* bit #$0100: X fits in 8 bits */
       ES(L + 0x27 + dxy, 1); t_branch(ss, narrow);                /* beq */
       if(!narrow) {
         ES(L + 0x29 + dxy, 2);              /* stx $52 (16-bit: x is 16-bit) */
-        t_write16(ss, dp + depth_sort_key, x);
+        t_write16_dp(ss, dp, depth_sort_key, x);
         EREP(L + 0x2B + dxy, 0x20);         /* rep #$20 */
         ESI(L + 0x2D + dxy); a = x; ss_set_nz16(ss, a);           /* txa */
         ES(L + 0x2E + dxy, 3); a = alu_and16(ss, a, 0x01FC);      /* and #$01FC */
@@ -477,29 +481,29 @@ static EmitResult emit_loop_rest(SnesState* ss, const EmitVariant* v,
         ESI(L + 0x34 + dxy); a = alu_lsr16(ss, a);                /* lsr A */
         ESI(L + 0x35 + dxy); a = alu_lsr16(ss, a);                /* lsr A */
         ESEP(L + 0x36 + dxy, 0x20);         /* sep #$20 */
-        ES(L + 0x38 + dxy, 2); t_write8(ss, dp + oam_entry_ptr, (uint8_t) a);
+        ES(L + 0x38 + dxy, 2); t_write8_dp(ss, dp, oam_entry_ptr, (uint8_t) a);
         ES(L + 0x3A + dxy, 3); t_index(ss); /* lda data_C0A6D7,X */
-        a = alu8_set(ss, a, t_read8(ss, ss_abs(ss, (uint16_t) (oam_x9_pattern + x))));
+        a = alu8_set(ss, a, t_read8(ss, ss_abs(ss, (oam_x9_pattern + x))));
         ES(L + 0x3D + dxy, 2);              /* ora (oam_entry_ptr) */
         a = alu8_ora(ss, a, t_read8(ss, t_idp(ss, oam_entry_ptr)));
         ES(L + 0x3F + dxy, 2);              /* sta (oam_entry_ptr) */
         t_write8(ss, t_idp(ss, oam_entry_ptr), (uint8_t) a);
         ES(L + 0x41 + dxy, 2);              /* ldx $52 (16-bit) */
-        x = t_read16(ss, dp + depth_sort_key);
+        x = t_read16_dp(ss, dp, depth_sort_key);
         ss_set_nz16(ss, x);
       }
       EREP(L + 0x43 + dxy, 0x20);           /* rep #$20 */
       ES(L + 0x45 + dxy, 2);                /* lda $1A */
-      a = t_read16(ss, dp + oam_flag_cursor);
+      a = t_read16_dp(ss, dp, oam_flag_cursor);
       ss_set_nz16(ss, a);
       ES(L + 0x47 + dxy, 2); t_index(ss);   /* sta $02,X */
-      t_write16(ss, (uint16_t) (dp + dma_pending_mask + x), a);
+      t_write16_dp(ss, dp, dma_pending_mask + x, a);
       ESI(L + 0x49 + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x4A + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x4B + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
       ESI(L + 0x4C + dxy); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);
     }
-    ES(L + 0x4D + dxy, 2); t_rmw16(ss, dp + oam_flag_cursor, +1); /* inc $1A */
+    ES(L + 0x4D + dxy, 2); t_rmw16(ss, t_dp(dp, oam_flag_cursor), +1); /* inc $1A */
     ESEP(L + 0x4F + dxy, 0x20);             /* sep #$20 */
     ESI(L + 0x51 + dxy); y = (uint16_t) (y + 1); ss_set_nz16(ss, y);
     ESI(L + 0x52 + dxy); y = (uint16_t) (y + 1); ss_set_nz16(ss, y);
@@ -535,14 +539,14 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
 
   /* ---- row block 0 header: $A791 -------------------------------------- */
   ES(H0 + 0x00, 2);                         /* lda oam_write_ptr */
-  a = t_read16(ss, dp + oam_write_ptr);
+  a = t_read16_dp(ss, dp, oam_write_ptr);
   ss_set_nz16(ss, a);
   ESI(H0 + 0x02); a = alu_lsr16(ss, a);     /* lsr A */
   ESI(H0 + 0x03); a = alu_lsr16(ss, a);     /* lsr A */
   ESEP(H0 + 0x04, 0x20);                    /* sep #$20 */
   ESI(H0 + 0x06); x = a; ss_set_nz16(ss, x);/* tax (index is 16-bit: the whole A) */
   ES(H0 + 0x07, 2);                         /* adc $1C: carry from the lsr above */
-  a = alu8_adc(ss, a, t_read8(ss, dp + oam_rows_0));
+  a = alu8_adc(ss, a, t_read8_dp(ss, dp, oam_rows_0));
   const bool room0 = ss_n(ss);
   ES(H0 + 0x09, 1); t_branch(ss, room0);    /* bmi */
   if(!room0) {
@@ -553,15 +557,15 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   ESI(H0 + 0x12); a = alu8_lsr(ss, a);      /* lsr A */
   ESI(H0 + 0x13); a = alu8_lsr(ss, a);      /* lsr A */
   ES(H0 + 0x14, 2); a = alu8_and(ss, a, 0x1F);                  /* and #$1F */
-  ES(H0 + 0x16, 2); t_write8(ss, dp + oam_entry_ptr, (uint8_t) a);
+  ES(H0 + 0x16, 2); t_write8_dp(ss, dp, oam_entry_ptr, (uint8_t) a);
   ESI(H0 + 0x18); a = alu8_set(ss, a, (uint8_t) x);             /* txa */
   ES(H0 + 0x19, 2); a = alu8_and(ss, a, 0x03);                  /* and #$03 */
   ESI(H0 + 0x1B); x = a; ss_set_nz16(ss, x);/* tax */
   ES(H0 + 0x1C, 3); t_index(ss);            /* lda data_C0A6D3,X */
-  a = alu8_set(ss, a, t_read8(ss, ss_abs(ss, (uint16_t) (oam_size_pattern + x))));
-  ES(H0 + 0x1F, 2); t_write8(ss, dp + oam_size_bits, (uint8_t) a);
+  a = alu8_set(ss, a, t_read8(ss, ss_abs(ss, (oam_size_pattern + x))));
+  ES(H0 + 0x1F, 2); t_write8_dp(ss, dp, oam_size_bits, (uint8_t) a);
   ES(H0 + 0x21, 2);                         /* ldx oam_write_ptr (16-bit) */
-  x = t_read16(ss, dp + oam_write_ptr);
+  x = t_read16_dp(ss, dp, oam_write_ptr);
   ss_set_nz16(ss, x);
   ESI(H0 + 0x23); ss_set_c(ss, false);      /* clc */
 
@@ -579,36 +583,36 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   ESI(H1 + 0x04); a = alu_lsr16(ss, a);     /* lsr A */
   ESEP(H1 + 0x05, 0x20);                    /* sep #$20 */
   ES(H1 + 0x07, 2);                         /* adc $1D */
-  a = alu8_adc(ss, a, t_read8(ss, dp + oam_rows_1));
+  a = alu8_adc(ss, a, t_read8_dp(ss, dp, oam_rows_1));
   const bool room1 = ss_n(ss);
   ES(H1 + 0x09, 1); t_branch(ss, room1);    /* bmi */
   if(!room1) {
     EREP(H1 + 0x0B, 0x20);                  /* rep #$20 */
     ES(H1 + 0x0D, 2);                       /* stx oam_write_ptr */
-    t_write16(ss, dp + oam_write_ptr, x);
+    t_write16_dp(ss, dp, oam_write_ptr, x);
     return emit_full_exit(ss, (uint16_t) (H1 + 0x0F));
   }
   ES(H1 + 0x13, 2);                         /* lda $1E */
-  a = alu8_set(ss, a, t_read8(ss, dp + oam_row_1_base));
+  a = alu8_set(ss, a, t_read8_dp(ss, dp, oam_row_1_base));
   ESI(H1 + 0x15); ss_set_c(ss, false);      /* clc */
   ES(H1 + 0x16, 2);                         /* adc $18 */
-  a = alu8_adc(ss, a, t_read8(ss, dp + oam_flag_word));
-  ES(H1 + 0x18, 2); t_write8(ss, dp + oam_flag_cursor, (uint8_t) a);
+  a = alu8_adc(ss, a, t_read8_dp(ss, dp, oam_flag_word));
+  ES(H1 + 0x18, 2); t_write8_dp(ss, dp, oam_flag_cursor, (uint8_t) a);
   if(v->adj_x || v->adj_y) {
     uint16_t k = (uint16_t) (H1 + 0x1A);
     EREP(k, 0x20); k = (uint16_t) (k + 2);  /* rep #$20 */
     if(v->adj_x) {
-      ES(k, 2); a = t_read16(ss, dp + entity_screen_x); ss_set_nz16(ss, a);
+      ES(k, 2); a = t_read16_dp(ss, dp, entity_screen_x); ss_set_nz16(ss, a);
       ESI(k + 2); ss_set_c(ss, false);
       ES(k + 3, 3); a = alu_adc16(ss, a, 0x0008);
-      ES(k + 6, 2); t_write16(ss, dp + entity_screen_x, a);
+      ES(k + 6, 2); t_write16_dp(ss, dp, entity_screen_x, a);
       k = (uint16_t) (k + 8);
     }
     if(v->adj_y) {
-      ES(k, 2); a = t_read16(ss, dp + entity_screen_y); ss_set_nz16(ss, a);
+      ES(k, 2); a = t_read16_dp(ss, dp, entity_screen_y); ss_set_nz16(ss, a);
       ESI(k + 2); ss_set_c(ss, false);
       ES(k + 3, 3); a = alu_adc16(ss, a, 0x0008);
-      ES(k + 6, 2); t_write16(ss, dp + entity_screen_y, a);
+      ES(k + 6, 2); t_write16_dp(ss, dp, entity_screen_y, a);
       k = (uint16_t) (k + 8);
     }
     ESEP(k, 0x20);                          /* sep #$20 */
@@ -628,21 +632,21 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
   ESI(H2 + 0x04); a = alu_lsr16(ss, a);     /* lsr A */
   ESEP(H2 + 0x05, 0x20);                    /* sep #$20 */
   ES(H2 + 0x07, 2);                         /* adc $1F */
-  a = alu8_adc(ss, a, t_read8(ss, dp + oam_rows_2));
+  a = alu8_adc(ss, a, t_read8_dp(ss, dp, oam_rows_2));
   const bool room2 = ss_n(ss);
   ES(H2 + 0x09, 1); t_branch(ss, room2);    /* bmi */
   if(!room2) {
     EREP(H2 + 0x0B, 0x20);                  /* rep #$20 */
     ES(H2 + 0x0D, 2);                       /* stx oam_write_ptr */
-    t_write16(ss, dp + oam_write_ptr, x);
+    t_write16_dp(ss, dp, oam_write_ptr, x);
     return emit_full_exit(ss, (uint16_t) (H2 + 0x0F));
   }
   ES(H2 + 0x13, 2);                         /* lda $20 */
-  a = alu8_set(ss, a, t_read8(ss, dp + oam_row_2_base));
+  a = alu8_set(ss, a, t_read8_dp(ss, dp, oam_row_2_base));
   ESI(H2 + 0x15); ss_set_c(ss, false);      /* clc */
   ES(H2 + 0x16, 2);                         /* adc $18 */
-  a = alu8_adc(ss, a, t_read8(ss, dp + oam_flag_word));
-  ES(H2 + 0x18, 2); t_write8(ss, dp + oam_flag_cursor, (uint8_t) a);
+  a = alu8_adc(ss, a, t_read8_dp(ss, dp, oam_flag_word));
+  ES(H2 + 0x18, 2); t_write8_dp(ss, dp, oam_flag_cursor, (uint8_t) a);
 
   ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
   {
@@ -653,7 +657,7 @@ static EmitResult emit_run(SnesState* ss, const EmitVariant* v) {
 
   /* ---- the emitter's own return: $A8F1 -------------------------------- */
   EREP(X2 + 0x00, 0x20);                    /* rep #$20 */
-  ES(X2 + 0x02, 2); t_write16(ss, dp + oam_write_ptr, x);       /* stx oam_write_ptr */
+  ES(X2 + 0x02, 2); t_write16_dp(ss, dp, oam_write_ptr, x);       /* stx oam_write_ptr */
   ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
   ES(X2 + 0x04, 1);                         /* rts */
   ss_rts(ss);
@@ -673,17 +677,17 @@ static EmitResult emit_prologue(SnesState* ss, uint16_t P, bool four,
   ES(P + 0x03, 2);                                              /* lda [$26],Y */
   a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
   ss_set_nz16(ss, a);
-  ES(P + 0x05, 2); t_write16(ss, dp + oam_rows_0, a);           /* sta $1C */
+  ES(P + 0x05, 2); t_write16_dp(ss, dp, oam_rows_0, a);           /* sta $1C */
   ES(P + 0x07, 3); y = 0x0002; ss_set_nz16(ss, y);              /* ldy #$0002 */
   ES(P + 0x0A, 2);
   a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
   ss_set_nz16(ss, a);
-  ES(P + 0x0C, 2); t_write16(ss, dp + oam_row_1_base, a);       /* sta $1E */
+  ES(P + 0x0C, 2); t_write16_dp(ss, dp, oam_row_1_base, a);       /* sta $1E */
   ES(P + 0x0E, 3); y = 0x0004; ss_set_nz16(ss, y);              /* ldy #$0004 */
   ES(P + 0x11, 2);
   a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
   ss_set_nz16(ss, a);
-  ES(P + 0x13, 2); t_write16(ss, dp + oam_row_2_base, a);       /* sta $20 */
+  ES(P + 0x13, 2); t_write16_dp(ss, dp, oam_row_2_base, a);       /* sta $20 */
   if(!four) {
     ES(P + 0x15, 3); y = 0x0005; ss_set_nz16(ss, y);            /* ldy #$0005 */
     ES(P + 0x18, 3);                                            /* jmp <header> */
@@ -695,7 +699,7 @@ static EmitResult emit_prologue(SnesState* ss, uint16_t P, bool four,
   ES(P + 0x18, 2);
   a = t_read16(ss, t_ily(ss, sprite_frame_ptr, y));
   ss_set_nz16(ss, a);
-  ES(P + 0x1A, 2); t_write16(ss, dp + oam_row_3_base, a);       /* sta $22 */
+  ES(P + 0x1A, 2); t_write16_dp(ss, dp, oam_row_3_base, a);       /* sta $22 */
   ES(P + 0x1C, 3); y = 0x0008; ss_set_nz16(ss, y);              /* ldy #$0008 */
   ss_set_a(ss, a); ss_set_x(ss, x); ss_set_y(ss, y);
   return emit_run(ss, v);                   /* falls through into the header */
@@ -762,21 +766,21 @@ void entity_build_oam_frame(SnesState* ss) {
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
   const uint16_t dp = ss_dp(ss);
 
-  S(0xA538, 3); a = 0x0400; ss_set_nz16(ss, a);   /* C0A538 lda #$0400 */
-  S(0xA53B, 2); t_write16(ss, dp + oam_entry_ptr, a);  /* C0A53B sta oam_entry_ptr */
+  SIMM16(0xA538); a = 0x0400; ss_set_nz16(ss, a);   /* C0A538 lda #$0400 */
+  S(0xA53B, 2); t_write16_dp(ss, dp, oam_entry_ptr, a);  /* C0A53B sta oam_entry_ptr */
 
 loc_A53D: ;
   S(0xA53D, 2);                             /* C0A53D lda oam_write_ptr */
-  a = t_read16(ss, dp + oam_write_ptr);
+  a = t_read16_dp(ss, dp, oam_write_ptr);
   ss_set_nz16(ss, a);
-  S(0xA53F, 3); alu_cmp16(ss, a, 0x0400);   /* C0A53F cmp #$0400 */
+  SIMM16(0xA53F); alu_cmp16(ss, a, 0x0400);   /* C0A53F cmp #$0400 */
   {
     const bool room = !ss_z(ss);
     S(0xA542, 1); t_branch(ss, room);       /* C0A542 bne loc_C0A553 */
     if(!room) {
       /* the buffer is already full: force blank at brightness 7 and give up */
       SEP(0xA544, 0x20);                    /* C0A544 sep #$20 */
-      S(0xA546, 2); a = alu8_set(ss, a, 0x07);  /* C0A546 lda #$07 */
+      SIMM8(0xA546); a = alu8_set(ss, a, 0x07);  /* C0A546 lda #$07 */
       S(0xA548, 3);                         /* C0A548 sta INIDISP */
       t_write8(ss, ss_abs(ss, INIDISP), (uint8_t) a);
       REP(0xA54B, 0x20);                    /* C0A54B rep #$20 */
@@ -791,39 +795,39 @@ loc_A53D: ;
   ss_idle(ss); ss_check_int(ss); ss_push8(ss, pb);
   S(0xA554, 1); t_plb(ss);                  /* C0A554 plb */
   S(0xA555, 2);                             /* C0A555 ldy entity_render_index */
-  y = t_read16(ss, dp + entity_render_index);
+  y = t_read16_dp(ss, dp, entity_render_index);
   ss_set_nz16(ss, y);
   S(0xA557, 3); t_index(ss);                /* C0A557 lda entity_render_order,Y */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_render_order + y)));
+  a = t_read16(ss, ss_abs(ss, (entity_render_order + y)));
   ss_set_nz16(ss, a);
   SI(0xA55A); y = a; ss_set_nz16(ss, y);    /* C0A55A tay */
   S(0xA55B, 3); t_index(ss);                /* C0A55B lda entity_substate,Y */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_substate + y)));
+  a = t_read16(ss, ss_abs(ss, (entity_substate + y)));
   ss_set_nz16(ss, a);
   S(0xA55E, 1); t_branch(ss, a != 0);       /* C0A55E bne loc_C0A563 */
   if(a == 0) goto loc_A560;
 
   /* loc_C0A563 */
   S(0xA563, 3); t_index(ss);                /* C0A563 ldx entity_frame_id,Y */
-  x = t_read16(ss, ss_abs(ss, (uint16_t) (entity_frame_id + y)));
+  x = t_read16(ss, ss_abs(ss, (entity_frame_id + y)));
   ss_set_nz16(ss, x);
   SI(0xA566); a = x; ss_set_nz16(ss, a);    /* C0A566 txa */
   S(0xA567, 3); t_index(ss);                /* C0A567 sta entity_frame_shown,Y */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_frame_shown + y)), a);
+  t_write16(ss, ss_abs(ss, (entity_frame_shown + y)), a);
   S(0xA56A, 1); t_branch(ss, a == 0);       /* C0A56A beq loc_C0A560 */
   if(a == 0) goto loc_A560;
 
   S(0xA56C, 4);                             /* C0A56C lda data_C40000,X */
   a = t_read16(ss, (sprite_frame_table + x) & 0xffffff);
   ss_set_nz16(ss, a);
-  S(0xA570, 2); t_write16(ss, dp + sprite_frame_ptr, a);   /* C0A570 sta sprite_frame_ptr */
+  S(0xA570, 2); t_write16_dp(ss, dp, sprite_frame_ptr, a);   /* C0A570 sta sprite_frame_ptr */
   SI(0xA572); a = alu_inc16(ss, a);         /* C0A572 inc A */
-  S(0xA573, 2); t_write16(ss, dp + sprite_frame_ptr2, a);  /* C0A573 sta sprite_frame_ptr2 */
+  S(0xA573, 2); t_write16_dp(ss, dp, sprite_frame_ptr2, a);  /* C0A573 sta sprite_frame_ptr2 */
   S(0xA575, 4);                             /* C0A575 lda data_C40002,X */
   a = t_read16(ss, (sprite_frame_table + 2 + x) & 0xffffff);
   ss_set_nz16(ss, a);
-  S(0xA579, 2); t_write16(ss, dp + sprite_frame_bank, a);  /* C0A579 sta sprite_frame_bank */
-  S(0xA57B, 2); t_write16(ss, dp + sprite_frame_bank2, a); /* C0A57B sta sprite_frame_bank2 */
+  S(0xA579, 2); t_write16_dp(ss, dp, sprite_frame_bank, a);  /* C0A579 sta sprite_frame_bank */
+  S(0xA57B, 2); t_write16_dp(ss, dp, sprite_frame_bank2, a); /* C0A57B sta sprite_frame_bank2 */
   S(0xA57D, 1);                             /* C0A57D xba: the frame's Y bias */
   {
     /* xba is three cycles, not two: the opcode fetch and two internal cycles
@@ -835,79 +839,79 @@ loc_A53D: ;
     ss_check_int(ss);
     ss_idle(ss);
   }
-  S(0xA57E, 3); a = alu_and16(ss, a, 0x00FF);  /* C0A57E and #$00FF */
+  SIMM16(0xA57E); a = alu_and16(ss, a, 0x00FF);  /* C0A57E and #$00FF */
   SI(0xA581); ss_set_c(ss, false);          /* C0A581 clc */
   S(0xA582, 3); t_index(ss);                /* C0A582 adc entity_y,Y */
-  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_y + y))));
+  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (entity_y + y))));
   S(0xA585, 3); t_index(ss);                /* C0A585 sta entity_depth_key,Y */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_depth_key + y)), a);
+  t_write16(ss, ss_abs(ss, (entity_depth_key + y)), a);
   S(0xA588, 3); t_index(ss);                /* C0A588 lda entity_z_dead,Y */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_z_dead + y)));
+  a = t_read16(ss, ss_abs(ss, (entity_z_dead + y)));
   ss_set_nz16(ss, a);
   SI(0xA58B); ss_set_c(ss, false);          /* C0A58B clc */
   S(0xA58C, 3); t_index(ss);                /* C0A58C adc entity_y,Y */
-  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_y + y))));
+  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (entity_y + y))));
   SI(0xA58F); ss_set_c(ss, true);           /* C0A58F sec */
-  S(0xA590, 3); a = alu_sbc16(ss, a, 0x0100);  /* C0A590 sbc #$0100 */
+  SIMM16(0xA590); a = alu_sbc16(ss, a, 0x0100);  /* C0A590 sbc #$0100 */
   SI(0xA593); ss_set_c(ss, true);           /* C0A593 sec */
   S(0xA594, 2);                             /* C0A594 sbc camera_y */
-  a = alu_sbc16(ss, a, t_read16(ss, dp + camera_y));
+  a = alu_sbc16(ss, a, t_read16_dp(ss, dp, camera_y));
   SI(0xA596); ss_set_c(ss, true);           /* C0A596 sec */
   S(0xA597, 2);                             /* C0A597 sbc $76 */
-  a = alu_sbc16(ss, a, t_read16(ss, dp + bg2_scroll_bias));
+  a = alu_sbc16(ss, a, t_read16_dp(ss, dp, bg2_scroll_bias));
   SI(0xA599); ss_set_c(ss, false);          /* C0A599 clc */
   S(0xA59A, 2);                             /* C0A59A adc $92 */
-  a = alu_adc16(ss, a, t_read16(ss, dp + screen_y_bias_92));
-  S(0xA59C, 2); t_write16(ss, dp + entity_screen_y, a);  /* C0A59C sta entity_screen_y */
-  S(0xA59E, 3); a = alu_adc16(ss, a, 0x0090);  /* C0A59E adc #$0090 (plus that carry) */
-  S(0xA5A1, 3); alu_cmp16(ss, a, 0x0130);   /* C0A5A1 cmp #$0130 */
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, screen_y_bias_92));
+  S(0xA59C, 2); t_write16_dp(ss, dp, entity_screen_y, a);  /* C0A59C sta entity_screen_y */
+  SIMM16(0xA59E); a = alu_adc16(ss, a, 0x0090);  /* C0A59E adc #$0090 (plus that carry) */
+  SIMM16(0xA5A1); alu_cmp16(ss, a, 0x0130);   /* C0A5A1 cmp #$0130 */
   {
     const bool culled = ss_c(ss);
     S(0xA5A4, 1); t_branch(ss, culled);     /* C0A5A4 bcs loc_C0A560 */
     if(culled) goto loc_A560;
   }
   S(0xA5A6, 3); t_index(ss);                /* C0A5A6 lda entity_x,Y */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + y)));
+  a = t_read16(ss, ss_abs(ss, (entity_x + y)));
   ss_set_nz16(ss, a);
   S(0xA5A9, 2);                             /* C0A5A9 sbc camera_x (C clear: see cmp) */
-  a = alu_sbc16(ss, a, t_read16(ss, dp + camera_x));
-  S(0xA5AB, 2); t_write16(ss, dp + entity_screen_x, a);  /* C0A5AB sta entity_screen_x */
+  a = alu_sbc16(ss, a, t_read16_dp(ss, dp, camera_x));
+  S(0xA5AB, 2); t_write16_dp(ss, dp, entity_screen_x, a);  /* C0A5AB sta entity_screen_x */
   SI(0xA5AD); ss_set_c(ss, false);          /* C0A5AD clc */
-  S(0xA5AE, 3); a = alu_adc16(ss, a, 0x0030);  /* C0A5AE adc #$0030 */
-  S(0xA5B1, 3); alu_cmp16(ss, a, 0x0160);   /* C0A5B1 cmp #$0160 */
+  SIMM16(0xA5AE); a = alu_adc16(ss, a, 0x0030);  /* C0A5AE adc #$0030 */
+  SIMM16(0xA5B1); alu_cmp16(ss, a, 0x0160);   /* C0A5B1 cmp #$0160 */
   {
     const bool onscreen = !ss_c(ss);
     S(0xA5B4, 1); t_branch(ss, onscreen);   /* C0A5B4 bcc loc_C0A5B9 */
-    if(!onscreen) { S(0xA5B6, 3); goto loc_A6BF; }  /* C0A5B6 jmp loc_C0A6BF */
+    if(!onscreen) { SJMP(0xA5B6); goto loc_A6BF; }  /* C0A5B6 jmp loc_C0A6BF */
   }
 
   /* loc_C0A5B9: pick the emitter from the two flip bits */
   S(0xA5B9, 3); t_index(ss);                /* C0A5B9 lda entity_flags,Y */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_flags + y)));
+  a = t_read16(ss, ss_abs(ss, (entity_flags + y)));
   ss_set_nz16(ss, a);
-  S(0xA5BC, 2); t_write16(ss, dp + oam_flag_word, a);    /* C0A5BC sta $18 */
-  S(0xA5BE, 2); t_write16(ss, dp + oam_flag_cursor, a);  /* C0A5BE sta $1A */
-  S(0xA5C0, 3); alu_bit_imm16(ss, a, 0x8000);  /* C0A5C0 bit #$8000 */
+  S(0xA5BC, 2); t_write16_dp(ss, dp, oam_flag_word, a);    /* C0A5BC sta $18 */
+  S(0xA5BE, 2); t_write16_dp(ss, dp, oam_flag_cursor, a);  /* C0A5BE sta $1A */
+  SIMM16(0xA5C0); alu_bit_imm16(ss, a, 0x8000);  /* C0A5C0 bit #$8000 */
   {
     const bool vflip = !ss_z(ss);
     S(0xA5C3, 1); t_branch(ss, vflip);      /* C0A5C3 bne loc_C0A60A */
     if(vflip) goto loc_A60A;
   }
-  S(0xA5C5, 3); alu_bit_imm16(ss, a, 0x4000);  /* C0A5C5 bit #$4000 */
+  SIMM16(0xA5C5); alu_bit_imm16(ss, a, 0x4000);  /* C0A5C5 bit #$4000 */
   {
     const bool hflip = !ss_z(ss);
     S(0xA5C8, 1); t_branch(ss, hflip);      /* C0A5C8 bne loc_C0A5EA */
     if(hflip) goto loc_A5EA;
   }
-  S(0xA5CA, 2); a = t_read16(ss, dp + entity_screen_x); ss_set_nz16(ss, a);
+  S(0xA5CA, 2); a = t_read16_dp(ss, dp, entity_screen_x); ss_set_nz16(ss, a);
   SI(0xA5CC); ss_set_c(ss, true);           /* C0A5CC sec */
-  S(0xA5CD, 3); a = alu_sbc16(ss, a, 0x0080);  /* C0A5CD sbc #$0080 */
-  S(0xA5D0, 2); t_write16(ss, dp + entity_screen_x, a);
-  S(0xA5D2, 2); a = t_read16(ss, dp + entity_screen_y); ss_set_nz16(ss, a);
+  SIMM16(0xA5CD); a = alu_sbc16(ss, a, 0x0080);  /* C0A5CD sbc #$0080 */
+  S(0xA5D0, 2); t_write16_dp(ss, dp, entity_screen_x, a);
+  S(0xA5D2, 2); a = t_read16_dp(ss, dp, entity_screen_y); ss_set_nz16(ss, a);
   SI(0xA5D4); ss_set_c(ss, false);          /* C0A5D4 clc */
-  S(0xA5D5, 3); a = alu_adc16(ss, a, 0x0010);  /* C0A5D5 adc #$0010 */
-  S(0xA5D8, 2); t_write16(ss, dp + entity_screen_y, a);
-  S(0xA5DA, 3); alu_cpx16(ss, x, 0x0004);   /* C0A5DA cpx #$0004 */
+  SIMM16(0xA5D5); a = alu_adc16(ss, a, 0x0010);  /* C0A5D5 adc #$0010 */
+  S(0xA5D8, 2); t_write16_dp(ss, dp, entity_screen_y, a);
+  SIMM16(0xA5DA); alu_cpx16(ss, x, 0x0004);   /* C0A5DA cpx #$0004 */
   {
     const bool big = ss_c(ss);
     S(0xA5DD, 1); t_branch(ss, big);        /* C0A5DD bcs loc_C0A5E5 */
@@ -917,7 +921,7 @@ loc_A53D: ;
       if(r == CALL_YIELD) return;
       a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
       if(r == CALL_TAIL) goto loc_A6CD;
-      S(0xA5E2, 3); goto loc_A6BF;          /* C0A5E2 jmp loc_C0A6BF */
+      SJMP(0xA5E2); goto loc_A6BF;          /* C0A5E2 jmp loc_C0A6BF */
     }
   }
   /* loc_C0A5E5 */
@@ -932,15 +936,15 @@ loc_A53D: ;
   goto loc_A62B;
 
 loc_A5EA: ;
-  S(0xA5EA, 2); a = t_read16(ss, dp + entity_screen_x); ss_set_nz16(ss, a);
+  S(0xA5EA, 2); a = t_read16_dp(ss, dp, entity_screen_x); ss_set_nz16(ss, a);
   SI(0xA5EC); ss_set_c(ss, true);           /* C0A5EC sec */
-  S(0xA5ED, 3); a = alu_sbc16(ss, a, 0x008F);  /* C0A5ED sbc #$008F */
-  S(0xA5F0, 2); t_write16(ss, dp + entity_screen_x, a);
-  S(0xA5F2, 2); a = t_read16(ss, dp + entity_screen_y); ss_set_nz16(ss, a);
+  SIMM16(0xA5ED); a = alu_sbc16(ss, a, 0x008F);  /* C0A5ED sbc #$008F */
+  S(0xA5F0, 2); t_write16_dp(ss, dp, entity_screen_x, a);
+  S(0xA5F2, 2); a = t_read16_dp(ss, dp, entity_screen_y); ss_set_nz16(ss, a);
   SI(0xA5F4); ss_set_c(ss, false);          /* C0A5F4 clc */
-  S(0xA5F5, 3); a = alu_adc16(ss, a, 0x0010);  /* C0A5F5 adc #$0010 */
-  S(0xA5F8, 2); t_write16(ss, dp + entity_screen_y, a);
-  S(0xA5FA, 3); alu_cpx16(ss, x, 0x0004);   /* C0A5FA cpx #$0004 */
+  SIMM16(0xA5F5); a = alu_adc16(ss, a, 0x0010);  /* C0A5F5 adc #$0010 */
+  S(0xA5F8, 2); t_write16_dp(ss, dp, entity_screen_y, a);
+  SIMM16(0xA5FA); alu_cpx16(ss, x, 0x0004);   /* C0A5FA cpx #$0004 */
   {
     const bool big = ss_c(ss);
     S(0xA5FD, 1); t_branch(ss, big);        /* C0A5FD bcs loc_C0A605 */
@@ -950,7 +954,7 @@ loc_A5EA: ;
       if(r == CALL_YIELD) return;
       a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
       if(r == CALL_TAIL) goto loc_A6CD;
-      S(0xA602, 3); goto loc_A6BF;          /* C0A602 jmp loc_C0A6BF */
+      SJMP(0xA602); goto loc_A6BF;          /* C0A602 jmp loc_C0A6BF */
     }
   }
   /* loc_C0A605 */
@@ -965,16 +969,16 @@ loc_A5EA: ;
   goto loc_A62B;
 
 loc_A60A: ;
-  S(0xA60A, 3); alu_bit_imm16(ss, a, 0x4000);  /* C0A60A bit #$4000 */
+  SIMM16(0xA60A); alu_bit_imm16(ss, a, 0x4000);  /* C0A60A bit #$4000 */
   {
     const bool hflip = !ss_z(ss);
     S(0xA60D, 1); t_branch(ss, hflip);      /* C0A60D bne loc_C0A61E */
     if(!hflip) {
-      S(0xA60F, 2); a = t_read16(ss, dp + entity_screen_x); ss_set_nz16(ss, a);
+      S(0xA60F, 2); a = t_read16_dp(ss, dp, entity_screen_x); ss_set_nz16(ss, a);
       SI(0xA611); ss_set_c(ss, true);       /* C0A611 sec */
-      S(0xA612, 3); a = alu_sbc16(ss, a, 0x0080);  /* C0A612 sbc #$0080 */
-      S(0xA615, 2); t_write16(ss, dp + entity_screen_x, a);
-      S(0xA617, 2); t_rmw16(ss, dp + entity_screen_y, +1);  /* C0A617 inc entity_screen_y */
+      SIMM16(0xA612); a = alu_sbc16(ss, a, 0x0080);  /* C0A612 sbc #$0080 */
+      S(0xA615, 2); t_write16_dp(ss, dp, entity_screen_x, a);
+      S(0xA617, 2); t_rmw16(ss, t_dp(dp, entity_screen_y), +1);  /* C0A617 inc entity_screen_y */
       S(0xA619, 3);                         /* C0A619 jsr oam_emit_frame_3row */
       const CallResult r = t_jsr_emitter(ss, pb, 0xAAAA);
       if(r == CALL_YIELD) return;
@@ -985,11 +989,11 @@ loc_A60A: ;
     }
   }
   /* loc_C0A61E */
-  S(0xA61E, 2); a = t_read16(ss, dp + entity_screen_x); ss_set_nz16(ss, a);
+  S(0xA61E, 2); a = t_read16_dp(ss, dp, entity_screen_x); ss_set_nz16(ss, a);
   SI(0xA620); ss_set_c(ss, true);           /* C0A620 sec */
-  S(0xA621, 3); a = alu_sbc16(ss, a, 0x008F);  /* C0A621 sbc #$008F */
-  S(0xA624, 2); t_write16(ss, dp + entity_screen_x, a);
-  S(0xA626, 2); t_rmw16(ss, dp + entity_screen_y, +1);  /* C0A626 inc entity_screen_y */
+  SIMM16(0xA621); a = alu_sbc16(ss, a, 0x008F);  /* C0A621 sbc #$008F */
+  S(0xA624, 2); t_write16_dp(ss, dp, entity_screen_x, a);
+  S(0xA626, 2); t_rmw16(ss, t_dp(dp, entity_screen_y), +1);  /* C0A626 inc entity_screen_y */
   S(0xA628, 3);                             /* C0A628 jsr oam_emit_frame_3row_flip */
   {
     const CallResult r = t_jsr_emitter(ss, pb, 0xAC40);
@@ -1004,79 +1008,79 @@ loc_A62B: ;
    * loaded. Two 8-byte entity_tile_job records can come out of one frame: the
    * second one only when the nibble at $23 is non-zero. */
   S(0xA62B, 2);                             /* C0A62B ldx entity_render_index */
-  x = t_read16(ss, dp + entity_render_index);
+  x = t_read16_dp(ss, dp, entity_render_index);
   ss_set_nz16(ss, x);
   S(0xA62D, 3); t_index(ss);                /* C0A62D lda entity_render_order,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_render_order + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_render_order + x)));
   ss_set_nz16(ss, a);
   SI(0xA630); x = a; ss_set_nz16(ss, x);    /* C0A630 tax */
   S(0xA631, 3); t_index(ss);                /* C0A631 lda entity_frame_id,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_frame_id + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_frame_id + x)));
   ss_set_nz16(ss, a);
   S(0xA634, 3); t_index(ss);                /* C0A634 cmp entity_frame_loaded,X */
-  alu_cmp16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_frame_loaded + x))));
+  alu_cmp16(ss, a, t_read16(ss, ss_abs(ss, (entity_frame_loaded + x))));
   {
     const bool changed = !ss_z(ss);
     S(0xA637, 1); t_branch(ss, changed);    /* C0A637 bne loc_C0A63C */
-    if(!changed) { S(0xA639, 3); goto loc_A6BF; }  /* C0A639 jmp loc_C0A6BF */
+    if(!changed) { SJMP(0xA639); goto loc_A6BF; }  /* C0A639 jmp loc_C0A6BF */
   }
   /* loc_C0A63C */
   S(0xA63C, 3); t_index(ss);                /* C0A63C sta entity_frame_loaded,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_frame_loaded + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_frame_loaded + x)), a);
   S(0xA63F, 3);                             /* C0A63F ldx entity_tile_job_ptr */
   x = t_read16(ss, ss_abs(ss, entity_tile_job_ptr));
   ss_set_nz16(ss, x);
   SI(0xA642); a = y; ss_set_nz16(ss, a);    /* C0A642 tya */
   SI(0xA643); ss_set_c(ss, false);          /* C0A643 clc */
   S(0xA644, 2);                             /* C0A644 adc sprite_frame_ptr */
-  a = alu_adc16(ss, a, t_read16(ss, dp + sprite_frame_ptr));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, sprite_frame_ptr));
   SI(0xA646); y = a; ss_set_nz16(ss, y);    /* C0A646 tay */
   S(0xA647, 3); t_index(ss);                /* C0A647 sta $0A8E,X: source addr */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 4 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 4 + x)), a);
   S(0xA64A, 2);                             /* C0A64A lda $21: the word at $21/$22 */
-  a = t_read16(ss, dp + oam_tile_src_lo);
+  a = t_read16_dp(ss, dp, oam_tile_src_lo);
   ss_set_nz16(ss, a);
-  S(0xA64C, 3); a = alu_and16(ss, a, 0x00FF);  /* C0A64C and #$00FF */
+  SIMM16(0xA64C); a = alu_and16(ss, a, 0x00FF);  /* C0A64C and #$00FF */
   SI(0xA64F); a = alu_asl16(ss, a);         /* C0A64F asl A */
   SI(0xA650); a = alu_asl16(ss, a);         /* C0A650 asl A */
   SI(0xA651); a = alu_asl16(ss, a);         /* C0A651 asl A */
   SI(0xA652); a = alu_asl16(ss, a);         /* C0A652 asl A */
   SI(0xA653); a = alu_asl16(ss, a);         /* C0A653 asl A */
   S(0xA654, 3); t_index(ss);                /* C0A654 sta $0A8A,X: byte count */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 0 + x)), a);
-  S(0xA657, 2); t_write16(ss, dp + depth_sort_key, a);  /* C0A657 sta $52 */
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 0 + x)), a);
+  S(0xA657, 2); t_write16_dp(ss, dp, depth_sort_key, a);  /* C0A657 sta $52 */
   SI(0xA659); a = y; ss_set_nz16(ss, a);    /* C0A659 tya */
   SI(0xA65A); ss_set_c(ss, false);          /* C0A65A clc */
   S(0xA65B, 2);                             /* C0A65B adc $52 */
-  a = alu_adc16(ss, a, t_read16(ss, dp + depth_sort_key));
+  a = alu_adc16(ss, a, t_read16_dp(ss, dp, depth_sort_key));
   SI(0xA65D); y = a; ss_set_nz16(ss, y);    /* C0A65D tay */
   S(0xA65E, 2);                             /* C0A65E lda $18 */
-  a = t_read16(ss, dp + oam_flag_word);
+  a = t_read16_dp(ss, dp, oam_flag_word);
   ss_set_nz16(ss, a);
-  S(0xA660, 3); a = alu_and16(ss, a, 0x01FF);  /* C0A660 and #$01FF */
+  SIMM16(0xA660); a = alu_and16(ss, a, 0x01FF);  /* C0A660 and #$01FF */
   SI(0xA663); a = alu_asl16(ss, a);         /* C0A663 asl A */
   SI(0xA664); a = alu_asl16(ss, a);         /* C0A664 asl A */
   SI(0xA665); a = alu_asl16(ss, a);         /* C0A665 asl A */
   SI(0xA666); a = alu_asl16(ss, a);         /* C0A666 asl A */
   S(0xA667, 3); t_index(ss);                /* C0A667 sta $0A8C,X: VRAM address */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 2 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 2 + x)), a);
   S(0xA66A, 2);                             /* C0A66A lda sprite_frame_bank */
-  a = t_read16(ss, dp + sprite_frame_bank);
+  a = t_read16_dp(ss, dp, sprite_frame_bank);
   ss_set_nz16(ss, a);
-  S(0xA66C, 3); a = alu_ora16(ss, a, 0xFF00);  /* C0A66C ora #$FF00: the pending flag */
+  SIMM16(0xA66C); a = alu_ora16(ss, a, 0xFF00);  /* C0A66C ora #$FF00: the pending flag */
   S(0xA66F, 3); t_index(ss);                /* C0A66F sta $0A90,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 6 + x)), a);
   SI(0xA672); a = x; ss_set_nz16(ss, a);    /* C0A672 txa */
   SI(0xA673); ss_set_c(ss, false);          /* C0A673 clc */
-  S(0xA674, 3); a = alu_adc16(ss, a, 0x0008);  /* C0A674 adc #$0008 */
+  SIMM16(0xA674); a = alu_adc16(ss, a, 0x0008);  /* C0A674 adc #$0008 */
   SI(0xA677); x = a; ss_set_nz16(ss, x);    /* C0A677 tax */
   S(0xA678, 3); t_index(ss);                /* C0A678 stz $0A90,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), 0);
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 6 + x)), 0);
   S(0xA67B, 2);                             /* C0A67B lda $23: the word at $23/$24 */
-  a = t_read16(ss, dp + oam_tile_src_hi);
+  a = t_read16_dp(ss, dp, oam_tile_src_hi);
   ss_set_nz16(ss, a);
-  S(0xA67D, 3); a = alu_and16(ss, a, 0x000F);  /* C0A67D and #$000F */
-  S(0xA680, 3); alu_cmp16(ss, a, 0x0000);   /* C0A680 cmp #$0000 */
+  SIMM16(0xA67D); a = alu_and16(ss, a, 0x000F);  /* C0A67D and #$000F */
+  SIMM16(0xA680); alu_cmp16(ss, a, 0x0000);   /* C0A680 cmp #$0000 */
   {
     const bool second = !ss_z(ss);
     S(0xA683, 1); t_branch(ss, !second);    /* C0A683 beq loc_C0A6B9 */
@@ -1087,65 +1091,65 @@ loc_A62B: ;
       SI(0xA688); a = alu_asl16(ss, a);     /* C0A688 asl A */
       SI(0xA689); a = alu_asl16(ss, a);     /* C0A689 asl A */
       S(0xA68A, 3); t_index(ss);            /* C0A68A sta $0A8A,X */
-      t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 0 + x)), a);
+      t_write16(ss, ss_abs(ss, (entity_tile_job + 0 + x)), a);
       S(0xA68D, 2);                         /* C0A68D lda $22 */
-      a = t_read16(ss, dp + oam_row_3_base);
+      a = t_read16_dp(ss, dp, oam_row_3_base);
       ss_set_nz16(ss, a);
-      S(0xA68F, 3); a = alu_and16(ss, a, 0x00FF);  /* C0A68F and #$00FF */
+      SIMM16(0xA68F); a = alu_and16(ss, a, 0x00FF);  /* C0A68F and #$00FF */
       SI(0xA692); a = alu_asl16(ss, a);     /* C0A692 asl A */
       SI(0xA693); a = alu_asl16(ss, a);     /* C0A693 asl A */
       SI(0xA694); a = alu_asl16(ss, a);     /* C0A694 asl A */
       SI(0xA695); a = alu_asl16(ss, a);     /* C0A695 asl A */
-      S(0xA696, 2); t_write16(ss, dp + depth_sort_key, a);  /* C0A696 sta $52 */
+      S(0xA696, 2); t_write16_dp(ss, dp, depth_sort_key, a);  /* C0A696 sta $52 */
       S(0xA698, 2);                         /* C0A698 lda $18 */
-      a = t_read16(ss, dp + oam_flag_word);
+      a = t_read16_dp(ss, dp, oam_flag_word);
       ss_set_nz16(ss, a);
-      S(0xA69A, 3); a = alu_and16(ss, a, 0x01FF);  /* C0A69A and #$01FF */
+      SIMM16(0xA69A); a = alu_and16(ss, a, 0x01FF);  /* C0A69A and #$01FF */
       SI(0xA69D); a = alu_asl16(ss, a);     /* C0A69D asl A */
       SI(0xA69E); a = alu_asl16(ss, a);     /* C0A69E asl A */
       SI(0xA69F); a = alu_asl16(ss, a);     /* C0A69F asl A */
       SI(0xA6A0); a = alu_asl16(ss, a);     /* C0A6A0 asl A */
       SI(0xA6A1); ss_set_c(ss, false);      /* C0A6A1 clc */
       S(0xA6A2, 2);                         /* C0A6A2 adc $52 */
-      a = alu_adc16(ss, a, t_read16(ss, dp + depth_sort_key));
+      a = alu_adc16(ss, a, t_read16_dp(ss, dp, depth_sort_key));
       S(0xA6A4, 3); t_index(ss);            /* C0A6A4 sta $0A8C,X */
-      t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 2 + x)), a);
+      t_write16(ss, ss_abs(ss, (entity_tile_job + 2 + x)), a);
       SI(0xA6A7); a = y; ss_set_nz16(ss, a);/* C0A6A7 tya */
       S(0xA6A8, 3); t_index(ss);            /* C0A6A8 sta $0A8E,X */
-      t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 4 + x)), a);
+      t_write16(ss, ss_abs(ss, (entity_tile_job + 4 + x)), a);
       S(0xA6AB, 2);                         /* C0A6AB lda sprite_frame_bank */
-      a = t_read16(ss, dp + sprite_frame_bank);
+      a = t_read16_dp(ss, dp, sprite_frame_bank);
       ss_set_nz16(ss, a);
-      S(0xA6AD, 3); a = alu_ora16(ss, a, 0xFF00);  /* C0A6AD ora #$FF00 */
+      SIMM16(0xA6AD); a = alu_ora16(ss, a, 0xFF00);  /* C0A6AD ora #$FF00 */
       S(0xA6B0, 3); t_index(ss);            /* C0A6B0 sta $0A90,X */
-      t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), a);
+      t_write16(ss, ss_abs(ss, (entity_tile_job + 6 + x)), a);
       SI(0xA6B3); a = x; ss_set_nz16(ss, a);/* C0A6B3 txa */
       SI(0xA6B4); ss_set_c(ss, false);      /* C0A6B4 clc */
-      S(0xA6B5, 3); a = alu_adc16(ss, a, 0x0008);  /* C0A6B5 adc #$0008 */
+      SIMM16(0xA6B5); a = alu_adc16(ss, a, 0x0008);  /* C0A6B5 adc #$0008 */
       SI(0xA6B8); x = a; ss_set_nz16(ss, x);/* C0A6B8 tax */
     }
   }
   /* loc_C0A6B9 */
   S(0xA6B9, 3); t_write16(ss, ss_abs(ss, entity_tile_job_ptr), x);  /* C0A6B9 stx $0A88 */
   S(0xA6BC, 3); t_index(ss);                /* C0A6BC stz $0A90,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_tile_job + 6 + x)), 0);
+  t_write16(ss, ss_abs(ss, (entity_tile_job + 6 + x)), 0);
   goto loc_A6BF;
 
 loc_A560: ;
-  S(0xA560, 3);                             /* C0A560 jmp loc_C0A6BF */
+  SJMP(0xA560);                             /* C0A560 jmp loc_C0A6BF */
   /* fall through */
 
 loc_A6BF: ;
-  S(0xA6BF, 2); t_rmw16(ss, dp + entity_render_index, +1);  /* C0A6BF inc entity_render_index */
-  S(0xA6C1, 2); t_rmw16(ss, dp + entity_render_index, +1);  /* C0A6C1 inc entity_render_index */
+  S(0xA6BF, 2); t_rmw16(ss, t_dp(dp, entity_render_index), +1);  /* C0A6BF inc entity_render_index */
+  S(0xA6C1, 2); t_rmw16(ss, t_dp(dp, entity_render_index), +1);  /* C0A6C1 inc entity_render_index */
   S(0xA6C3, 2);                             /* C0A6C3 lda entity_render_index */
-  a = t_read16(ss, dp + entity_render_index);
+  a = t_read16_dp(ss, dp, entity_render_index);
   ss_set_nz16(ss, a);
-  S(0xA6C5, 3); alu_cmp16(ss, a, 0x0020);   /* C0A6C5 cmp #$0020 */
+  SIMM16(0xA6C5); alu_cmp16(ss, a, 0x0020);   /* C0A6C5 cmp #$0020 */
   {
     const bool done = ss_z(ss);
     S(0xA6C8, 1); t_branch(ss, done);       /* C0A6C8 beq loc_C0A6CD */
-    if(!done) { S(0xA6CA, 3); goto loc_A53D; }  /* C0A6CA jmp loc_C0A53D */
+    if(!done) { SJMP(0xA6CA); goto loc_A53D; }  /* C0A6CA jmp loc_C0A53D */
   }
 
 loc_A6CD: ;
@@ -1177,14 +1181,14 @@ void entity_render_order_reset(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
 
-  S(0xAEB9, 3); x = 0x0000; ss_set_nz16(ss, x);  /* C0AEB9 ldx #$0000 */
+  SIMM16(0xAEB9); x = 0x0000; ss_set_nz16(ss, x);  /* C0AEB9 ldx #$0000 */
   for(;;) {
     SI(0xAEBC); a = x; ss_set_nz16(ss, a);  /* C0AEBC txa */
     S(0xAEBD, 3); t_index(ss);              /* C0AEBD sta entity_render_order,X */
-    t_write16(ss, ss_abs(ss, (uint16_t) (entity_render_order + x)), a);
+    t_write16(ss, ss_abs(ss, (entity_render_order + x)), a);
     SI(0xAEC0); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);  /* C0AEC0 inx */
     SI(0xAEC1); x = (uint16_t) (x + 1); ss_set_nz16(ss, x);  /* C0AEC1 inx */
-    S(0xAEC2, 3); alu_cpx16(ss, x, 0x0020); /* C0AEC2 cpx #$0020 */
+    SIMM16(0xAEC2); alu_cpx16(ss, x, 0x0020); /* C0AEC2 cpx #$0020 */
     S(0xAEC5, 1); t_branch(ss, x != 0x0020);/* C0AEC5 bne loc_C0AEBC */
     if(x == 0x0020) break;
   }

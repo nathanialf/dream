@@ -76,9 +76,9 @@ static void t_push16(SnesState* ss, uint16_t v) {
 /* `lda [$A0],Y`: the pointer word and its bank byte come out of the direct page
  * with no interrupt latch between them, then the data read takes one. */
 static uint16_t t_read_ily(SnesState* ss, uint16_t dp, uint16_t off, uint16_t y) {
-  uint8_t lo = ss_bus_r8(ss, (uint16_t) (dp + off));
-  uint8_t hi = ss_bus_r8(ss, (uint16_t) (dp + off + 1));
-  uint8_t bank = ss_bus_r8(ss, (uint16_t) (dp + off + 2));
+  uint8_t lo = ss_bus_r8(ss, t_dp(dp, off));
+  uint8_t hi = ss_bus_r8(ss, t_dp(dp, off + 1));
+  uint8_t bank = ss_bus_r8(ss, t_dp(dp, off + 2));
   uint32_t ptr = ((uint32_t) bank << 16) | (uint16_t) (lo | (hi << 8));
   return t_read16(ss, (ptr + y) & 0xffffff);
 }
@@ -124,22 +124,22 @@ void anim_update(SnesState* ss) {
 
 restart:
   S(0xAEC8, 2);                             /* C0AEC8 stz $52 */
-  t_write16(ss, dp + anim_new_frame, 0);
+  t_write16_dp(ss, dp, anim_new_frame, 0);
   S(0xAECA, 3); t_index(ss);                /* C0AECA lda entity_anim_id,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_anim_id + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_anim_id + x)));
   ss_set_nz16(ss, a);
   S(0xAECD, 1); t_branch(ss, a == 0);       /* C0AECD beq loc_C0AF04 */
   if(a == 0) goto loc_C0AF04;
   S(0xAECF, 3); t_index(ss);                /* C0AECF cmp $0A48,X */
-  { uint16_t v = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A48 + x)));
+  { uint16_t v = t_read16(ss, ss_abs(ss, (entity_field_0A48 + x)));
     alu_cmp16(ss, a, v); }
   S(0xAED2, 1); t_branch(ss, ss_z(ss));     /* C0AED2 beq loc_C0AF05 */
   if(ss_z(ss)) goto loc_C0AF05;
 
   S(0xAED4, 3); t_index(ss);                /* C0AED4 stz $0A08,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)), 0);
+  t_write16(ss, ss_abs(ss, (entity_field_0A08 + x)), 0);
   S(0xAED7, 3); t_index(ss);                /* C0AED7 sta $0A48,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A48 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_field_0A48 + x)), a);
   SI(0xAEDA); y = x; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AEDA txy */
   SI(0xAEDB); x = a; ss_set_x(ss, x); ss_set_nz16(ss, x);  /* C0AEDB tax */
   S(0xAEDC, 4);                             /* C0AEDC lda anim_script_table,X */
@@ -147,37 +147,37 @@ restart:
   ss_set_nz16(ss, a);
   SI(0xAEE0); x = y; ss_set_x(ss, x); ss_set_nz16(ss, x);  /* C0AEE0 tyx */
   S(0xAEE1, 2);                             /* C0AEE1 sta $A0 */
-  t_write16(ss, dp + anim_script_ptr, a);
-  S(0xAEE3, 3); a = 0x00C4; ss_set_nz16(ss, a);  /* C0AEE3 lda #$00C4 */
+  t_write16_dp(ss, dp, anim_script_ptr, a);
+  SIMM16(0xAEE3); a = 0x00C4; ss_set_nz16(ss, a);  /* C0AEE3 lda #$00C4 */
   S(0xAEE6, 2);                             /* C0AEE6 sta $A2 */
-  t_write16(ss, dp + anim_script_bank, a);
-  S(0xAEE8, 3); y = 0x0006;                 /* C0AEE8 ldy #$0006 */
+  t_write16_dp(ss, dp, anim_script_bank, a);
+  SIMM16(0xAEE8); y = 0x0006;               /* C0AEE8 ldy #$0006 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xAEEB, 2);                             /* C0AEEB lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAEED, 1); t_branch(ss, a == 0);       /* C0AEED beq loc_C0AF01 */
   if(a == 0) goto loc_C0AF01;
-  S(0xAEEF, 3); y = 0x0004;                 /* C0AEEF ldy #$0004 */
+  SIMM16(0xAEEF); y = 0x0004;               /* C0AEEF ldy #$0004 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xAEF2, 2);                             /* C0AEF2 lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAEF4, 1); t_branch(ss, a != 0);       /* C0AEF4 bne loc_C0AEF9 */
   if(a == 0) {
-    S(0xAEF6, 3);                           /* C0AEF6 jmp loc_C0AF9B */
+    SJMP(0xAEF6);                           /* C0AEF6 jmp loc_C0AF9B */
     goto loc_C0AF9B;
   }
                                             /* loc_C0AEF9 */
   S(0xAEF9, 3); t_index(ss);                /* C0AEF9 sta $0A28,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A28 + x)), a);
-  S(0xAEFC, 3); a = 0x0000; ss_set_nz16(ss, a);  /* C0AEFC lda #$0000 */
+  t_write16(ss, ss_abs(ss, (entity_field_0A28 + x)), a);
+  SIMM16(0xAEFC); a = 0x0000; ss_set_nz16(ss, a);  /* C0AEFC lda #$0000 */
   S(0xAEFF, 1); t_branch(ss, true);         /* C0AEFF bra loc_C0AF30 */
   goto loc_C0AF30;
 
 loc_C0AF01:
   S(0xAF01, 3); t_index(ss);                /* C0AF01 sta entity_frame_id,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_frame_id + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_frame_id + x)), a);
 loc_C0AF04:
   ss_set_a(ss, a);
   S(0xAF04, 1);                             /* C0AF04 rtl */
@@ -192,30 +192,30 @@ loc_C0AF05:
   ss_set_nz16(ss, a);
   SI(0xAF0B); x = y; ss_set_x(ss, x); ss_set_nz16(ss, x);  /* C0AF0B tyx */
   S(0xAF0C, 2);                             /* C0AF0C sta $A0 */
-  t_write16(ss, dp + anim_script_ptr, a);
-  S(0xAF0E, 3); a = 0x00C4; ss_set_nz16(ss, a);  /* C0AF0E lda #$00C4 */
+  t_write16_dp(ss, dp, anim_script_ptr, a);
+  SIMM16(0xAF0E); a = 0x00C4; ss_set_nz16(ss, a);  /* C0AF0E lda #$00C4 */
   S(0xAF11, 2);                             /* C0AF11 sta $A2 */
-  t_write16(ss, dp + anim_script_bank, a);
-  S(0xAF13, 3); y = 0x0006;                 /* C0AF13 ldy #$0006 */
+  t_write16_dp(ss, dp, anim_script_bank, a);
+  SIMM16(0xAF13); y = 0x0006;               /* C0AF13 ldy #$0006 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xAF16, 2);                             /* C0AF16 lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAF18, 1); t_branch(ss, a == 0);       /* C0AF18 beq loc_C0AF01 */
   if(a == 0) goto loc_C0AF01;
-  S(0xAF1A, 3); y = 0x0004;                 /* C0AF1A ldy #$0004 */
+  SIMM16(0xAF1A); y = 0x0004;               /* C0AF1A ldy #$0004 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xAF1D, 2);                             /* C0AF1D lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAF1F, 1); t_branch(ss, a != 0);       /* C0AF1F bne loc_C0AF24 */
   if(a == 0) {
-    S(0xAF21, 3);                           /* C0AF21 jmp loc_C0AF9B */
+    SJMP(0xAF21);                           /* C0AF21 jmp loc_C0AF9B */
     goto loc_C0AF9B;
   }
                                             /* loc_C0AF24 */
   S(0xAF24, 3); t_index(ss);                /* C0AF24 dec $0A28,X */
-  { const uint32_t adr = ss_abs(ss, (uint16_t) (entity_field_0A28 + x));
+  { const uint32_t adr = ss_abs(ss, (entity_field_0A28 + x));
     uint16_t v = (uint16_t) (t_rmw_r16(ss, adr) - 1);
     ss_idle(ss);
     t_rmw_w16(ss, adr, v);
@@ -223,34 +223,34 @@ loc_C0AF05:
   S(0xAF27, 1); t_branch(ss, !ss_n(ss));    /* C0AF27 bpl loc_C0AF44 */
   if(!ss_n(ss)) goto loc_C0AF44;
   S(0xAF29, 3); t_index(ss);                /* C0AF29 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
   SI(0xAF2C); ss_set_c(ss, false);          /* C0AF2C clc */
-  S(0xAF2D, 3); a = alu_adc16(ss, a, 0x0008);  /* C0AF2D adc #$0008 */
+  SIMM16(0xAF2D); a = alu_adc16(ss, a, 0x0008);  /* C0AF2D adc #$0008 */
 
 loc_C0AF30:
   S(0xAF30, 3); t_index(ss);                /* C0AF30 sta $0A08,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_field_0A08 + x)), a);
   S(0xAF33, 3); t_index(ss);                /* C0AF33 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
-  S(0xAF36, 3); a = alu_ora16(ss, a, 0x0004);  /* C0AF36 ora #$0004 */
+  SIMM16(0xAF36); a = alu_ora16(ss, a, 0x0004);  /* C0AF36 ora #$0004 */
   SI(0xAF39); y = a; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AF39 tay */
   S(0xAF3A, 2);                             /* C0AF3A lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAF3C, 3); t_index(ss);                /* C0AF3C sta $0A28,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A28 + x)), a);
-  S(0xAF3F, 3); a = 0x0001; ss_set_nz16(ss, a);  /* C0AF3F lda #$0001 */
+  t_write16(ss, ss_abs(ss, (entity_field_0A28 + x)), a);
+  SIMM16(0xAF3F); a = 0x0001; ss_set_nz16(ss, a);  /* C0AF3F lda #$0001 */
   S(0xAF42, 2);                             /* C0AF42 sta $52 */
-  t_write16(ss, dp + anim_new_frame, a);
+  t_write16_dp(ss, dp, anim_new_frame, a);
 
 loc_C0AF44:
   S(0xAF44, 3); t_index(ss);                /* C0AF44 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
-  S(0xAF47, 3); a = alu_and16(ss, a, 0x0FF8);  /* C0AF47 and #$0FF8 */
-  S(0xAF4A, 3); a = alu_ora16(ss, a, 0x0004);  /* C0AF4A ora #$0004 */
+  SIMM16(0xAF47); a = alu_and16(ss, a, 0x0FF8);  /* C0AF47 and #$0FF8 */
+  SIMM16(0xAF4A); a = alu_ora16(ss, a, 0x0004);  /* C0AF4A ora #$0004 */
   SI(0xAF4D); y = a; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AF4D tay */
   S(0xAF4E, 2);                             /* C0AF4E lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
@@ -258,14 +258,14 @@ loc_C0AF44:
   SI(0xAF50); y = (uint16_t) (y + 1); ss_set_y(ss, y); ss_set_nz16(ss, y);  /* iny */
   SI(0xAF51); y = (uint16_t) (y + 1); ss_set_y(ss, y); ss_set_nz16(ss, y);  /* iny */
   SI(0xAF52); ss_set_c(ss, true);           /* C0AF52 sec */
-  S(0xAF53, 3); a = alu_sbc16(ss, a, 0xFFFE);  /* C0AF53 sbc #$FFFE */
+  SIMM16(0xAF53); a = alu_sbc16(ss, a, 0xFFFE);  /* C0AF53 sbc #$FFFE */
   S(0xAF56, 1); t_branch(ss, ss_c(ss));     /* C0AF56 bcs loc_C0AF5D */
   if(!ss_c(ss)) {
     S(0xAF58, 2);                           /* C0AF58 lda [$A0],Y */
     a = t_read_ily(ss, dp, anim_script_ptr, y);
     ss_set_nz16(ss, a);
     S(0xAF5A, 3); t_index(ss);              /* C0AF5A sta entity_frame_id,X */
-    t_write16(ss, ss_abs(ss, (uint16_t) (entity_frame_id + x)), a);
+    t_write16(ss, ss_abs(ss, (entity_frame_id + x)), a);
   }
                                             /* loc_C0AF5D */
   SI(0xAF5D); y = (uint16_t) (y - 1); ss_set_y(ss, y); ss_set_nz16(ss, y);  /* dey */
@@ -277,14 +277,14 @@ loc_C0AF44:
   ss_set_nz16(ss, a);
   S(0xAF63, 1); t_branch(ss, a == 0);       /* C0AF63 beq loc_C0AF7C */
   if(a == 0) goto loc_C0AF7C;
-  S(0xAF65, 3); alu_cmp16(ss, a, 0x0002);   /* C0AF65 cmp #$0002 */
+  SIMM16(0xAF65); alu_cmp16(ss, a, 0x0002);   /* C0AF65 cmp #$0002 */
   S(0xAF68, 1); t_branch(ss, a == 0x0002);  /* C0AF68 beq loc_C0AF73 */
   if(a != 0x0002) {
-    S(0xAF6A, 3); alu_cmp16(ss, a, 0x0001); /* C0AF6A cmp #$0001 */
+    SIMM16(0xAF6A); alu_cmp16(ss, a, 0x0001); /* C0AF6A cmp #$0001 */
     S(0xAF6D, 1); t_branch(ss, a != 0x0001);  /* C0AF6D bne loc_C0AF7C */
     if(a != 0x0001) goto loc_C0AF7C;
     S(0xAF6F, 2);                           /* C0AF6F lda $52 */
-    a = t_read16(ss, dp + anim_new_frame);
+    a = t_read16_dp(ss, dp, anim_new_frame);
     ss_set_nz16(ss, a);
     S(0xAF71, 1); t_branch(ss, a == 0);     /* C0AF71 beq loc_C0AF7C */
     if(a == 0) goto loc_C0AF7C;
@@ -296,23 +296,23 @@ loc_C0AF44:
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAF77, 2);                             /* C0AF77 sta ptr_04 */
-  t_write16(ss, dp + ptr_04, a);
+  t_write16_dp(ss, dp, ptr_04, a);
   S(0xAF79, 3);                             /* C0AF79 jsr anim_callback_dispatch */
   if(t_call_sub(ss, pb, 0xB022)) return;
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
 loc_C0AF7C:
   S(0xAF7C, 3); t_index(ss);                /* C0AF7C lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
-  S(0xAF7F, 3); a = alu_and16(ss, a, 0x0FF8);  /* C0AF7F and #$0FF8 */
-  S(0xAF82, 3); a = alu_ora16(ss, a, 0x0004);  /* C0AF82 ora #$0004 */
+  SIMM16(0xAF7F); a = alu_and16(ss, a, 0x0FF8);  /* C0AF7F and #$0FF8 */
+  SIMM16(0xAF82); a = alu_ora16(ss, a, 0x0004);  /* C0AF82 ora #$0004 */
   SI(0xAF85); y = a; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AF85 tay */
   S(0xAF86, 2);                             /* C0AF86 lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   SI(0xAF88); ss_set_c(ss, true);           /* C0AF88 sec */
-  S(0xAF89, 3); a = alu_sbc16(ss, a, 0xFFFE);  /* C0AF89 sbc #$FFFE */
+  SIMM16(0xAF89); a = alu_sbc16(ss, a, 0xFFFE);  /* C0AF89 sbc #$FFFE */
   S(0xAF8C, 1); t_branch(ss, a == 0);       /* C0AF8C beq loc_C0AF30 */
   if(a == 0) goto loc_C0AF30;
   S(0xAF8E, 1); t_branch(ss, !ss_c(ss));    /* C0AF8E bcc loc_C0AF9A */
@@ -328,69 +328,69 @@ loc_C0AF7C:
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAF94, 3); t_index(ss);                /* C0AF94 sta entity_anim_id,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_anim_id + x)), a);
-  S(0xAF97, 3);                             /* C0AF97 jmp anim_update */
+  t_write16(ss, ss_abs(ss, (entity_anim_id + x)), a);
+  SJMP(0xAF97);                             /* C0AF97 jmp anim_update */
   goto restart;
 
 loc_C0AF9B:
   S(0xAF9B, 3); t_index(ss);                /* C0AF9B lda entity_anim_rate,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_anim_rate + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_anim_rate + x)));
   ss_set_nz16(ss, a);
-  S(0xAF9E, 3); alu_cmp16(ss, a, 0x0100);   /* C0AF9E cmp #$0100 */
+  SIMM16(0xAF9E); alu_cmp16(ss, a, 0x0100);   /* C0AF9E cmp #$0100 */
   S(0xAFA1, 1); t_branch(ss, !ss_c(ss));    /* C0AFA1 bcc loc_C0AFA6 */
   if(ss_c(ss)) {
-    S(0xAFA3, 3); a = 0x0100; ss_set_nz16(ss, a);  /* C0AFA3 lda #$0100 */
+    SIMM16(0xAFA3); a = 0x0100; ss_set_nz16(ss, a);  /* C0AFA3 lda #$0100 */
   }
                                             /* loc_C0AFA6 */
   SI(0xAFA6); ss_set_c(ss, false);          /* C0AFA6 clc */
   S(0xAFA7, 3); t_index(ss);                /* C0AFA7 adc $0A28,X */
-  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A28 + x))));
+  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (entity_field_0A28 + x))));
   S(0xAFAA, 2);                             /* C0AFAA sta $18 */
-  t_write16(ss, dp + scratch_18, a);
-  S(0xAFAC, 3); a = alu_and16(ss, a, 0x00FF);  /* C0AFAC and #$00FF */
+  t_write16_dp(ss, dp, scratch_18, a);
+  SIMM16(0xAFAC); a = alu_and16(ss, a, 0x00FF);  /* C0AFAC and #$00FF */
   S(0xAFAF, 3); t_index(ss);                /* C0AFAF sta $0A28,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A28 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_field_0A28 + x)), a);
   S(0xAFB2, 3); t_index(ss);                /* C0AFB2 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
   S(0xAFB5, 2);                             /* C0AFB5 sta $52 */
-  t_write16(ss, dp + anim_new_frame, a);
+  t_write16_dp(ss, dp, anim_new_frame, a);
   S(0xAFB7, 2);                             /* C0AFB7 lda $19 (the high byte of $18) */
-  a = t_read16(ss, dp + scratch_18 + 1);
+  a = t_read16_dp(ss, dp, scratch_18 + 1);
   ss_set_nz16(ss, a);
-  S(0xAFB9, 3); a = alu_and16(ss, a, 0x00FF);  /* C0AFB9 and #$00FF */
+  SIMM16(0xAFB9); a = alu_and16(ss, a, 0x00FF);  /* C0AFB9 and #$00FF */
   SI(0xAFBC); ss_set_c(ss, false);          /* C0AFBC clc */
   S(0xAFBD, 3); t_index(ss);                /* C0AFBD adc $0A08,X */
-  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x))));
+  a = alu_adc16(ss, a, t_read16(ss, ss_abs(ss, (entity_field_0A08 + x))));
   S(0xAFC0, 3); t_index(ss);                /* C0AFC0 sta $0A08,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_field_0A08 + x)), a);
   SI(0xAFC3); ss_set_c(ss, true);           /* C0AFC3 sec */
   S(0xAFC4, 2);                             /* C0AFC4 sbc $52 */
-  a = alu_sbc16(ss, a, t_read16(ss, dp + anim_new_frame));
+  a = alu_sbc16(ss, a, t_read16_dp(ss, dp, anim_new_frame));
   S(0xAFC6, 2);                             /* C0AFC6 sta $52 */
-  t_write16(ss, dp + anim_new_frame, a);
+  t_write16_dp(ss, dp, anim_new_frame, a);
   S(0xAFC8, 3); t_index(ss);                /* C0AFC8 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
   SI(0xAFCB); a = alu_asl16(ss, a);         /* C0AFCB asl A */
   SI(0xAFCC); a = alu_asl16(ss, a);         /* C0AFCC asl A */
   SI(0xAFCD); a = alu_asl16(ss, a);         /* C0AFCD asl A */
-  S(0xAFCE, 3); a = alu_and16(ss, a, 0x0FF8);  /* C0AFCE and #$0FF8 */
-  S(0xAFD1, 3); a = alu_ora16(ss, a, 0x0002);  /* C0AFD1 ora #$0002 */
+  SIMM16(0xAFCE); a = alu_and16(ss, a, 0x0FF8);  /* C0AFCE and #$0FF8 */
+  SIMM16(0xAFD1); a = alu_ora16(ss, a, 0x0002);  /* C0AFD1 ora #$0002 */
   SI(0xAFD4); y = a; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AFD4 tay */
   S(0xAFD5, 2);                             /* C0AFD5 lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAFD7, 1); t_branch(ss, a == 0);       /* C0AFD7 beq loc_C0AFF0 */
   if(a == 0) goto loc_C0AFF0;
-  S(0xAFD9, 3); alu_cmp16(ss, a, 0x0002);   /* C0AFD9 cmp #$0002 */
+  SIMM16(0xAFD9); alu_cmp16(ss, a, 0x0002);   /* C0AFD9 cmp #$0002 */
   S(0xAFDC, 1); t_branch(ss, a == 0x0002);  /* C0AFDC beq loc_C0AFE7 */
   if(a != 0x0002) {
-    S(0xAFDE, 3); alu_cmp16(ss, a, 0x0001); /* C0AFDE cmp #$0001 */
+    SIMM16(0xAFDE); alu_cmp16(ss, a, 0x0001); /* C0AFDE cmp #$0001 */
     S(0xAFE1, 1); t_branch(ss, a != 0x0001);  /* C0AFE1 bne loc_C0AFF0 */
     if(a != 0x0001) goto loc_C0AFF0;
     S(0xAFE3, 2);                           /* C0AFE3 lda $52 */
-    a = t_read16(ss, dp + anim_new_frame);
+    a = t_read16_dp(ss, dp, anim_new_frame);
     ss_set_nz16(ss, a);
     S(0xAFE5, 1); t_branch(ss, a == 0);     /* C0AFE5 beq loc_C0AFF0 */
     if(a == 0) goto loc_C0AFF0;
@@ -402,26 +402,26 @@ loc_C0AF9B:
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xAFEB, 2);                             /* C0AFEB sta ptr_04 */
-  t_write16(ss, dp + ptr_04, a);
+  t_write16_dp(ss, dp, ptr_04, a);
   S(0xAFED, 3);                             /* C0AFED jsr anim_callback_dispatch */
   if(t_call_sub(ss, pb, 0xB022)) return;
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
 
 loc_C0AFF0:
   S(0xAFF0, 3); t_index(ss);                /* C0AFF0 lda $0A08,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_field_0A08 + x)));
   ss_set_nz16(ss, a);
   SI(0xAFF3); a = alu_asl16(ss, a);         /* C0AFF3 asl A */
   SI(0xAFF4); a = alu_asl16(ss, a);         /* C0AFF4 asl A */
   SI(0xAFF5); a = alu_asl16(ss, a);         /* C0AFF5 asl A */
-  S(0xAFF6, 3); a = alu_and16(ss, a, 0x0FF8);  /* C0AFF6 and #$0FF8 */
-  S(0xAFF9, 3); a = alu_ora16(ss, a, 0x0004);  /* C0AFF9 ora #$0004 */
+  SIMM16(0xAFF6); a = alu_and16(ss, a, 0x0FF8);  /* C0AFF6 and #$0FF8 */
+  SIMM16(0xAFF9); a = alu_ora16(ss, a, 0x0004);  /* C0AFF9 ora #$0004 */
   SI(0xAFFC); y = a; ss_set_y(ss, y); ss_set_nz16(ss, y);  /* C0AFFC tay */
   S(0xAFFD, 2);                             /* C0AFFD lda [$A0],Y */
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   SI(0xAFFF); ss_set_c(ss, true);           /* C0AFFF sec */
-  S(0xB000, 3); a = alu_sbc16(ss, a, 0xFFFE);  /* C0B000 sbc #$FFFE */
+  SIMM16(0xB000); a = alu_sbc16(ss, a, 0xFFFE);  /* C0B000 sbc #$FFFE */
   S(0xB003, 1); t_branch(ss, a == 0);       /* C0B003 beq loc_C0B011 */
   if(a != 0) {
     S(0xB005, 1); t_branch(ss, !ss_c(ss));  /* C0B005 bcc loc_C0B01A */
@@ -432,17 +432,17 @@ loc_C0AFF0:
     a = t_read_ily(ss, dp, anim_script_ptr, y);
     ss_set_nz16(ss, a);
     S(0xB00B, 3); t_index(ss);              /* C0B00B sta entity_anim_id,X */
-    t_write16(ss, ss_abs(ss, (uint16_t) (entity_anim_id + x)), a);
-    S(0xB00E, 3);                           /* C0B00E jmp anim_update */
+    t_write16(ss, ss_abs(ss, (entity_anim_id + x)), a);
+    SJMP(0xB00E);                           /* C0B00E jmp anim_update */
     goto restart;
   }
                                             /* loc_C0B011 */
-  S(0xB011, 3); y = 0x0004;                 /* C0B011 ldy #$0004 */
+  SIMM16(0xB011); y = 0x0004;               /* C0B011 ldy #$0004 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xB014, 3); t_index(ss);                /* C0B014 stz $0A28,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A28 + x)), 0);
+  t_write16(ss, ss_abs(ss, (entity_field_0A28 + x)), 0);
   S(0xB017, 3); t_index(ss);                /* C0B017 stz $0A08,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_field_0A08 + x)), 0);
+  t_write16(ss, ss_abs(ss, (entity_field_0A08 + x)), 0);
 
 loc_C0B01A:
   SI(0xB01A); y = (uint16_t) (y + 1); ss_set_y(ss, y); ss_set_nz16(ss, y);  /* iny */
@@ -451,7 +451,7 @@ loc_C0B01A:
   a = t_read_ily(ss, dp, anim_script_ptr, y);
   ss_set_nz16(ss, a);
   S(0xB01E, 3); t_index(ss);                /* C0B01E sta entity_frame_id,X */
-  t_write16(ss, ss_abs(ss, (uint16_t) (entity_frame_id + x)), a);
+  t_write16(ss, ss_abs(ss, (entity_frame_id + x)), a);
   ss_set_a(ss, a);
   S(0xB021, 1);                             /* C0B021 rtl */
   ss_rtl(ss);
@@ -560,40 +560,40 @@ void anim_cb_sfx_0704(SnesState* ss) {
   bool far_variant;
 
   S(0xB025, 2);                             /* C0B025 lda game_mode */
-  a = t_read16(ss, dp + game_mode);
+  a = t_read16_dp(ss, dp, game_mode);
   ss_set_nz16(ss, a);
-  S(0xB027, 3); alu_cmp16(ss, a, 0x0002);   /* C0B027 cmp #$0002 */
+  SIMM16(0xB027); alu_cmp16(ss, a, 0x0002);   /* C0B027 cmp #$0002 */
   S(0xB02A, 1); t_branch(ss, a != 0x0002);  /* C0B02A bne loc_C0B039 */
   if(a == 0x0002) {
     S(0xB02C, 3); t_index(ss);              /* C0B02C lda entity_x,X */
-    a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x)));
+    a = t_read16(ss, ss_abs(ss, (entity_x + x)));
     ss_set_nz16(ss, a);
-    S(0xB02F, 3); alu_cmp16(ss, a, 0x0748); /* C0B02F cmp #$0748 */
+    SIMM16(0xB02F); alu_cmp16(ss, a, 0x0748); /* C0B02F cmp #$0748 */
     S(0xB032, 1); t_branch(ss, !ss_c(ss));  /* C0B032 bcc loc_C0B048 */
     if(!ss_c(ss)) { far_variant = true; goto emit; }
-    S(0xB034, 3); alu_cmp16(ss, a, 0x07B0); /* C0B034 cmp #$07B0 */
+    SIMM16(0xB034); alu_cmp16(ss, a, 0x07B0); /* C0B034 cmp #$07B0 */
     S(0xB037, 1); t_branch(ss, !ss_c(ss));  /* C0B037 bcc loc_C0B04D */
     if(!ss_c(ss)) { far_variant = false; goto emit; }
   }
                                             /* loc_C0B039 */
-  S(0xB039, 3); a = alu_and16(ss, a, 0xFFFF);  /* C0B039 and #$FFFF */
+  SIMM16(0xB039); a = alu_and16(ss, a, 0xFFFF);  /* C0B039 and #$FFFF */
   S(0xB03C, 1); t_branch(ss, a != 0);       /* C0B03C bne loc_C0B048 */
   if(a != 0) { far_variant = true; goto emit; }
   S(0xB03E, 3); t_index(ss);                /* C0B03E lda entity_x,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_x + x)));
   ss_set_nz16(ss, a);
   S(0xB041, 1); t_branch(ss, (a & 0x8000) != 0);  /* C0B041 bmi loc_C0B04D */
   if((a & 0x8000) != 0) { far_variant = false; goto emit; }
-  S(0xB043, 3); alu_cmp16(ss, a, 0x0090);   /* C0B043 cmp #$0090 */
+  SIMM16(0xB043); alu_cmp16(ss, a, 0x0090);   /* C0B043 cmp #$0090 */
   S(0xB046, 1); t_branch(ss, !ss_c(ss));    /* C0B046 bcc loc_C0B04D */
   far_variant = ss_c(ss);
 
 emit:
   if(far_variant) {
-    S(0xB048, 3); a = 0x0704; ss_set_nz16(ss, a);  /* C0B048 lda #$0704 */
+    SIMM16(0xB048); a = 0x0704; ss_set_nz16(ss, a);  /* C0B048 lda #$0704 */
     S(0xB04B, 1); t_branch(ss, true);       /* C0B04B bra play_sound_effect */
   } else {
-    S(0xB04D, 3); a = 0x0705; ss_set_nz16(ss, a);  /* C0B04D lda #$0705 */
+    SIMM16(0xB04D); a = 0x0705; ss_set_nz16(ss, a);  /* C0B04D lda #$0705 */
     S(0xB050, 1); t_branch(ss, true);       /* C0B050 bra play_sound_effect */
   }
   ss_set_a(ss, a);
@@ -607,18 +607,18 @@ void anim_cb_sfx_060E(SnesState* ss) {
   bool far_variant;
 
   S(0xB08F, 2);                             /* C0B08F lda game_mode */
-  a = t_read16(ss, dp + game_mode);
+  a = t_read16_dp(ss, dp, game_mode);
   ss_set_nz16(ss, a);
-  S(0xB091, 3); alu_cmp16(ss, a, 0x0002);   /* C0B091 cmp #$0002 */
+  SIMM16(0xB091); alu_cmp16(ss, a, 0x0002);   /* C0B091 cmp #$0002 */
   S(0xB094, 1); t_branch(ss, a != 0x0002);  /* C0B094 bne loc_C0B0A5 */
   if(a == 0x0002) {
     S(0xB096, 3); t_index(ss);              /* C0B096 lda entity_x,X */
-    a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x)));
+    a = t_read16(ss, ss_abs(ss, (entity_x + x)));
     ss_set_nz16(ss, a);
-    S(0xB099, 3); alu_cmp16(ss, a, 0x0748); /* C0B099 cmp #$0748 */
+    SIMM16(0xB099); alu_cmp16(ss, a, 0x0748); /* C0B099 cmp #$0748 */
     S(0xB09C, 1); t_branch(ss, !ss_c(ss));  /* C0B09C bcc loc_C0B0B2 */
     if(!ss_c(ss)) { far_variant = true; goto emit; }
-    S(0xB09E, 3); alu_cmp16(ss, a, 0x07B0); /* C0B09E cmp #$07B0 */
+    SIMM16(0xB09E); alu_cmp16(ss, a, 0x07B0); /* C0B09E cmp #$07B0 */
     S(0xB0A1, 1); t_branch(ss, !ss_c(ss));  /* C0B0A1 bcc loc_C0B0B7 */
     if(!ss_c(ss)) { far_variant = false; goto emit; }
     S(0xB0A3, 1); t_branch(ss, true);       /* C0B0A3 bra loc_C0B0B2 */
@@ -626,22 +626,22 @@ void anim_cb_sfx_060E(SnesState* ss) {
     goto emit;
   }
                                             /* loc_C0B0A5 */
-  S(0xB0A5, 3); a = alu_and16(ss, a, 0xFFFF);  /* C0B0A5 and #$FFFF */
+  SIMM16(0xB0A5); a = alu_and16(ss, a, 0xFFFF);  /* C0B0A5 and #$FFFF */
   S(0xB0A8, 1); t_branch(ss, a != 0);       /* C0B0A8 bne loc_C0B0B2 */
   if(a != 0) { far_variant = true; goto emit; }
   S(0xB0AA, 3); t_index(ss);                /* C0B0AA lda entity_x,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_x + x)));
   ss_set_nz16(ss, a);
-  S(0xB0AD, 3); alu_cmp16(ss, a, 0x0090);   /* C0B0AD cmp #$0090 */
+  SIMM16(0xB0AD); alu_cmp16(ss, a, 0x0090);   /* C0B0AD cmp #$0090 */
   S(0xB0B0, 1); t_branch(ss, !ss_c(ss));    /* C0B0B0 bcc loc_C0B0B7 */
   far_variant = ss_c(ss);
 
 emit:
   if(far_variant) {
-    S(0xB0B2, 3); a = 0x060E; ss_set_nz16(ss, a);  /* C0B0B2 lda #$060E */
+    SIMM16(0xB0B2); a = 0x060E; ss_set_nz16(ss, a);  /* C0B0B2 lda #$060E */
     S(0xB0B5, 1); t_branch(ss, true);       /* C0B0B5 bra play_sound_effect */
   } else {
-    S(0xB0B7, 3); a = 0x060D; ss_set_nz16(ss, a);  /* C0B0B7 lda #$060D */
+    SIMM16(0xB0B7); a = 0x060D; ss_set_nz16(ss, a);  /* C0B0B7 lda #$060D */
     S(0xB0BA, 1); t_branch(ss, true);       /* C0B0BA bra play_sound_effect */
   }
   ss_set_a(ss, a);
@@ -663,24 +663,24 @@ void play_footstep_sound(SnesState* ss) {
   const uint16_t dp = ss_dp(ss);
 
   S(0xB075, 2);                             /* C0B075 lda walk_cycle_parity */
-  a = t_read16(ss, dp + walk_cycle_parity);
+  a = t_read16_dp(ss, dp, walk_cycle_parity);
   ss_set_nz16(ss, a);
   S(0xB077, 1); t_branch(ss, a == 0);       /* C0B077 beq loc_C0B084 */
   if(a != 0) {
-    S(0xB079, 3); a = 0x050A; ss_set_nz16(ss, a);  /* C0B079 lda #$050A */
+    SIMM16(0xB079); a = 0x050A; ss_set_nz16(ss, a);  /* C0B079 lda #$050A */
     S(0xB07C, 3);                           /* C0B07C jsr play_sound_effect */
     ss_set_a(ss, a);
     if(t_call_sub(ss, pb, 0xB0C5)) return;
     a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
-    S(0xB07F, 3); a = 0x0710; ss_set_nz16(ss, a);  /* C0B07F lda #$0710 */
+    SIMM16(0xB07F); a = 0x0710; ss_set_nz16(ss, a);  /* C0B07F lda #$0710 */
     S(0xB082, 1); t_branch(ss, true);       /* C0B082 bra play_sound_effect */
   } else {                                  /* loc_C0B084 */
-    S(0xB084, 3); a = 0x0712; ss_set_nz16(ss, a);  /* C0B084 lda #$0712 */
+    SIMM16(0xB084); a = 0x0712; ss_set_nz16(ss, a);  /* C0B084 lda #$0712 */
     S(0xB087, 3);                           /* C0B087 jsr play_sound_effect */
     ss_set_a(ss, a);
     if(t_call_sub(ss, pb, 0xB0C5)) return;
     a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
-    S(0xB08A, 3); a = 0x050B; ss_set_nz16(ss, a);  /* C0B08A lda #$050B */
+    SIMM16(0xB08A); a = 0x050B; ss_set_nz16(ss, a);  /* C0B08A lda #$050B */
     S(0xB08D, 1); t_branch(ss, true);       /* C0B08D bra play_sound_effect */
   }
   ss_set_a(ss, a);
@@ -691,12 +691,12 @@ void play_zone_transition_sound(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
 
-  S(0xB0BC, 3); a = 0x050F; ss_set_nz16(ss, a);  /* C0B0BC lda #$050F */
+  SIMM16(0xB0BC); a = 0x050F; ss_set_nz16(ss, a);  /* C0B0BC lda #$050F */
   S(0xB0BF, 3);                             /* C0B0BF jsr play_sound_effect */
   ss_set_a(ss, a);
   if(t_call_sub(ss, pb, 0xB0C5)) return;
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
-  S(0xB0C2, 3); a = 0x0611; ss_set_nz16(ss, a);  /* C0B0C2 lda #$0611 */
+  SIMM16(0xB0C2); a = 0x0611; ss_set_nz16(ss, a);  /* C0B0C2 lda #$0611 */
   ss_set_a(ss, a);
   play_sound_effect_body(ss);               /* falls through into $B0C5 */
 }
@@ -718,10 +718,10 @@ void anim_cb_hit_player(SnesState* ss) {
   ss_set_nz16(ss, a);
   S(0xB0D1, 1); t_branch(ss, a != 0);       /* C0B0D1 bne loc_C0B0EC */
   if(a != 0) goto loc_C0B0EC;
-  S(0xB0D3, 3); y = 0x0000;                 /* C0B0D3 ldy #$0000 */
+  SIMM16(0xB0D3); y = 0x0000;               /* C0B0D3 ldy #$0000 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xB0D6, 3); t_index(ss);                /* C0B0D6 bit entity_flags,X */
-  alu_bit16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_flags + x))));
+  alu_bit16(ss, a, t_read16(ss, ss_abs(ss, (entity_flags + x))));
   S(0xB0D9, 1); t_branch(ss, !ss_v(ss));    /* C0B0D9 bvc loc_C0B0ED */
   if(ss_v(ss)) {
     S(0xB0DB, 3);                           /* C0B0DB lda entity_x (player) */
@@ -729,13 +729,13 @@ void anim_cb_hit_player(SnesState* ss) {
     ss_set_nz16(ss, a);
     SI(0xB0DE); ss_set_c(ss, true);         /* C0B0DE sec */
     S(0xB0DF, 3); t_index(ss);              /* C0B0DF sbc entity_x,X */
-    a = alu_sbc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x))));
+    a = alu_sbc16(ss, a, t_read16(ss, ss_abs(ss, (entity_x + x))));
     S(0xB0E2, 1); t_branch(ss, (a & 0x8000) == 0);  /* C0B0E2 bpl loc_C0B0EC */
     if((a & 0x8000) == 0) goto loc_C0B0EC;
-    S(0xB0E4, 3); alu_cmp16(ss, a, 0xFFC0); /* C0B0E4 cmp #$FFC0 */
+    SIMM16(0xB0E4); alu_cmp16(ss, a, 0xFFC0); /* C0B0E4 cmp #$FFC0 */
     S(0xB0E7, 1); t_branch(ss, !ss_c(ss));  /* C0B0E7 bcc loc_C0B0EC */
     if(!ss_c(ss)) goto loc_C0B0EC;
-    S(0xB0E9, 3);                           /* C0B0E9 jmp entity_hit_react */
+    SJMP(0xB0E9);                           /* C0B0E9 jmp entity_hit_react */
     ss_set_a(ss, a);
     ss_set_pc(ss, pb, 0xB171);
     return;
@@ -746,13 +746,13 @@ void anim_cb_hit_player(SnesState* ss) {
   ss_set_nz16(ss, a);
   SI(0xB0F0); ss_set_c(ss, true);           /* C0B0F0 sec */
   S(0xB0F1, 3); t_index(ss);                /* C0B0F1 sbc entity_x,X */
-  a = alu_sbc16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x))));
+  a = alu_sbc16(ss, a, t_read16(ss, ss_abs(ss, (entity_x + x))));
   S(0xB0F4, 1); t_branch(ss, (a & 0x8000) != 0);  /* C0B0F4 bmi loc_C0B0EC */
   if((a & 0x8000) != 0) goto loc_C0B0EC;
-  S(0xB0F6, 3); alu_cmp16(ss, a, 0x0040);   /* C0B0F6 cmp #$0040 */
+  SIMM16(0xB0F6); alu_cmp16(ss, a, 0x0040);   /* C0B0F6 cmp #$0040 */
   S(0xB0F9, 1); t_branch(ss, ss_c(ss));     /* C0B0F9 bcs loc_C0B0EC */
   if(ss_c(ss)) goto loc_C0B0EC;
-  S(0xB0FB, 3);                             /* C0B0FB jmp entity_hit_react */
+  SJMP(0xB0FB);                             /* C0B0FB jmp entity_hit_react */
   ss_set_a(ss, a);
   ss_set_pc(ss, pb, 0xB171);
   return;
@@ -777,22 +777,22 @@ void anim_cb_hit_enemies(SnesState* ss) {
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
   const uint16_t dp = ss_dp(ss);
 
-  S(0xB0FE, 3); a = 0x0703; ss_set_nz16(ss, a);  /* C0B0FE lda #$0703 */
+  SIMM16(0xB0FE); a = 0x0703; ss_set_nz16(ss, a);  /* C0B0FE lda #$0703 */
   S(0xB101, 3);                             /* C0B101 jsr play_sound_effect */
   ss_set_a(ss, a);
   if(t_call_sub(ss, pb, 0xB0C5)) return;
   a = ss_a(ss); x = ss_x(ss); y = ss_y(ss);
-  S(0xB104, 3); y = 0x0004;                 /* C0B104 ldy #$0004 */
+  SIMM16(0xB104); y = 0x0004;               /* C0B104 ldy #$0004 */
   ss_set_y(ss, y); ss_set_nz16(ss, y);
   S(0xB107, 2);                             /* C0B107 stx ptr_04 */
-  t_write16(ss, dp + ptr_04, x);
+  t_write16_dp(ss, dp, ptr_04, x);
   S(0xB109, 3); t_index(ss);                /* C0B109 lda entity_x,X */
-  a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + x)));
+  a = t_read16(ss, ss_abs(ss, (entity_x + x)));
   ss_set_nz16(ss, a);
   S(0xB10C, 2);                             /* C0B10C sta $06 */
-  t_write16(ss, dp + scratch_06, a);
+  t_write16_dp(ss, dp, scratch_06, a);
   S(0xB10E, 3); t_index(ss);                /* C0B10E bit entity_flags,X */
-  alu_bit16(ss, a, t_read16(ss, ss_abs(ss, (uint16_t) (entity_flags + x))));
+  alu_bit16(ss, a, t_read16(ss, ss_abs(ss, (entity_flags + x))));
   S(0xB111, 1); t_branch(ss, !ss_v(ss));    /* C0B111 bvc loc_C0B142 */
 
   /* The two sweeps differ only in the sign test and the reach constant, so the
@@ -803,16 +803,16 @@ void anim_cb_hit_enemies(SnesState* ss) {
     const uint16_t base = second ? 0xB142 : 0xB113;
     for(;;) {
       S(base + 0, 2);                       /* C0B113 cpy ptr_04 */
-      alu_cmp16(ss, y, t_read16(ss, dp + ptr_04));
+      alu_cmp16(ss, y, t_read16_dp(ss, dp, ptr_04));
       S(base + 2, 1); t_branch(ss, ss_z(ss));  /* C0B115 beq loc_C0B13B */
       if(!ss_z(ss)) {
         S(base + 4, 3); t_index(ss);        /* C0B117 lda entity_hitstun_timer,X */
-        a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_hitstun_timer + x)));
+        a = t_read16(ss, ss_abs(ss, (entity_hitstun_timer + x)));
         ss_set_nz16(ss, a);
         S(base + 7, 1); t_branch(ss, a != 0);  /* C0B11A bne loc_C0B13B */
         if(a == 0) {
           S(base + 9, 3); t_index(ss);      /* C0B11C lda entity_type,Y */
-          a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_type + y)));
+          a = t_read16(ss, ss_abs(ss, (entity_type + y)));
           ss_set_nz16(ss, a);
           S(base + 12, 3); alu_cmp16(ss, a, 0x000E);  /* C0B11F cmp #$000E */
           S(base + 15, 1); t_branch(ss, !ss_c(ss));   /* C0B122 bcc loc_C0B13B */
@@ -821,11 +821,11 @@ void anim_cb_hit_enemies(SnesState* ss) {
             S(base + 20, 1); t_branch(ss, ss_c(ss));    /* C0B127 bcs loc_C0B13B */
             if(!ss_c(ss)) {
               S(base + 22, 3); t_index(ss); /* C0B129 lda entity_x,Y */
-              a = t_read16(ss, ss_abs(ss, (uint16_t) (entity_x + y)));
+              a = t_read16(ss, ss_abs(ss, (entity_x + y)));
               ss_set_nz16(ss, a);
               SI(base + 25); ss_set_c(ss, true);  /* C0B12C sec */
               S(base + 26, 2);              /* C0B12D sbc $06 */
-              a = alu_sbc16(ss, a, t_read16(ss, dp + scratch_06));
+              a = alu_sbc16(ss, a, t_read16_dp(ss, dp, scratch_06));
               bool hit;
               if(!second) {
                 S(base + 28, 1);            /* C0B12F bpl loc_C0B13B */
@@ -867,7 +867,7 @@ void anim_cb_hit_enemies(SnesState* ss) {
       SI(base + 40); y = (uint16_t) (y + 1); ss_set_y(ss, y); ss_set_nz16(ss, y);
       SI(base + 41); y = (uint16_t) (y + 1); ss_set_y(ss, y); ss_set_nz16(ss, y);
       S(base + 42, 2);                      /* C0B13D cpy $A6 */
-      alu_cmp16(ss, y, t_read16(ss, dp + entity_count));
+      alu_cmp16(ss, y, t_read16_dp(ss, dp, entity_count));
       S(base + 44, 1); t_branch(ss, !ss_c(ss));  /* C0B13F bcc loc_C0B113 */
       if(ss_c(ss)) break;
     }

@@ -92,6 +92,9 @@ struct SnesState {
   int maxCtx;                /* high-water mark of nctx */
   /* --unit: hold the routine, see ss_unit_hold() below */
   bool unitHold;
+  /* The odd master cycle ss_consume_cycles() could not spend this call, carried
+   * into the next one. snes_runCycles advances two at a time. */
+  int cycleCarry;
 };
 
 /* Called by the dispatcher around a hook body: push a snapshot of the machine on

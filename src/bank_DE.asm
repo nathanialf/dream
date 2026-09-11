@@ -39,4 +39,5 @@ org $DE0000
     incbin "../data/sprites/frame_alt_0078.bin"                        ; 1686 bytes (whole asset)
     incbin "../data/sprites/frame_alt_0079.bin"                        ; 1686 bytes (whole asset)
     incbin "../data/sprites/frame_alt_0080.bin"                        ; 1686 bytes (whole asset)
-    incbin "../data/sprites/frame_alt_0081.bin"                        ; 2791 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0081.bin"                        ; 1686 bytes (whole asset)
+    incbin "../data/sprites/frame_alt_0117.bin"                        ; 1105 bytes (whole asset)

@@ -24,7 +24,7 @@
 void mode0_particle_draw_dispatch(SnesState* ss) {
   const uint8_t pb = ss_pb(ss);
   uint16_t a = ss_a(ss), x = ss_x(ss), y = ss_y(ss);
-  S(0x9227, 3);                             /* C09227 jmp particle_update_and_draw_mode0 */
+  SJMP(0x9227);                             /* C09227 jmp particle_update_and_draw_mode0 */
   ss_set_pc(ss, pb, 0x9331);
 }
 
@@ -91,7 +91,8 @@ void particle_table_clear(SnesState* ss) {
  * unused_stream_desc_dispatch: $C0:9206
  *
  * A jump-table dispatcher nothing calls: no jsr, jsl or table word anywhere in
- * out/dream.asm names the address, and config/recomp_order.txt marks it cold.
+ * out/dream.asm names the address, and no input script enters it (the `*` rows
+ * of `tools/recomp_verify.py`).
  * It adds the accumulator to the word at $0BB8, uses the sum as a byte index
  * into the word table at $C0:B208, and, when the entry is non-zero, parks
  * it in $04, reads and post-increments a second counter at $0BBA, and leaves
@@ -136,7 +137,7 @@ void unused_stream_desc_dispatch(SnesState* ss) {
   }
 
   S(0x9211, 2);                             /* C09211 sta ptr_04 */
-  t_write16(ss, dp + ptr_04, a);
+  t_write16_dp(ss, dp, ptr_04, a);
   S(0x9213, 3);                             /* C09213 lda $0BBA */
   a = t_read16(ss, ss_abs(ss, 0x0BBA));
   ss_set_nz16(ss, a);

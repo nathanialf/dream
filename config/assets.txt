@@ -1822,10 +1822,12 @@
 1cc6aa 1ccd74 sprite_frame_alt data/sprites/frame_alt_0000.bin  ; alternate-format sprite frame (header scan) -> file offset 1CC6AA
 1ccd74 1cd43e sprite_frame_alt data/sprites/frame_alt_0001.bin  ; alternate-format sprite frame (header scan) -> file offset 1CCD74
 1cd43e 1cdb08 sprite_frame_alt data/sprites/frame_alt_0002.bin  ; alternate-format sprite frame (header scan) -> file offset 1CD43E
-1cdb08 1ce89c sprite_frame_alt data/sprites/frame_alt_0003.bin  ; alternate-format sprite frame (header scan) -> file offset 1CDB08
+1cdb08 1ce1d2 sprite_frame_alt data/sprites/frame_alt_0003.bin  ; alternate-format sprite frame (header scan) -> file offset 1CDB08
+1ce1d2 1ce89c sprite_frame_alt data/sprites/frame_alt_0113.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1CE1D2
 1ce89c 1cef5e sprite_frame_alt data/sprites/frame_alt_0004.bin  ; alternate-format sprite frame (header scan) -> file offset 1CE89C
 1cef5e 1cf620 sprite_frame_alt data/sprites/frame_alt_0005.bin  ; alternate-format sprite frame (header scan) -> file offset 1CEF5E
-1cf620 1d0000 sprite_frame_alt data/sprites/frame_alt_0006.bin  ; alternate-format sprite frame (header scan) -> file offset 1CF620
+1cf620 1cfce2 sprite_frame_alt data/sprites/frame_alt_0006.bin  ; alternate-format sprite frame (header scan) -> file offset 1CF620
+1cfce2 1d0000 sprite_frame_alt data/sprites/frame_alt_0114.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1CFCE2
 1d0000 1d06c1 sprite_frame_alt data/sprites/frame_alt_0007.bin  ; alternate-format sprite frame (header scan) -> file offset 1D0000
 1d06c1 1d0d82 sprite_frame_alt data/sprites/frame_alt_0008.bin  ; alternate-format sprite frame (header scan) -> file offset 1D06C1
 1d0d82 1d1443 sprite_frame_alt data/sprites/frame_alt_0009.bin  ; alternate-format sprite frame (header scan) -> file offset 1D0D82
@@ -1854,7 +1856,8 @@
 1da87c 1daf2c sprite_frame_alt data/sprites/frame_alt_0032.bin  ; alternate-format sprite frame (header scan) -> file offset 1DA87C
 1daf2c 1db5dc sprite_frame_alt data/sprites/frame_alt_0033.bin  ; alternate-format sprite frame (header scan) -> file offset 1DAF2C
 1db5dc 1dbc8c sprite_frame_alt data/sprites/frame_alt_0034.bin  ; alternate-format sprite frame (header scan) -> file offset 1DB5DC
-1dbc8c 1dc9dc sprite_frame_alt data/sprites/frame_alt_0035.bin  ; alternate-format sprite frame (header scan) -> file offset 1DBC8C
+1dbc8c 1dc334 sprite_frame_alt data/sprites/frame_alt_0035.bin  ; alternate-format sprite frame (header scan) -> file offset 1DBC8C
+1dc334 1dc9dc sprite_frame_alt data/sprites/frame_alt_0115.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1DC334
 1dc9dc 1dd083 sprite_frame_alt data/sprites/frame_alt_0036.bin  ; alternate-format sprite frame (header scan) -> file offset 1DC9DC
 1dd083 1dd72a sprite_frame_alt data/sprites/frame_alt_0037.bin  ; alternate-format sprite frame (header scan) -> file offset 1DD083
 1dd72a 1dddd1 sprite_frame_alt data/sprites/frame_alt_0038.bin  ; alternate-format sprite frame (header scan) -> file offset 1DD72A
@@ -1862,7 +1865,8 @@
 1de478 1deb1f sprite_frame_alt data/sprites/frame_alt_0040.bin  ; alternate-format sprite frame (header scan) -> file offset 1DE478
 1deb1f 1df1c6 sprite_frame_alt data/sprites/frame_alt_0041.bin  ; alternate-format sprite frame (header scan) -> file offset 1DEB1F
 1df1c6 1df86d sprite_frame_alt data/sprites/frame_alt_0042.bin  ; alternate-format sprite frame (header scan) -> file offset 1DF1C6
-1df86d 1e0000 sprite_frame_alt data/sprites/frame_alt_0043.bin  ; alternate-format sprite frame (header scan) -> file offset 1DF86D
+1df86d 1dff14 sprite_frame_alt data/sprites/frame_alt_0043.bin  ; alternate-format sprite frame (header scan) -> file offset 1DF86D
+1dff14 1e0000 sprite_frame_alt data/sprites/frame_alt_0116.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1DFF14
 1e0000 1e06a7 sprite_frame_alt data/sprites/frame_alt_0044.bin  ; alternate-format sprite frame (header scan) -> file offset 1E0000
 1e06a7 1e0d4e sprite_frame_alt data/sprites/frame_alt_0045.bin  ; alternate-format sprite frame (header scan) -> file offset 1E06A7
 1e0d4e 1e13f5 sprite_frame_alt data/sprites/frame_alt_0046.bin  ; alternate-format sprite frame (header scan) -> file offset 1E0D4E
@@ -1900,7 +1904,8 @@
 1ee157 1ee7ed sprite_frame_alt data/sprites/frame_alt_0078.bin  ; alternate-format sprite frame (header scan) -> file offset 1EE157
 1ee7ed 1eee83 sprite_frame_alt data/sprites/frame_alt_0079.bin  ; alternate-format sprite frame (header scan) -> file offset 1EE7ED
 1eee83 1ef519 sprite_frame_alt data/sprites/frame_alt_0080.bin  ; alternate-format sprite frame (header scan) -> file offset 1EEE83
-1ef519 1f0000 sprite_frame_alt data/sprites/frame_alt_0081.bin  ; alternate-format sprite frame (header scan) -> file offset 1EF519
+1ef519 1efbaf sprite_frame_alt data/sprites/frame_alt_0081.bin  ; alternate-format sprite frame (header scan) -> file offset 1EF519
+1efbaf 1f0000 sprite_frame_alt data/sprites/frame_alt_0117.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1EFBAF
 1f0000 1f10c0 stale        data/stale/stale_dup_metatiles_mode3.bin ; stale duplicate of 0A37A0-0A4860 (all 134 game_mode 3 metatiles)
 1f10c0 1f1100 stale        data/stale/stale_dup_metatiles_mode1_tail.bin ; stale duplicate of 0A3760-0A37A0 (the last 2 metatiles of metatiles_mode1); exact byte-for-byte match, fits between its two stale-duplicate-metatile neighbours
 1f1100 1f2780 stale        data/stale/stale_dup_metatiles_mode2b.bin ; stale duplicate of 09C660-09DCE0 (game_mode 2 metatiles 136-315)
@@ -1912,7 +1917,8 @@
 1f4849 1f4ed6 sprite_frame_alt data/sprites/frame_alt_0086.bin  ; alternate-format sprite frame (header scan) -> file offset 1F4849
 1f4ed6 1f5563 sprite_frame_alt data/sprites/frame_alt_0087.bin  ; alternate-format sprite frame (header scan) -> file offset 1F4ED6
 1f5563 1f5bf0 sprite_frame_alt data/sprites/frame_alt_0088.bin  ; alternate-format sprite frame (header scan) -> file offset 1F5563
-1f5bf0 1f6903 sprite_frame_alt data/sprites/frame_alt_0089.bin  ; alternate-format sprite frame (header scan) -> file offset 1F5BF0
+1f5bf0 1f627d sprite_frame_alt data/sprites/frame_alt_0089.bin  ; alternate-format sprite frame (header scan) -> file offset 1F5BF0
+1f627d 1f6903 sprite_frame_alt data/sprites/frame_alt_0118.bin  ; alternate-format sprite frame, chained directly after an oversized frame by its header length (docs/data_formats.md 1c) -> file offset 1F627D
 1f6903 1f6f88 sprite_frame_alt data/sprites/frame_alt_0090.bin  ; alternate-format sprite frame (header scan) -> file offset 1F6903
 1f6f88 1f760d sprite_frame_alt data/sprites/frame_alt_0091.bin  ; alternate-format sprite frame (header scan) -> file offset 1F6F88
 1f760d 1f7c92 sprite_frame_alt data/sprites/frame_alt_0092.bin  ; alternate-format sprite frame (header scan) -> file offset 1F760D
@@ -1936,4 +1942,4 @@
 1feb59 1ff1dd sprite_frame_alt data/sprites/frame_alt_0110.bin  ; alternate-format sprite frame (header scan) -> file offset 1FEB59
 1ff1dd 1ff861 sprite_frame_alt data/sprites/frame_alt_0111.bin  ; alternate-format sprite frame (header scan) -> file offset 1FF1DD
 1ff861 1ffee5 sprite_frame_alt data/sprites/frame_alt_0112.bin  ; alternate-format sprite frame (header scan) -> file offset 1FF861
-1ffee5 200000 sprite_frame_alt data/sprites/sprite_frame_tail.bin ; tail: partial last alternate-format sprite frame / padding; partial alt-format frame (truncated by end of ROM)
+1ffee5 200000 sprite_frame_alt data/sprites/sprite_frame_tail.bin ; complete alt-format frame (header scan) -> file offset 1FFEE5; the header accounts for all but a 4-byte trailer

@@ -34,10 +34,35 @@
 #define OAM_BYTES  (0x200u + 0x20u)
 #define ARAM_BYTES 0x10000u    /* the SPC700's 64 KB */
 #define DSPREG_BYTES 0x80u     /* the DSP's 128 registers */
-#define SPCREG_BYTES 8u        /* A X Y SP PSW PC(lo,hi) */
+#define SPCREG_BYTES 8u        /* A X Y SP PSW PC(lo,hi) DSPADDR */
 #define REGION_COUNT 7
 
 #define COV_BYTES  (1u << 21)  /* 2^24 PCs / 8 */
+
+/* Allocation. recomp/harness/coro.h states that the harness "exits on allocation
+ * failure, like the rest of the harness"; these are what make that true. Every
+ * allocation in this file goes through one of them, so no path stores NULL and
+ * dereferences it a few lines later, and the two realloc sites no longer leak the
+ * old block and overwrite the pointer with NULL when the resize fails. */
+static void* xalloc_die(void) {
+  fprintf(stderr, "dream_harness: out of memory\n");
+  exit(2);
+}
+
+static void* xmalloc(size_t n) {
+  void* p = malloc(n);
+  return p != NULL ? p : xalloc_die();
+}
+
+static void* xcalloc(size_t n, size_t sz) {
+  void* p = calloc(n, sz);
+  return p != NULL ? p : xalloc_die();
+}
+
+static void* xrealloc(void* p, size_t n) {
+  void* q = realloc(p, n);
+  return q != NULL ? q : xalloc_die();
+}
 
 /* ---- input scripts ---------------------------------------------------- */
 
@@ -119,7 +144,7 @@ static bool input_load(InputScript* s, const char* path) {
     return false;
   }
   int cap = 16;
-  s->ev = malloc((size_t) cap * sizeof(InputEvent));
+  s->ev = xmalloc((size_t) cap * sizeof(InputEvent));
   s->count = 0;
   uint16_t lastState2 = 0;
   char line[512];
@@ -138,6 +163,17 @@ static bool input_load(InputScript* s, const char* path) {
       fclose(f);
       return false;
     }
+    /* input_state_at scans `i < count && ev[i].frame <= frame`, so the first line
+     * whose frame number goes backwards makes every later line invisible for the
+     * whole run: a script that looks like it presses Start never does. Equal frame
+     * numbers are fine, the later line wins. */
+    if(s->count > 0 && (int) frame < s->ev[s->count - 1].frame) {
+      fprintf(stderr, "dream_harness: %s:%d: frame %ld is before the previous line's %d;"
+              " the script must be in frame order\n",
+              path, lineno, frame, s->ev[s->count - 1].frame);
+      fclose(f);
+      return false;
+    }
     p = endp;
     char* bar = strchr(p, '|');
     if(bar != NULL) *bar = 0;
@@ -149,7 +185,7 @@ static bool input_load(InputScript* s, const char* path) {
     }
     if(s->count == cap) {
       cap *= 2;
-      s->ev = realloc(s->ev, (size_t) cap * sizeof(InputEvent));
+      s->ev = xrealloc(s->ev, (size_t) cap * sizeof(InputEvent));
     }
     s->ev[s->count].frame = (int) frame;
     s->ev[s->count].state = state;
@@ -503,7 +539,7 @@ static void machine_init(Machine* m, const uint8_t* rom, size_t len,
   m->hooks = hooks;
   m->hookCount = hooks != NULL ? hookCount : 0;
   m->hooksActive = active;
-  m->cov = trace ? calloc(COV_BYTES, 1) : NULL;
+  m->cov = trace ? xcalloc(COV_BYTES, 1) : NULL;
   if(!machine_load_rom(m, rom, len)) exit(2);
   m->snes->cpu->hook = harness_hook;
   m->snes->cpu->hookCtx = m;
@@ -602,7 +638,7 @@ static bool trace_write(Machine* m, const char* path) {
     return false;
   }
   /* fold mirror banks onto the canonical $C0:0000+offset form before sorting */
-  uint8_t* rom = calloc(ROM_SIZE / 8, 1);
+  uint8_t* rom = xcalloc(ROM_SIZE / 8, 1);
   uint64_t nonRom = 0;
   for(uint32_t pc = 0; pc < (1u << 24); pc++) {
     if((m->cov[pc >> 3] & (1u << (pc & 7))) == 0) continue;
@@ -684,7 +720,7 @@ static uint8_t* read_file(const char* path, size_t* lenOut) {
   long len = ftell(f);
   fseek(f, 0, SEEK_SET);
   if(len <= 0) { fclose(f); return NULL; }
-  uint8_t* buf = malloc((size_t) len);
+  uint8_t* buf = xmalloc((size_t) len);
   if(fread(buf, 1, (size_t) len, f) != (size_t) len) {
     fclose(f);
     free(buf);
@@ -720,7 +756,7 @@ static Installed* build_table(const char* which, unsigned* countOut) {
   const RecompEntry* reg = recomp_registry(&n);
   Installed* out;
   if(strcmp(which, "all") == 0) {
-    out = calloc(n ? n : 1, sizeof(Installed));
+    out = xcalloc(n ? n : 1, sizeof(Installed));
     for(unsigned i = 0; i < n; i++) {
       out[i].addr = reg[i].addr;
       out[i].name = reg[i].name;
@@ -731,7 +767,7 @@ static Installed* build_table(const char* which, unsigned* countOut) {
   }
   const RecompHook* t = strcmp(which, "demo") == 0 ? recomp_hooks : recomp_hooks_empty;
   unsigned c = recomp_hooks_count(t);
-  out = calloc(c ? c : 1, sizeof(Installed));
+  out = xcalloc(c ? c : 1, sizeof(Installed));
   for(unsigned i = 0; i < c; i++) {
     out[i].addr = t[i].addr;
     out[i].name = t[i].name;
@@ -746,7 +782,7 @@ static Installed* build_table(const char* which, unsigned* countOut) {
 static SpcInstalled* build_spc_table(unsigned* countOut) {
   unsigned n = 0;
   const SpcRecompEntry* reg = recomp_spc_registry(&n);
-  SpcInstalled* out = calloc(n ? n : 1, sizeof(SpcInstalled));
+  SpcInstalled* out = xcalloc(n ? n : 1, sizeof(SpcInstalled));
   for(unsigned i = 0; i < n; i++) {
     out[i].addr = reg[i].addr;
     out[i].name = reg[i].name;
@@ -1440,10 +1476,14 @@ static int run_spc_timing_test(const uint8_t* rom, size_t romLen) {
  *
  * Leaving the routine is one rule for all four shapes, and it needs no
  * per-routine return kind at the stopping end: control has left when the pc is
- * outside the routine's own byte range *and* the stack pointer is at or above
- * where it stood at the first instruction. The stack-pointer half lets a
- * routine call a subroutine (the pc leaves the range, but a frame is below) and
- * distinguishes a tail `jmp` from it. The return frame the harness pushes
+ * outside the routine's own byte range, the instruction *before* it was inside,
+ * and the stack pointer is at or above where it stood at the first instruction.
+ * All three are needed, and unit_left() below tests all three. The
+ * stack-pointer clause lets a routine call a subroutine (the pc leaves the
+ * range, but a frame is below) and distinguishes a tail `jmp` from it. The
+ * was-inside clause stops a callee that deliberately unbalances the stack from
+ * looking like the end; the sound driver has exactly one, `seq_pop_x`. See
+ * recomp/README.md, "Knowing when the routine is over". The return frame the harness pushes
  * carries a sentinel address that is deliberately outside every routine, so an
  * `rts`, an `rtl` and an `rti` all satisfy the same rule and no instruction at
  * the sentinel is ever fetched. `ret=` in the seed says which frame to push,
@@ -1603,7 +1643,11 @@ static bool unit_seed_key(UnitSeed* sd, char* key, char* val, const char* path) 
   }
   if(strcmp(key, "stack") == 0) {
     size_t n = strlen(val);
-    if(n == 0 || (n & 1) != 0 || n / 2 > UNIT_MAX_STACK) return false;
+    /* The bound is the accumulated count, not this token's. A line with two
+     * `stack=` keys used to write past sd->stack[], and the first overflowing byte
+     * lands on sd->stackCount itself, which is the loop bound at the push sites. */
+    if(n == 0 || (n & 1) != 0 ||
+       sd->stackCount + (int) (n / 2) > UNIT_MAX_STACK) return false;
     for(size_t i = 0; i < n; i += 2) {
       char b[3] = { val[i], val[i + 1], 0 };
       if(!unit_hex(b, &v, &digits)) return false;
@@ -1640,7 +1684,7 @@ static bool unit_load(const char* path, UnitSeed** out, int* countOut) {
     return false;
   }
   int cap = 32, count = 0;
-  UnitSeed* seeds = calloc((size_t) cap, sizeof(UnitSeed));
+  UnitSeed* seeds = xcalloc((size_t) cap, sizeof(UnitSeed));
   char line[1024];
   int lineno = 0;
   bool ok = true;
@@ -1654,7 +1698,7 @@ static bool unit_load(const char* path, UnitSeed** out, int* countOut) {
     if(*p == 0 || *p == '\n' || *p == '\r') continue;
     if(count == cap) {
       cap *= 2;
-      seeds = realloc(seeds, (size_t) cap * sizeof(UnitSeed));
+      seeds = xrealloc(seeds, (size_t) cap * sizeof(UnitSeed));
       memset(seeds + count, 0, (size_t) (cap - count) * sizeof(UnitSeed));
     }
     UnitSeed* sd = &seeds[count];
@@ -1749,7 +1793,7 @@ static bool unit_boot(const uint8_t* rom, size_t romLen, const char* script, int
   m.snes->cpu->waiting = false;
   m.snes->cpu->stopped = false;
   out->size = snes_saveState(m.snes, NULL);
-  out->data = malloc((size_t) out->size);
+  out->data = xmalloc((size_t) out->size);
   snes_saveState(m.snes, out->data);
   snprintf(out->script, sizeof(out->script), "%s", script);
   out->frame = frame;
@@ -2137,7 +2181,7 @@ static int run_unit_gate(const uint8_t* rom, size_t romLen, const char* specPath
   int failures = 0, ran = 0;
   /* one boot per distinct (script, frame): booting is most of the work, and a
    * seed only needs the state it produced */
-  bool* done = calloc((size_t) (count > 0 ? count : 1), 1);
+  bool* done = xcalloc((size_t) (count > 0 ? count : 1), 1);
   for(int i = 0; i < count; i++) {
     if(done[i]) continue;
     if(!name_in_list(onlyList, seeds[i].name)) { done[i] = true; continue; }
@@ -2195,6 +2239,21 @@ static void print_frame_line(int frame, Machine* m, const Region* r) {
          c->sp,
          (unsigned) ((p->forcedBlank ? 0x80 : 0) | (p->brightness & 0xf)),
          p->mode);
+}
+
+
+/* The options that take a separate value word. Only used to tell a truncated
+ * command line from a misspelled one. */
+static bool flag_takes_value(const char* a) {
+  static const char* const kWithValue[] = {
+    "--rom", "--frames", "--input", "--trace", "--dump-wram", "--dump-cgram",
+    "--dump-oam", "--hooks", "--spc-hooks", "--hook-table", "--profile",
+    "--cycles", "--only", "--unit", "--unit-only",
+  };
+  for(size_t i = 0; i < sizeof(kWithValue) / sizeof(kWithValue[0]); i++) {
+    if(strcmp(a, kWithValue[i]) == 0) return true;
+  }
+  return false;
 }
 
 int main(int argc, char** argv) {
@@ -2260,6 +2319,15 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--unit-only") == 0 && hasNext) unitOnly = argv[++i];
     else if(strcmp(a, "--quiet") == 0) quiet = true;
     else if(strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) { usage(); return 0; }
+    else if(!hasNext && flag_takes_value(a)) {
+      /* Every branch above is `strcmp(...) == 0 && hasNext`, so a flag that takes a
+       * value and happens to be the last word in argv fell through to "unknown
+       * option --frames", which sends the reader looking for a typo that is not
+       * there. The status was always 2; only the message was wrong. */
+      fprintf(stderr, "dream_harness: %s needs an argument\n", a);
+      usage();
+      return 2;
+    }
     else { fprintf(stderr, "dream_harness: unknown option %s\n", a); usage(); return 2; }
   }
   if(frames <= 0) { fprintf(stderr, "dream_harness: --frames must be positive\n"); return 2; }
@@ -2312,7 +2380,17 @@ int main(int argc, char** argv) {
   Installed* table = build_table(tableName, &tableCount);
   unsigned spcTableCount = 0;
   SpcInstalled* spcTable = build_spc_table(&spcTableCount);
-  if(profilePath != NULL) { lockstep = false; hooksOn = false; }
+  if(profilePath != NULL) {
+    /* --profile runs its own reference/candidate pair and reports per-routine
+     * intervals; it is not the lockstep comparison and cannot be both. Say so
+     * rather than dropping the flag the command line asked for. */
+    if(lockstep) {
+      fprintf(stderr, "dream_harness: --profile measures the two machines, it does not"
+                      " compare them; drop --lockstep\n");
+      return 2;
+    }
+    hooksOn = false;
+  }
   /* The charges are loaded for --profile too, and the measuring pass applies
    * them. That makes --profile a refinement step rather than a measurement from
    * scratch: an uncharged candidate drifts out of phase with the reference
@@ -2359,6 +2437,18 @@ int main(int argc, char** argv) {
       if(name_in_list(onlyList, spcTable[i].name)) spcTable[kept++] = spcTable[i];
     }
     spcTableCount = kept;
+    /* A name that matches neither registry used to compact both tables to nothing
+     * and then report `table all (0 entries)` and a clean lockstep pass, so a typo
+     * in a bisection proved nothing while looking green. */
+    if(tableCount == 0 && spcTableCount == 0) {
+      fprintf(stderr, "dream_harness: --only %s matches no routine in either registry\n",
+              onlyList);
+      free(rom);
+      free(table);
+      free(spcTable);
+      free(script.ev);
+      return 2;
+    }
   }
 
   Machine ref, cand;
@@ -2387,19 +2477,19 @@ int main(int argc, char** argv) {
   if(profilePath != NULL) {
     unsigned n = tableCount ? tableCount : 1;
     ref.profiling = true;
-    ref.profCycles = calloc(n, sizeof(uint64_t));
-    ref.profCalls = calloc(n, sizeof(uint64_t));
-    ref.profMin = calloc(n, sizeof(uint64_t));
-    ref.profMax = calloc(n, sizeof(uint64_t));
-    ref.profNoReturn = calloc(n, 1);
-    ref.profRomTail = calloc(n, 1);
+    ref.profCycles = xcalloc(n, sizeof(uint64_t));
+    ref.profCalls = xcalloc(n, sizeof(uint64_t));
+    ref.profMin = xcalloc(n, sizeof(uint64_t));
+    ref.profMax = xcalloc(n, sizeof(uint64_t));
+    ref.profNoReturn = xcalloc(n, 1);
+    ref.profRomTail = xcalloc(n, 1);
     cand.measureSpend = true;
-    cand.profCycles = calloc(n, sizeof(uint64_t));
-    cand.profCalls = calloc(n, sizeof(uint64_t));
-    cand.profMin = calloc(n, sizeof(uint64_t));
-    cand.profMax = calloc(n, sizeof(uint64_t));
-    cand.profNoReturn = calloc(n, 1);
-    cand.profRomTail = calloc(n, 1);
+    cand.profCycles = xcalloc(n, sizeof(uint64_t));
+    cand.profCalls = xcalloc(n, sizeof(uint64_t));
+    cand.profMin = xcalloc(n, sizeof(uint64_t));
+    cand.profMax = xcalloc(n, sizeof(uint64_t));
+    cand.profNoReturn = xcalloc(n, 1);
+    cand.profRomTail = xcalloc(n, 1);
   }
   free(rom);
 
@@ -2451,6 +2541,22 @@ int main(int argc, char** argv) {
         }
         status = 1;
       }
+      /* The seven memcmps are not the whole invariant. A wrong cycle charge moves
+       * the candidate's clock before it moves any compared byte, and the deltas
+       * below used to be computed as printf arguments only: the run printed
+       * `no mismatches (candidate ended +312 master cycles ...)` and exited 0, and
+       * tools/recomp_verify.py keys success off the return code alone. The --unit
+       * path has always compared them; this is the frame path doing the same. */
+      if(lockstep && status == 0) {
+        const int64_t dMaster = (int64_t) cand.snes->cycles - (int64_t) ref.snes->cycles;
+        const int64_t dApu = (int64_t) cand.snes->apu->cycles - (int64_t) ref.snes->apu->cycles;
+        if(dMaster != 0 || dApu != 0) {
+          printf("MISMATCH frame %d cycles: candidate is %+" PRId64 " master cycles"
+                 " and %+" PRId64 " APU cycles from the reference\n",
+                 frame, dMaster, dApu);
+          status = 1;
+        }
+      }
     }
 
     if(!quiet) print_frame_line(frame, &ref, rr);
@@ -2475,8 +2581,13 @@ int main(int argc, char** argv) {
           wrote = false;
           break;
         }
-        fwrite(datas[d], 1, lens[d], wf);
-        fclose(wf);
+        const size_t put = fwrite(datas[d], 1, lens[d], wf);
+        const int closed = fclose(wf);
+        if(put != lens[d] || closed != 0) {
+          fprintf(stderr, "dream_harness: short write on %s: %s\n", path, strerror(errno));
+          wrote = false;
+          break;
+        }
       }
       if(!wrote) { status = 2; ranFrames = frame + 1; break; }
     }

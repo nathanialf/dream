@@ -24,21 +24,21 @@ The round trip is byte-identical by construction (make check), so this measures
 understanding, not reproduction.
 
 Needs baserom/DREAM.sfc (the tracer runs in-process). Usage:
-    python3 tools/progress.py            # rewrite README.md / docs/PROGRESS.md / docs/progress.json
-    python3 tools/progress.py --check    # exit 1 if the files would change
+    python3 tools/progress.py            # rewrite docs/PROGRESS.md and docs/progress.json
+    python3 tools/progress.py --check    # exit 1 if the files would change; writes nothing,
+                                         # out/ included
 """
 from __future__ import annotations
 import sys, os, re, json, datetime
 from pathlib import Path
-from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 import trace65816 as t  # noqa: E402
+import gen_assets  # noqa: E402
 
 ROM = ROOT / 'baserom' / 'DREAM.sfc'
 REGIONS = ROOT / 'config' / 'regions.txt'
-README = ROOT / 'README.md'
 PROGRESS_MD = ROOT / 'docs' / 'PROGRESS.md'
 PROGRESS_JSON = ROOT / 'docs' / 'progress.json'
 SPC_ASM = ROOT / 'spc' / 'driver.asm'
@@ -50,10 +50,22 @@ CODE_KIND = {'code', 'sound_iface', 'spc700'}
 RECOMP = ROOT / 'config' / 'recomp.txt'
 ASSETS = ROOT / 'config' / 'assets.txt'
 ROUNDTRIP = ROOT / 'config' / 'roundtrip.txt'
+# The data section an asset kind counts under, for an asset that sits inside a code
+# region. Every kind tools/gen_assets.py can emit has a row: None means the kind has no
+# data section, and the assertion below makes a new kind an error rather than an asset
+# that vanishes from both the byte totals and the item counts with no diagnostic.
+#   code          belongs to src/ and spc/, and the code sections already count it.
+#   entity_table  a kind config/assets.txt can emit and does not use; choosing its
+#                 section is part of adopting it.
 KIND_CLASS = {'sprite_frame': 'sprites', 'sprite_frame_alt': 'sprites', 'sprite_table': 'sprites', 'tileset_4bpp': 'tiles', 'tileset_8bpp': 'tiles',
               'tileset_2bpp': 'tiles', 'tilemap': 'maps', 'metatiles': 'maps', 'map': 'maps', 'hdma': 'maps',
               'palette': 'palettes', 'brr': 'brr', 'song': 'music', 'sfx_bank': 'music', 'spc_table': 'music',
-              'anim_script': 'anim', 'anim_table': 'anim', 'stale': 'stale', 'filler': 'filler', 'unknown': 'unknown'}
+              'anim_script': 'anim', 'anim_table': 'anim', 'stale': 'stale', 'filler': 'filler', 'unknown': 'unknown',
+              'code': None, 'entity_table': None}
+_unmapped = sorted(set(gen_assets.KINDS) - set(KIND_CLASS))
+if _unmapped:
+    sys.exit('progress.py: asset kinds with no section mapping in KIND_CLASS: '
+             + ', '.join(_unmapped))
 LEVEL2_ONLY = {'stale', 'filler', 'unknown'}
 AUTO = re.compile(r'^(sub|loc|orphan|nmi_handler|jtbl|data|handlers|null|unk)_[0-9A-Fa-f]{4,6}$')
 
@@ -81,11 +93,14 @@ def read_regions():
     regions.sort(key=lambda r: r['start'])
     return regions
 
-def run_tracer():
+def run_tracer(write=True):
+    """`--check` is documented as read-only and is a gate in tools/hooks/pre-push, so it
+    asks the tracer for the routine sizes without letting it rewrite out/codemap.txt,
+    out/symbols.txt, out/dream.mlb, out/dream.sym and out/dream.asm."""
     sys.argv = ['trace65816', str(ROM), str(ROOT / 'out')]
     import io, contextlib
     with contextlib.redirect_stdout(io.StringIO()):
-        t.main()
+        t.main(write=write)
 
 def class_at(regions, f):
     for r in regions:
@@ -177,9 +192,9 @@ def routines_spc700():
         if is_named(label): named_data[0] += nbytes
     return routines, code_total, named_data[0]
 
-def compute():
+def compute(write_tracer_outputs=True):
     regions = read_regions()
-    run_tracer()
+    run_tracer(write_tracer_outputs)
     routines = routines_65816(regions)
     spc_routines, spc_code_total, spc_named_data = routines_spc700()
     ndata = named_data_bytes(regions)
@@ -237,8 +252,14 @@ def compute():
         named = is_named(t.labels.get(r['start']))
         region_rows.append({'name': r['name'], 'start': f'{r["start"]:06X}', 'end': f'{r["end"]:06X}',
                             'size': r['end'] - r['start'], 'class': r['class'], 'named': named, 'desc': r['desc']})
-    for sec in sections.values():
-        sec['matched'] = min(sec['matched'], sec['total'])
+    # An over-count is a bug in the accounting above (an asset credited twice, a region
+    # whose bytes are claimed by two sections). Clamping it to the total turned that into
+    # a clean 100.00%, which is the one figure nobody would look at twice.
+    over = [f'{s["name"]} {s["matched"]}/{s["total"]}' for s in sections.values()
+            if s['matched'] > s['total']]
+    if over:
+        sys.exit('progress.py: a section matched more bytes than it has: '
+                 + ', '.join(over))
     return {
         'target': 'dream', 'sha1': SHA1,
         'generated': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -249,22 +270,6 @@ def compute():
 
 def pct(m, tot):
     return 100.0 * m / tot if tot else 0.0
-
-def badge_color(p):
-    if p >= 100: return 'brightgreen'
-    if p >= 75: return 'green'
-    if p >= 50: return 'yellowgreen'
-    if p >= 25: return 'yellow'
-    if p > 0: return 'orange'
-    return 'red'
-
-def badges(data):
-    out = []
-    for s in data['sections']:
-        p = pct(s['matched'], s['total'])
-        label = quote(s['name'].replace('_', ' '))
-        out.append(f'![{s["name"]} progress](https://img.shields.io/badge/{label}-{p:.2f}%20%25-{badge_color(p)}.svg)')
-    return '\n'.join(out)
 
 def table(data):
     rows = ['| Section | Kind | Matched bytes | Total bytes | % | Items | Extracted bytes |', '| --- | --- | ---: | ---: | ---: | ---: | ---: |']
@@ -288,8 +293,7 @@ def main():
     check = '--check' in sys.argv
     if not ROM.exists():
         sys.exit('progress.py: baserom/DREAM.sfc missing; cannot compute progress')
-    data = compute()
-    readme_new = README.read_text() if README.exists() else ''   # badges retired; README untouched
+    data = compute(write_tracer_outputs=not check)
     explain = ('`recomp` counts traced code bytes reimplemented in C and passing the lockstep gate. Code '
                'sections count bytes inside routines that carry a human-chosen name. Data sections count '
                'bytes of assets whose kind round-trips through an editable form (`config/roundtrip.txt`); '
@@ -310,8 +314,9 @@ def main():
             return False
         da.pop('generated', None); db.pop('generated', None)
         return da == db
-    changed = (readme_new != (README.read_text() if README.exists() else '') or
-               progress_new != (PROGRESS_MD.read_text() if PROGRESS_MD.exists() else '') or
+    # README.md carries no badges and this script does not touch it, so it is not part
+    # of the comparison. It used to be compared against itself, which is always equal.
+    changed = (progress_new != (PROGRESS_MD.read_text() if PROGRESS_MD.exists() else '') or
                not same_json(js, old_json))
     if check:
         print('progress: up to date' if not changed else 'progress: STALE')

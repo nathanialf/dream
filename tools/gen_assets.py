@@ -84,16 +84,75 @@ def _alt_record_run(rom, f, limit=200):
     return n
 
 
+def alt_frame_header_len(rom, fo):
+    """Decode the alternate-format 8-byte header (docs/data_formats.md 1c; the same rule
+    recomp/app/gallery.c's frame_build_alt implements for the gallery, and that
+    nt1+nt2 == 4*n1+n2+n3 holds for all 1555 live frames too, recomp/src/oam_emit.c's three
+    OAM "rows" confirms it is the one shared container, not two different formats):
+
+        hdr[0]  bit 7    the records carry a third byte, the OAM attribute (3-byte records)
+                bits 0-6 n1, the count of 16x16 sprites
+        hdr[1]  n2, 8x8 sprites      hdr[2]  off2, the VRAM tile they start at
+        hdr[3]  n3, 8x8 sprites      hdr[4]  off3, the VRAM tile they start at
+        hdr[5]  nt1, tiles in the first DMA chunk, which lands at VRAM tile 0
+        hdr[6]  vo2, where the second chunk lands   hdr[7]  nt2, its tile count
+
+        length = 8 + (3 or 2) * (n1 + n2 + n3) + 32 * (nt1 + nt2)
+
+    and nt1 + nt2 == 4*n1 + n2 + n3 in every frame (validated against all 120 alternate-format
+    frames and all 1555 live frames). Raises ValueError if that invariant fails, since that
+    means `fo` is not really a frame header."""
+    hdr = rom[fo:fo + 8]
+    n1 = hdr[0] & 0x7F
+    wide = (hdr[0] & 0x80) != 0
+    n2, n3 = hdr[1], hdr[3]
+    nt1, nt2 = hdr[5], hdr[7]
+    recs = n1 + n2 + n3
+    tiles = nt1 + nt2
+    if tiles != 4 * n1 + n2 + n3:
+        raise ValueError(
+            f'frame at {fo:06X}: nt1+nt2 ({tiles}) != 4*n1+n2+n3 ({4 * n1 + n2 + n3})')
+    rsz = 3 if wide else 2
+    return 8 + rsz * recs + 32 * tiles
+
+
+def split_alt_span(rom, start, end, max_trailer=40):
+    """Split one alternate-format frame span into one or more frames by decoded header
+    length (alt_frame_header_len). A span is usually exactly one frame; a handful chain a
+    second, complete frame directly behind the first (no gap), which the naive one-frame-
+    per-span reading folded into an oversized "trailer" instead of splitting out. Whatever
+    is left once a frame's declared length would leave <= max_trailer bytes before `end` is
+    that frame's own undecoded trailer (2-40 bytes, the live format's convention), not
+    another frame. Returns a sorted list of (start, end) frame spans covering [start, end)."""
+    frames = []
+    f = start
+    while True:
+        length = alt_frame_header_len(rom, f)
+        remaining = end - f
+        if length <= 0 or length > remaining:
+            raise ValueError(
+                f'frame at {f:06X}: header length {length} does not fit the '
+                f'{remaining}-byte span up to {end:06X}')
+        if remaining - length <= max_trailer:
+            frames.append((f, end))
+            return frames
+        frames.append((f, f + length))
+        f += length
+
+
 def parse_sprite_frame_alt_region(rom, start, end, thresh=8):
-    """Chain-walk one alternate-format sprite-frame region (docs/data_formats.md 1b, alt
-    format): unlike the live format there is no frame table pointing into these bytes, so
-    frame boundaries are found by scanning for maximal runs (>=thresh records) of 3-byte
-    {x, y, attr} OAM records with attr in 0x1C-0x22; the 8 bytes immediately before a run's
-    first record are that frame's header, and each frame runs up to the next one's header
-    (folding in its own 4bpp tile data plus any short undecoded trailer; same convention as
-    the live format's trailer). Returns a sorted list of (start, end) frame spans covering
-    [start, end) exactly. Validated against baserom/DREAM.sfc: reproduces exactly 82 frames in
-    1CC6AA-1F0000 and 31 in 1F2E14-1FFEE5, matching the header-scan count in the docs."""
+    """Chain-walk one alternate-format sprite-frame region (docs/data_formats.md 1c): unlike
+    the live format there is no frame table pointing into these bytes, so the *frame-group*
+    boundaries are found by scanning for maximal runs (>=thresh records) of 3-byte {x, y,
+    attr} OAM records with attr in 0x1C-0x22; the 8 bytes immediately before a run's first
+    record are that group's first frame's header. Each group runs up to the next one's
+    header, and within a group split_alt_span (the decoded header length, not the scan) finds
+    the real frame boundaries: 107 of the 113 groups are exactly one frame, and 6 are two
+    frames back to back, header-decoded and validated by nt1+nt2 == 4*n1+n2+n3. Returns a
+    list of groups (each a sorted list of one or more (start, end) frame spans, in file
+    order); flattening every group's spans covers [start, end) exactly. Validated against
+    baserom/DREAM.sfc: 82 groups (87 frames, 5 split) in 1CC6AA-1F0000 and 31 groups (32
+    frames, 1 split) in 1F2E14-1FFEE5."""
     anchors = []
     f = start
     while f < end - 3:
@@ -106,11 +165,11 @@ def parse_sprite_frame_alt_region(rom, start, end, thresh=8):
         f += 1
     assert anchors and anchors[0] == start, \
         f'alt sprite-frame chain must start exactly at {start:06X} (first anchor {anchors[0] if anchors else None})'
-    frames = []
+    groups = []
     for i, a in enumerate(anchors):
         nxt = anchors[i + 1] if i + 1 < len(anchors) else end
-        frames.append((a, nxt))
-    return frames
+        groups.append(split_alt_span(rom, a, nxt))
+    return groups
 
 
 def sprite_frame_len(rom, fo):
@@ -253,22 +312,32 @@ def build_assets(rom, rows):
 
     frame_counter = 0
     alt_frame_counter = 0
+    # Frames a group's header length splits out *after* its first frame (see
+    # parse_sprite_frame_alt_region). Their start offsets predate this discovery, so giving
+    # them the next free frame_alt_NNNN index (rather than renumbering the whole series)
+    # keeps the 113 already-established alt-frame paths and indices stable.
+    pending_alt_frames = []
     for (start, end, cls, slug, note) in rows:
         if slug in SPRITE_ALT_REGION_SLUGS:
-            region_frames = parse_sprite_frame_alt_region(rom, start, end)
-            for (a, b) in region_frames:
-                assets.append((a, b, 'sprite_frame_alt',
+            for group in parse_sprite_frame_alt_region(rom, start, end):
+                a0, b0 = group[0]
+                assets.append((a0, b0, 'sprite_frame_alt',
                                 f'data/sprites/frame_alt_{alt_frame_counter:04d}.bin',
-                                f'alternate-format sprite frame (header scan) -> file offset {a:06X}'))
+                                f'alternate-format sprite frame (header scan) -> file offset {a0:06X}'))
                 alt_frame_counter += 1
+                pending_alt_frames.extend(group[1:])
             continue
         if slug == 'sprite_frame_tail':
-            # 283-byte partial/truncated alt-format frame at the ROM's end (header +
-            # a handful of OAM records + a partial tile blob, cut off by the 0x200000 edge);
-            # genuinely partial, but it is the *same* structure, so it gets the same kind and
-            # keeps its existing path (nothing to split it into).
+            # Not actually partial: the header accounts for 279 of these 283 bytes, a
+            # 4-byte trailer (the live format's own convention) and no more, so it is a
+            # complete alt-format frame like any other and keeps its existing path (its
+            # boundaries do not move, so there is nothing to split it into).
+            spans = split_alt_span(rom, start, end)
+            assert spans == [(start, end)], \
+                f'expected exactly one frame filling {start:06X}-{end:06X}, got {spans}'
             assets.append((start, end, 'sprite_frame_alt', f'data/sprites/{slug}.bin',
-                            note + '; partial alt-format frame (truncated by end of ROM)'))
+                            'complete alt-format frame (header scan) -> file offset '
+                            f'{start:06X}; the header accounts for all but a 4-byte trailer'))
             continue
         if slug == 'sprite_frame_table':
             assets.append((start, end, 'sprite_table', 'data/sprites/frame_table.bin',
@@ -315,6 +384,16 @@ def build_assets(rom, rows):
         # generic single-asset row
         kind, dirname = classify_generic(cls, slug, note)
         assets.append((start, end, kind, f'data/{dirname}/{slug}.bin', note))
+
+    # The frames a group's header length split out beyond its first frame: appended after
+    # every established index is assigned, in file order, so they get the next free indices
+    # (113-118) rather than displacing any of the 113 already-established ones.
+    for (a, b) in sorted(pending_alt_frames):
+        assets.append((a, b, 'sprite_frame_alt',
+                        f'data/sprites/frame_alt_{alt_frame_counter:04d}.bin',
+                        f'alternate-format sprite frame, chained directly after an oversized '
+                        f'frame by its header length (docs/data_formats.md 1c) -> file offset {a:06X}'))
+        alt_frame_counter += 1
 
     assets.sort(key=lambda a: a[0])
     return assets

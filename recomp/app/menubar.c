@@ -43,6 +43,8 @@ typedef struct {
 } MenuDef;
 
 static const MenuItem kFileItems[] = {
+  { "Screenshot (F12)", MENU_ACT_SCREENSHOT, 0, CHK_NONE },
+  { "-", MENU_ACT_NONE, 0, CHK_NONE },
   { "Quit", MENU_ACT_QUIT, 0, CHK_NONE },
 };
 
@@ -60,7 +62,6 @@ static const MenuItem kViewItems[] = {
 };
 
 static const MenuItem kGalleryItems[] = {
-  { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SCENES, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SPRITES, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_SPRITES_ALT, CHK_SECTION },
   { NULL, MENU_ACT_GALLERY, GALLERY_SEC_BACKGROUNDS, CHK_SECTION },
@@ -90,7 +91,13 @@ struct Menubar {
   int hoverItem;     /* -1, else an item index in the open menu */
   bool focused;      /* the keyboard has the bar */
   float mouseX, mouseY;
+  char notice[96];   /* shown at the right of the bar until noticeUntil */
+  Uint64 noticeUntil;
 };
+
+/* How long a notice stands. Long enough to read a file name, short enough that
+ * it is gone before the next thing the user does. */
+#define NOTICE_MS 4000
 
 /* ---- text ---------------------------------------------------------------------- */
 
@@ -353,6 +360,19 @@ void menubar_draw(Menubar* mb, SDL_Renderer* renderer, int outW, const MenuModel
               0xE4, 0xE8, 0xF0);
   }
 
+  /* The right end of the bar: what the last screenshot was called, for as long
+   * as NOTICE_MS. Drawn after the titles and before the open panel, so an open
+   * menu covers it rather than the other way round, and dropped entirely rather
+   * than drawn over a title when the window is too narrow to hold both. */
+  if(mb->notice[0] != 0 && SDL_GetTicks() < mb->noticeUntil) {
+    int lastX = 0, lastW = 0;
+    title_box(model->galleryOpen ? MENU_COUNT : MENU_COUNT - 1, model, &lastX, &lastW);
+    int nx = outW / s - text_w(mb->notice) - L_TITLE_PAD;
+    if(nx > lastX + lastW)
+      draw_text(mb, renderer, s, (float) nx * S, 3.0f * S, mb->notice,
+                0xE8, 0xC0, 0x50);
+  }
+
   if(mb->open < 0) return;
   const MenuDef* def = &kMenus[mb->open];
   int px = 0, pw = 0;
@@ -399,6 +419,12 @@ void menubar_destroy(Menubar* mb) {
   if(mb == NULL) return;
   if(mb->atlas != NULL) SDL_DestroyTexture(mb->atlas);
   SDL_free(mb);
+}
+
+void menubar_notice(Menubar* mb, const char* text) {
+  if(mb == NULL || text == NULL) return;
+  SDL_strlcpy(mb->notice, text, sizeof(mb->notice));
+  mb->noticeUntil = SDL_GetTicks() + NOTICE_MS;
 }
 
 bool menubar_focused(const Menubar* mb) {

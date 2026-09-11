@@ -21,9 +21,6 @@
  *   --gallery SEC[:NAV]         open a gallery page (for the screenshot)
  *   --gallery-toggle N,ITERS    open the gallery mid-run and close it again, so a
  *                               run with the toggle can be diffed against one without
- *   --scene-dump M[,V]:FILE     compose a level and write it as a PPM of its own size
- *   --scene-probe M:X:Y:V:FILE  one composed screen at a camera position
- *   --scene-verify [DIR]        every composed scene against the running game
  *   --sprite-pal-report         how the 1555 live frames' palettes come out
  *   --sprite-probe F:M:FLAGS:FILE  one sprite frame, drawn by the game
  *   --sprite-verify             every forced sprite render against the game
@@ -39,8 +36,17 @@
 #include <stdbool.h>
 #include <errno.h>
 
+#include <time.h>
+#include <sys/stat.h>
 #ifdef _WIN32
-/* GetModuleFileNameA, for the ROM sitting next to dream.exe (find_rom below).
+#include <direct.h>     /* _mkdir: the screenshots directory */
+#else
+#include <sys/types.h>
+#endif
+
+#ifdef _WIN32
+/* GetModuleFileNameA, for the ROM sitting next to dream.exe (find_rom below)
+ * and for the screenshots directory beside it (exe_dir below).
  * Nothing else in the app is Windows-specific: SDL covers the window, the
  * sound, the pads and the 60.0988 Hz pacing, and the coroutine backend the
  * --no-cpu scheduler needs is chosen by CMake (recomp/harness/coro.h). */
@@ -49,6 +55,14 @@
 #endif
 
 #include <SDL3/SDL.h>
+
+/* The one path separator that differs. Windows takes either, but a path in
+ * dream.log should look like the platform's own. */
+#ifdef _WIN32
+#define DIR_SEP '\\'
+#else
+#define DIR_SEP '/'
+#endif
 
 #include "snes.h"
 #include "cart.h"
@@ -67,6 +81,7 @@
 #include "scene.h"
 #include "coro.h"   /* coro_backend(), for the log line naming the backend */
 #include "dlog.h"   /* dream.log: the run, and the crash, written down */
+#include "png.h"    /* the screenshot writer: stored deflate, no zlib */
 
 #define ROM_SIZE    0x200000u
 #define WRAM_SIZE   0x20000u
@@ -647,11 +662,7 @@ static bool write_ppm(const char* path, const uint32_t* fb) {
 }
 
 
-/* --scene-dump MODE[,LAYERS][:FILE]: compose a scene and write it out.
- *
- * How the Scenes page is checked without a display. The image is the whole
- * level, so it is written as a PPM of its own size rather than through the
- * 256x224 framebuffer. */
+/* The same, at a size of its own: a sprite crop is not 256x224. */
 static bool write_ppm_size(const char* path, const uint32_t* px, int w, int h) {
   FILE* f = fopen(path, "wb");
   if(f == NULL) {
@@ -669,297 +680,106 @@ static bool write_ppm_size(const char* path, const uint32_t* px, int w, int h) {
   return true;
 }
 
-static int scene_dump(const uint8_t* rom, size_t romLen, const char* spec) {
-  char buf[256];
-  snprintf(buf, sizeof(buf), "%s", spec);
-  char* file = strchr(buf, ':');
-  if(file != NULL) *file++ = 0;
-  int view = SCENE_VIEW_ALL;
-  char* comma = strchr(buf, ',');
-  if(comma != NULL) { *comma = 0; view = atoi(comma + 1); }
-  int mode = atoi(buf);
-  Scenes* sc = scenes_create(rom, romLen);
-  if(sc == NULL) { fprintf(stderr, "dream: no scene machine\n"); return 2; }
-  scenes_request(sc, mode);
-  while(scenes_step(sc, 250)) {
-    printf("scene: %s (%d.%d%%)\n", scenes_status(sc),
-           scenes_progress(sc) / 10, scenes_progress(sc) % 10);
-    fflush(stdout);
-  }
-  int w = 0, h = 0;
-  const uint32_t* img = scenes_image(sc, view, &w, &h);
-  SceneInfo info;
-  if(img == NULL || !scenes_info(sc, &info)) {
-    fprintf(stderr, "dream: scene %d not composed: %s\n", mode, scenes_status(sc));
-    scenes_destroy(sc);
-    return 2;
-  }
-  printf("scene %d: %dx%d px, %d x %d metatiles, map %06X, meta %06X, "
-         "bgmode %d%s, tm %02X, level layer BG%d, %d screens, %d frames\n",
-         mode, w, h, info.cols, info.rows, info.mapAddr, info.metaAddr,
-         info.bgmode, info.bg3prio ? "+bg3prio" : "", info.tm, info.levelBg,
-         info.screens, info.frames);
-  for(int i = 0; i < 4; i++)
-    printf("  BG%d map $%04X chars $%04X%s\n", i + 1, info.bgMap[i], info.bgChr[i],
-           ((info.tm >> i) & 1u) ? "  (TM)" : "");
-  int rc = 0;
-  if(file != NULL && *file != 0) rc = write_ppm_size(file, img, w, h) ? 0 : 2;
-  scenes_destroy(sc);
-  return rc;
-}
-
-
-/* --scene-verify [DIR]: the Scenes page against the running game.
+/* ---- the Screenshot item (File menu, or F12) -----------------------------
  *
- * For each scene: compose it the way the page does, then boot a second machine
- * the ordinary way (the harness script, no walk, no camera hook), render its BG
- * layers through the same PPU with the same masking, and compare that screen
- * against the composed image cropped at the camera the second machine happens to
- * be at. The layer the metatile blitter feeds is continuous across the whole
- * composition, so it has to match pixel for pixel wherever the crop lands; a
- * parallax layer only matches where the crop lands on a screen the composition
- * took, and the second row of each pair measures that.
+ * What is saved is the viewport as it stands: the 256x224 framebuffer, at its
+ * own size, with whatever page or frame of the game is in it and without the
+ * menu bar, which is drawn with SDL primitives over the top and is not part of
+ * the picture. The scale the window happens to be at is a property of the
+ * window, not of the image, so it is not baked in.
+ *
+ * Where it goes: a `screenshots` directory beside the executable, made if it is
+ * not there. That is the directory GetModuleFileNameA reports on Windows and
+ * SDL_GetBasePath everywhere else (/proc/self/exe on Linux, which is what SDL
+ * reads); if neither can say, the current directory is used, which is what a
+ * checkout run from its own root wants anyway.
  */
-static int scene_cmp(const uint32_t* a, const uint32_t* b, int n) {
-  int same = 0;
-  for(int i = 0; i < n; i++) if(a[i] == b[i]) same++;
-  return same;
-}
-
-static int scene_probe(const uint8_t* rom, size_t romLen, const char* spec) {
-  int mode = 0, cx = 0, cy = 0, view = SCENE_VIEW_ALL;
-  char path[256] = "";
-  if(sscanf(spec, "%d:%d:%d:%d:%255s", &mode, &cx, &cy, &view, path) < 5) return 2;
-  uint32_t* out = malloc((size_t) SCENE_SCREEN_W * SCENE_SCREEN_H * sizeof(uint32_t));
-  Scenes* sc = scenes_create(rom, romLen);
-  int gx = 0, gy = 0;
-  if(out == NULL || sc == NULL) return 2;
-  if(!scenes_screen_at(sc, mode, cx, cy, view, out, &gx, &gy)) return 2;
-  printf("probe mode %d asked (%d,%d) got (%d,%d) -> %s\n", mode, cx, cy, gx, gy, path);
-  write_ppm_size(path, out, SCENE_SCREEN_W, SCENE_SCREEN_H);
-  scenes_destroy(sc);
-  free(out);
-  return 0;
-}
-
-
-/* Metatiles against the composed scene.
- *
- * The Backgrounds page's third view draws a scene's metatile table, each 32x32
- * metatile composed out of the VRAM and CGRAM that scene's init leaves. The
- * composed scene is the same picture assembled by the game's own blitter, so
- * every 32x32 cell of it should be one of those metatiles, pixel for pixel.
- * That is what this measures: eight cells a scene, each compared first against
- * the metatile the level map's own word names and then, if that is not it,
- * against every metatile the scene has. A cell that is exactly some metatile
- * says the view draws what the game draws; a cell that is exactly the metatile
- * the map names says the map reading is right as well.
- *
- * Two cases are excluded first. The cells are near the level start, because
- * the streaming descriptors at $80:B208 re-upload palettes as the camera moves
- * while the page's CGRAM is the one the init leaves; and a cell whose metatile
- * names a CGRAM row the scene's HDMA rewrites is skipped, because what the
- * composition drew it with is the last scanline's colours (docs/data_formats.md,
- * "CGRAM after the init"). Only the pixels the metatile itself owns are
- * compared: where its tile pixel is zero the picture is the backdrop.
- *
- * The metatile grid and the composed picture do not share an origin in every
- * scene: game_mode 0 and 1 write their level layer's vertical scroll one line
- * off the camera the composition blits at. That is the composition's business,
- * and `--scene-verify` above is the gate on it, so the offset is found once per
- * scene from the first cell and held for the rest.
- */
-#define META_RGB(v) ((v) & 0xFFFFFF00u)
-#define META_N (GALLERY_META_PX * GALLERY_META_PX)
-
-/* How many of the metatile's own pixels the picture at (qx, qy) agrees with, and
- * how many there are. */
-static void meta_cmp(const uint32_t* meta, const uint8_t* opaque, const uint32_t* img,
-                     int w, int qx, int qy, int* eq, int* tot) {
-  *eq = 0;
-  *tot = 0;
-  for(int y = 0; y < GALLERY_META_PX; y++)
-    for(int x = 0; x < GALLERY_META_PX; x++) {
-      if(!opaque[y * GALLERY_META_PX + x]) continue;
-      (*tot)++;
-      if(META_RGB(meta[y * GALLERY_META_PX + x]) ==
-         META_RGB(img[(size_t) (qy + y) * w + qx + x])) (*eq)++;
-    }
-}
-
-static int metatile_verify(const uint8_t* rom, size_t romLen, Scenes* sc) {
-  Gallery* gal = gallery_create(rom, romLen);
-  if(gal == NULL) return 0;
-  uint32_t meta[META_N];
-  uint8_t opaque[META_N];
-  int bad = 0;
-  printf("metatile-verify: the metatile view against the composed scene\n");
-  for(int mode = 0; mode < 4; mode++) {
-    scenes_request(sc, mode);
-    while(scenes_step(sc, 1000)) { }
-    SceneInfo info;
-    int w = 0, h = 0;
-    const uint32_t* img = NULL;
-    if(scenes_info(sc, &info) && info.levelBg >= 1)
-      img = scenes_image(sc, info.levelBg, &w, &h);
-    if(img == NULL) {
-      printf("  %-14s no level layer to compare against\n", scenes_mode_name(mode));
-      bad++;
-      continue;
-    }
-    uint16_t cg[256];
-    bool haveCg = scenes_cgram(sc, cg);
-    int count = gallery_metatile_count(gal, mode);
-    int checked = 0, isMeta = 0, isNamed = 0, skipped = 0, offY = 0;
-    bool aligned = false;
-    int rstep = info.rows / 3 > 0 ? info.rows / 3 : 1;
-    for(int c = 1; c < info.cols && checked < 8; c++)
-      for(int r = 0; r < info.rows && checked < 8; r += rstep) {
-        int px = c * GALLERY_META_PX, py = r * GALLERY_META_PX;
-        if(px + GALLERY_META_PX > w || py + GALLERY_META_PX + 2 > h) continue;
-        uint32_t at = info.mapAddr + (uint32_t) (2 * (c * info.rows + r));
-        if(at + 1u >= romLen) continue;
-        unsigned word = (unsigned) rom[at] | ((unsigned) rom[at + 1] << 8);
-        int named = (int) (word & 0x3FFFu);
-        if(named >= count) continue;
-
-        bool blank = true;
-        for(int y = 0; y < GALLERY_META_PX && blank; y++)
-          for(int x = 0; x < GALLERY_META_PX && blank; x++)
-            if(META_RGB(img[(size_t) (py + y) * w + px + x]) != META_RGB(img[0]))
-              blank = false;
-        if(blank) continue;      /* the sweep never reached this cell */
-
-        unsigned rows = gallery_metatile_rows(gal, mode, named);
-        bool known = true;
-        for(int row = 0; row < 8 && known && haveCg; row++) {
-          if(((rows >> row) & 1u) == 0) continue;
-          for(int k = 0; k < 16; k++)
-            if(cg[row * 16 + k] != gallery_cgram_entry(gal, mode, row * 16 + k)) known = false;
-        }
-        if(!known) { skipped++; continue; }
-
-        /* the scene's own vertical alignment, found once */
-        if(!aligned && gallery_metatile(gal, mode, named, word & 0xC000u, meta, opaque)) {
-          for(int oy = -2; oy <= 2 && !aligned; oy++) {
-            int qy = py + oy, eq = 0, tot = 0;
-            if(qy < 0 || qy + GALLERY_META_PX > h) continue;
-            meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
-            if(tot > 0 && eq == tot) { offY = oy; aligned = true; }
-          }
-        }
-        if(!aligned) continue;      /* the first cell that lines up sets the offset */
-        int qy = py + offY;
-        if(qy < 0 || qy + GALLERY_META_PX > h) continue;
-
-        checked++;
-        int eq = 0, tot = 0;
-        if(gallery_metatile(gal, mode, named, word & 0xC000u, meta, opaque))
-          meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
-        if(tot > 0 && eq == tot) { isNamed++; isMeta++; continue; }
-        /* not the metatile the map names: is it any of them? */
-        bool found = false;
-        for(int i = 0; i < count && !found; i++)
-          for(unsigned fl = 0; fl < 4 && !found; fl++) {
-            if(!gallery_metatile(gal, mode, i, fl << 14, meta, opaque)) continue;
-            meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
-            if(tot > 0 && eq == tot) found = true;
-          }
-        if(found) isMeta++;
-      }
-    printf("  %-14s %d of %d cells are exactly a metatile, %d of them the one the"
-           " map names\n", scenes_mode_name(mode), isMeta, checked, isNamed);
-    if(skipped > 0 || offY != 0)
-      printf("                 %d skipped (CGRAM this scene's HDMA rewrites),"
-             " grid offset %d\n", skipped, offY);
-    if(isMeta != checked || checked == 0) bad++;
-  }
-  gallery_destroy(gal);
-  printf("metatile-verify: %s\n",
-         bad == 0 ? "every cell checked is exactly a metatile" : "SOME DIFFER");
-  return bad;
-}
-
-static int scene_verify(const uint8_t* rom, size_t romLen, const char* dir) {
-  const int N = SCENE_SCREEN_W * SCENE_SCREEN_H;
-  uint32_t* ref = malloc((size_t) N * sizeof(uint32_t));
-  uint32_t* crop = malloc((size_t) N * sizeof(uint32_t));
-  Scenes* a = scenes_create(rom, romLen);
-  Scenes* b = scenes_create(rom, romLen);
-  if(ref == NULL || crop == NULL || a == NULL || b == NULL) return 2;
-  int bad = 0;
-  printf("scene-verify: composed scene vs the running game, BG layers only,"
-         " sprites masked\n");
-  for(int mode = 0; mode < SCENE_MODE_COUNT; mode++) {
-    SceneInfo info;
-    /* pass 1: every layer the mode's TM enables; pass 2: the level layer alone */
-    for(int pass = 0; pass < 2; pass++) {
-      int view = SCENE_VIEW_ALL;
-      if(pass == 1) {
-        if(!scenes_info(a, &info) || info.levelBg < 1) {
-          printf("  %-14s level layer: no BG has its tilemap at VRAM $7800\n",
-                 scenes_mode_name(mode));
-          continue;
-        }
-        view = info.levelBg;
-      }
-      scenes_request(a, mode);
-      while(scenes_step(a, 1000)) { }
-      int w = 0, h = 0;
-      const uint32_t* img = scenes_image(a, view, &w, &h);
-      if(img == NULL || !scenes_info(a, &info)) {
-        printf("  %-14s FAILED to compose: %s\n", scenes_mode_name(mode), scenes_status(a));
-        bad++;
-        break;
-      }
-      int cx = 0, cy = 0;
-      if(!scenes_reference(b, mode, view, ref, &cx, &cy)) { bad++; break; }
-      for(int y = 0; y < SCENE_SCREEN_H; y++)
-        for(int x = 0; x < SCENE_SCREEN_W; x++) {
-          int sx = cx + x, sy = cy + y;
-          crop[y * SCENE_SCREEN_W + x] =
-            (sx >= 0 && sx < w && sy >= 0 && sy < h) ? img[(size_t) sy * w + sx] : 0;
-        }
-      int same = scene_cmp(ref, crop, N);
-      printf("  %-14s %-11s%s camera (%4d,%4d)  stitch %6d/%6d %s",
-             scenes_mode_name(mode),
-             pass == 0 ? "all layers" : "level layer",
-             pass == 0 ? "" : "",
-             cx, cy, same, N, same == N ? "exact  " : "DIFFERS");
-      if(mode != SCENE_MODE_TITLE) {
-        int gx = 0, gy = 0;
-        if(scenes_screen_at(b, mode, cx, cy, view, crop, &gx, &gy)) {
-          int s2 = scene_cmp(ref, crop, N);
-          printf("   one screen at (%4d,%4d) %6d/%6d %s",
-                 gx, gy, s2, N, s2 == N ? "exact" : "DIFFERS");
-          if(dir != NULL) {
-            char path[512];
-            snprintf(path, sizeof(path), "%s/verify_m%d_p%d_one.ppm", dir, mode, pass);
-            write_ppm_size(path, crop, SCENE_SCREEN_W, SCENE_SCREEN_H);
-          }
-        }
-      }
-      printf("\n");
-      if(pass == 1 && same != N) bad++;
-      if(dir != NULL) {
-        char path[512];
-        snprintf(path, sizeof(path), "%s/verify_m%d_p%d_ref.ppm", dir, mode, pass);
-        write_ppm_size(path, ref, SCENE_SCREEN_W, SCENE_SCREEN_H);
-        snprintf(path, sizeof(path), "%s/verify_m%d_p%d_crop.ppm", dir, mode, pass);
-        write_ppm_size(path, crop, SCENE_SCREEN_W, SCENE_SCREEN_H);
-      }
-      if(mode == SCENE_MODE_TITLE) break;   /* one screen, no level layer */
+static void exe_dir(char* out, size_t outLen) {
+  out[0] = 0;
+#ifdef _WIN32
+  char exe[MAX_PATH];
+  DWORD n = GetModuleFileNameA(NULL, exe, (DWORD) sizeof(exe));
+  if(n > 0 && n < sizeof(exe)) {
+    char* slash = strrchr(exe, '\\');
+    char* fwd = strrchr(exe, '/');
+    if(fwd != NULL && (slash == NULL || fwd > slash)) slash = fwd;
+    if(slash != NULL) {
+      *slash = 0;
+      snprintf(out, outLen, "%s", exe);
+      return;
     }
   }
-  bad += metatile_verify(rom, romLen, a);
-  scenes_destroy(a);
-  scenes_destroy(b);
-  free(ref);
-  free(crop);
-  printf("scene-verify: %s\n", bad == 0 ? "all level layers exact" : "SOME DIFFER");
-  return bad == 0 ? 0 : 1;
+  dlog("screenshot: GetModuleFileNameA failed (%lu)", (unsigned long) GetLastError());
+#else
+  const char* base = SDL_GetBasePath();   /* owned by SDL; has a trailing slash */
+  if(base != NULL && base[0] != 0) {
+    snprintf(out, outLen, "%s", base);
+    size_t len = strlen(out);
+    while(len > 1 && out[len - 1] == '/') out[--len] = 0;
+    return;
+  }
+  dlog("screenshot: SDL_GetBasePath gave nothing: %s", SDL_GetError());
+#endif
 }
 
+static bool dir_make(const char* path) {
+#ifdef _WIN32
+  return _mkdir(path) == 0 || errno == EEXIST;
+#else
+  return mkdir(path, 0777) == 0 || errno == EEXIST;
+#endif
+}
+
+/* The picture, and the name it went under for the menu bar. `name` gets the file
+ * name alone; dream.log gets the whole path either way. */
+static bool save_screenshot(const uint32_t* fb, char* name, size_t nameLen) {
+  char dir[512];
+  exe_dir(dir, sizeof(dir));
+  char shots[576];
+  if(dir[0] != 0) snprintf(shots, sizeof(shots), "%s%cscreenshots", dir, DIR_SEP);
+  else snprintf(shots, sizeof(shots), "screenshots");
+  if(!dir_make(shots)) {
+    dlog("screenshot: cannot make %s: %s", shots, strerror(errno));
+    snprintf(name, nameLen, "no screenshots directory");
+    return false;
+  }
+
+  time_t now = time(NULL);
+  struct tm tmv;
+#ifdef _WIN32
+  struct tm* got = localtime(&now);
+  if(got != NULL) tmv = *got;
+  else memset(&tmv, 0, sizeof(tmv));
+#else
+  if(localtime_r(&now, &tmv) == NULL) memset(&tmv, 0, sizeof(tmv));
+#endif
+  char file[64];
+  char path[640];
+  /* Two shots inside one second would otherwise be the same name and the second
+   * would eat the first, so the seconds get a counter after them when they have
+   * to. Twenty is more than anyone can press in a second. */
+  for(int n = 0; n < 20; n++) {
+    if(n == 0)
+      snprintf(file, sizeof(file), "dream-%04d%02d%02d-%02d%02d%02d.png",
+               tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+               tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    else
+      snprintf(file, sizeof(file), "dream-%04d%02d%02d-%02d%02d%02d-%d.png",
+               tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+               tmv.tm_hour, tmv.tm_min, tmv.tm_sec, n + 1);
+    snprintf(path, sizeof(path), "%s%c%s", shots, DIR_SEP, file);
+    if(!file_exists(path)) break;
+  }
+
+  if(!png_write_rgbx(path, fb, FB_W, FB_H)) {
+    dlog("screenshot: cannot write %s: %s", path, strerror(errno));
+    snprintf(name, nameLen, "screenshot failed");
+    return false;
+  }
+  dlog_stage("screenshot: wrote %s", path);
+  snprintf(name, nameLen, "saved %s", file);
+  return true;
+}
 
 /* --sprite-probe FID:MODE:FLAGS:FILE: one sprite frame, drawn by the game.
  *
@@ -1068,8 +888,9 @@ static int sprite_verify(const uint8_t* rom, size_t romLen) {
   printf("sprite-verify: the game's own render against the game itself\n");
   scenes_observe_request(sc);
   while(scenes_step(sc, 1000)) { }
-  int observed = 0, derived = 0, unknown = 0, firstObs = 0;
-  gallery_frame_pal_counts(gal, &observed, &derived, &unknown, &firstObs);
+  GalleryPalTally tal;
+  int firstObs = 0;
+  gallery_frame_pal_counts(gal, &tal, &firstObs);
 
   scenes_sprite_walk_observed(sc, sprite_ref_cb, &set);
   int refs = 0;
@@ -1092,11 +913,12 @@ static int sprite_verify(const uint8_t* rom, size_t romLen) {
       sprite_shot_free(&got);
     }
   }
-  printf("  observed frames        %d of %d live frames\n", observed, observed + derived + unknown);
+  printf("  observed frames        %d of %d live frames\n",
+         tal.observed, tal.observed + tal.viaScript + tal.derived + tal.guess);
   printf("  crops taken            %d (the running game, OBJ layer only, HDMA restored)\n", refs);
   printf("  no crop                %d (the game showed the frame for one build, where\n"
          "                         its own tiles are still the previous frame's)\n",
-         observed - refs);
+         tal.observed - refs);
   printf("  exact, whole sprite    %d/%d\n", match, refs);
   printf("  exact where comparable %d (the game's own sprite met a screen edge)\n", partial);
   printf("  differ                 %d\n", differ);
@@ -1105,7 +927,7 @@ static int sprite_verify(const uint8_t* rom, size_t romLen) {
   /* Every live frame once, with the scene and the flag word the page uses. */
   WhyCount why[16];
   int nwhy = 0, drawn = 0, empty = 0;
-  int bySource[3] = { 0, 0, 0 };
+  int bySource[4] = { 0, 0, 0, 0 };
   int n = gallery_live_count(gal);
   for(int mode = 0; mode < 4; mode++) {
     for(int i = 0; i < n; i++) {
@@ -1117,7 +939,7 @@ static int sprite_verify(const uint8_t* rom, size_t romLen) {
         why_add(why, 16, &nwhy, "no machine");
         continue;
       }
-      if(got.w > 0) { drawn++; bySource[plan.source & 3]++; }
+      if(got.w > 0) { drawn++; bySource[plan.source & 3]++; }   /* GALLERY_PAL_* */
       else {
         empty++;
         why_add(why, 16, &nwhy, got.why[0] ? got.why : "no reason given");
@@ -1129,12 +951,22 @@ static int sprite_verify(const uint8_t* rom, size_t romLen) {
     }
   }
   printf("  every live frame       %d drawn, %d refused, of %d\n", drawn, empty, n);
-  printf("                         %d at an observed palette, %d derived, %d a guess\n",
-         bySource[0], bySource[1], bySource[2]);
+  printf("                         %d at an observed palette, %d observed via a script,\n"
+         "                         %d derived, %d a guess\n",
+         bySource[0], bySource[1], bySource[2], bySource[3]);
+  printf("  derived, ranked        %d of %d with more than one candidate changed their\n"
+         "                         top candidate once ranked\n", tal.reordered, tal.multi);
+  printf("  observation wins       %d frames where an observation and the derivation\n"
+         "                         name different palettes\n", tal.disagree);
   for(int i = 0; i < nwhy; i++) printf("    refused: %-34s %d\n", why[i].why, why[i].n);
 
   int altTotal = 0, altNear = 0, altShared = 0;
   gallery_alt_counts(gal, &altTotal, &altNear, &altShared);
+  int hExact = 0, hTotal = 0, hBeyond = 0;
+  gallery_alt_header_fit(gal, &hExact, &hTotal, &hBeyond);
+  printf("  alternate headers      %d of %d account for their asset's length exactly;\n"
+         "                         %d bytes beyond, where another frame starts\n",
+         hExact, hTotal, hBeyond);
   printf("  alternate frames       %d of %d have a nearest live frame;"
          " the most tiles any one\n"
          "                         shares with a live frame is %d\n",
@@ -1206,14 +1038,10 @@ int main(int argc, char** argv) {
   const char* inputPath = NULL;
   const char* shotPath = NULL;
   const char* gallerySpec = NULL;
-  const char* sceneSpec = NULL;
-  const char* sceneVerify = NULL;
-  const char* sceneProbe = NULL;
   const char* spriteProbe = NULL;
   bool wantSpriteVerify = false;
   const char* uiShotPath = NULL;
   bool palReport = false;
-  bool wantSceneVerify = false;
   int frames = 0;                 /* 0 = run until the user quits */
   int toggleFrame = -1, toggleIters = 0;
 
@@ -1226,14 +1054,8 @@ int main(int argc, char** argv) {
     else if(strcmp(a, "--screenshot-ui") == 0 && hasNext) uiShotPath = argv[++i];
     else if(strcmp(a, "--sprite-pal-report") == 0) palReport = true;
     else if(strcmp(a, "--gallery") == 0 && hasNext) gallerySpec = argv[++i];
-    else if(strcmp(a, "--scene-dump") == 0 && hasNext) sceneSpec = argv[++i];
-    else if(strcmp(a, "--scene-probe") == 0 && hasNext) sceneProbe = argv[++i];
     else if(strcmp(a, "--sprite-probe") == 0 && hasNext) spriteProbe = argv[++i];
     else if(strcmp(a, "--sprite-verify") == 0) wantSpriteVerify = true;
-    else if(strcmp(a, "--scene-verify") == 0) {
-      wantSceneVerify = true;
-      if(hasNext && argv[i + 1][0] != '-') sceneVerify = argv[++i];
-    }
     else if(strcmp(a, "--gallery-toggle") == 0 && hasNext) {
       if(sscanf(argv[++i], "%d,%d", &toggleFrame, &toggleIters) != 2) {
         fprintf(stderr, "dream: --gallery-toggle wants FRAME,ITERATIONS\n");
@@ -1278,13 +1100,6 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if(sceneProbe != NULL) {
-    int rc = scene_probe(rom, romLen, sceneProbe);
-    free(rom);
-    dlog_close();
-    return rc;
-  }
-
   if(spriteProbe != NULL) {
     int rc = sprite_probe(rom, romLen, spriteProbe);
     free(rom);
@@ -1294,20 +1109,6 @@ int main(int argc, char** argv) {
 
   if(wantSpriteVerify) {
     int rc = sprite_verify(rom, romLen);
-    free(rom);
-    dlog_close();
-    return rc;
-  }
-
-  if(wantSceneVerify) {
-    int rc = scene_verify(rom, romLen, sceneVerify);
-    free(rom);
-    dlog_close();
-    return rc;
-  }
-
-  if(sceneSpec != NULL) {
-    int rc = scene_dump(rom, romLen, sceneSpec);
     free(rom);
     dlog_close();
     return rc;
@@ -1462,6 +1263,7 @@ int main(int argc, char** argv) {
   bool running = true;
   int frame = 0;
   int toggleLeft = 0;
+  bool wantShot = false;          /* the File menu's Screenshot item, or F12 */
   uint64_t nextFrame = SDL_GetTicksNS();
   dlog_stage("run: entering the frame loop (%s)",
              timed ? "--frames, unpaced" : "60.0988 Hz");
@@ -1499,6 +1301,7 @@ int main(int argc, char** argv) {
             dlog_stage("gallery: closing (menu)");
             gallery_close(gal);
             break;
+          case MENU_ACT_SCREENSHOT: wantShot = true; break;
           default: break;
         }
         continue;
@@ -1509,6 +1312,10 @@ int main(int argc, char** argv) {
           running = false;
           break;
         case SDL_EVENT_KEY_DOWN:
+          /* F12 is the Screenshot item's shortcut, and does exactly what it
+           * does: the picture is taken below, once this iteration's frame has
+           * been drawn, so what is saved is what the user is looking at. */
+          if(ev.key.scancode == SDL_SCANCODE_F12) wantShot = true;
           /* Escape closes the page if one is open, and quits otherwise. */
           if(ev.key.scancode == SDL_SCANCODE_ESCAPE) {
             if(gallery_is_open(gal)) {
@@ -1573,11 +1380,11 @@ int main(int argc, char** argv) {
         gallery_input(gal, held);
       }
 
-      /* The Scenes page (and the observed half of the sprite palettes) get a
-       * machine of their own too, and it is stepped a few milliseconds at a time
-       * so the page stays responsive while it composes. It is kept once built:
-       * the walk across a level is thousands of frames and nobody wants it
-       * repeated because a page was closed. */
+      /* The sprite page gets a machine of its own, and it is stepped a few
+       * milliseconds at a time so the page stays responsive while a frame is
+       * being drawn on it. It is kept once built: the boot into a scene and the
+       * observation pass are thousands of frames between them and nobody wants
+       * either repeated because a page was closed. */
       if(gallery_wants_scenes(gal)) {
         if(scenes == NULL) {
           dlog_stage("gallery: creating the scene machine");
@@ -1640,6 +1447,15 @@ int main(int argc, char** argv) {
       downsample(srcPixels, fb);
     }
 
+    /* The framebuffer is complete and is the picture without the bar: this is
+     * where a screenshot is taken from. Nothing above is touched by it. */
+    if(wantShot) {
+      char said[96];
+      save_screenshot(fb, said, sizeof(said));
+      menubar_notice(bar, said);
+      wantShot = false;
+    }
+
     SDL_UpdateTexture(texture, NULL, fb, FB_W * (int) sizeof(uint32_t));
     int outW = 0, outH = 0;
     SDL_GetRenderOutputSize(renderer, &outW, &outH);
@@ -1700,13 +1516,12 @@ int main(int argc, char** argv) {
         scenes = scenes_create(rom, romLen);
         gallery_set_scenes(gal, scenes);
       }
-      /* Compose, then apply the moves, then compose whatever they asked for: a
-       * move can pick another scene, and a layer toggle only has views to walk
-       * once the first composition has produced them. */
+      /* Run the machine out, then apply the moves, then run out whatever they
+       * asked for: a move can pick another frame, whose render is another boot. */
       for(int pass = 0; pass < 2; pass++) {
         if(gallery_wants_scenes(gal) && scenes != NULL) {
-          if(gallery_section(gal) == GALLERY_SEC_SPRITES) scenes_observe_request(scenes);
-          gallery_render(gal, fb);    /* the page says which scene it wants */
+          scenes_observe_request(scenes);
+          gallery_render(gal, fb);    /* the page says which frame it wants */
           while(scenes_step(scenes, 1000)) { }
         }
         if(pass == 0 && colon != NULL) gallery_nav(gal, colon + 1);
@@ -1720,11 +1535,17 @@ int main(int argc, char** argv) {
     if(scenes == NULL) { scenes = scenes_create(rom, romLen); gallery_set_scenes(gal, scenes); }
     scenes_observe_request(scenes);
     while(scenes_step(scenes, 1000)) { }
-    int o = 0, d = 0, u = 0, first = 0, seen = 0, nobs = 0;
-    gallery_frame_pal_counts(gal, &o, &d, &u, &first);
+    GalleryPalTally t;
+    int first = 0, seen = 0, nobs = 0;
+    gallery_frame_pal_counts(gal, &t, &first);
     scenes_obs_stats(scenes, &seen, &nobs);
-    printf("sprite palettes: %d observed, %d derived only, %d unknown, of %d live frames\n",
-           o, d, u, o + d + u);
+    printf("sprite palettes: %d observed, %d observed via a script, %d derived only,"
+           " %d a guess, of %d live frames\n",
+           t.observed, t.viaScript, t.derived, t.guess,
+           t.observed + t.viaScript + t.derived + t.guess);
+    printf("sprite palettes: %d of %d multi-candidate derived frames changed their top"
+           " candidate once ranked; %d disagreements, observation wins\n",
+           t.reordered, t.multi, t.disagree);
     printf("sprite palettes: %d {scene, frame} cells seen, %d entity-frame observations,"
            " first observed frame is item %d\n", seen, nobs, first);
   }

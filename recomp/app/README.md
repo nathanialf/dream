@@ -8,8 +8,9 @@ There is no launcher and no config file: the controller mapping in
 [docs/RECOMP.md](../../docs/RECOMP.md) is fixed, and `main.c` is where it lives. The
 app's own UI is one desktop-style menu bar across the top of the window (**File**,
 **View**, **Gallery**), drawn by the app itself, since SDL3 has no native menus. The
-game boots straight into play underneath it; nothing the bar offers is persisted, and
-the window's current size is all the app remembers between actions.
+game boots straight into play underneath it; no setting the bar offers is persisted,
+and the window's current size is all the app remembers between actions. The only files
+it writes are `dream.log` and, when the Screenshot item is picked, a PNG.
 
 `dream` and `dream_harness` are the same machine. They share the core, the hook
 dispatcher, the accessors in `harness/snes_state.c` and the cycle charge
@@ -210,7 +211,8 @@ there is no keyboard fallback for player 2 (no UI to configure one).
 | Select | back / select                 | `Shift`       |
 | d-pad  | d-pad, and left stick past half deflection | arrow keys |
 
-`Escape` closes an open gallery page, and quits when there is none.
+`Escape` closes an open gallery page, and quits when there is none. `F12` saves a
+screenshot (see "Screenshots" below).
 
 The menu bar takes the mouse (click a title, click an item) and, as a fallback, the
 keyboard: `Alt` or `F10` focuses it, left/right move between menus, up/down between
@@ -219,9 +221,9 @@ game does not see it, so a menu cannot be walked and played at the same time.
 
 | Menu | Items |
 |------|-------|
-| File | Quit |
+| File | Screenshot (F12), Quit |
 | View | Scale 1x/2x/3x/4x (the window resizes to fit), Fit to window (integer), Aspect 8:7 (square pixels) or 4:3, Fullscreen |
-| Gallery | the nine pages below, and Close gallery |
+| Gallery | the eight pages below, and Close gallery |
 
 The View items change nothing but the window: the machine is not told about them and
 does not run differently at 4x than at 1x. With a gallery page open the bar grows a
@@ -269,6 +271,33 @@ does not run differently at 4x than at 1x. With a gallery page open the bar grow
   is 60.0988 Hz whatever the monitor runs at. A frame more than eight frames late
   abandons the backlog rather than sprinting through it.
 
+### Screenshots
+
+**File > Screenshot**, or `F12`, writes what the viewport is showing to a PNG.
+
+What is saved is the 256x224 framebuffer at its own size: the frame of the game, or
+the gallery page, exactly as it was drawn, with no scaling and without the menu bar.
+The bar is drawn over the picture with SDL primitives rather than into it, and the
+scale the window happens to be at is a property of the window, so neither is baked
+into the file. The picture is taken after the iteration's frame is complete, so what
+lands in the file is what was on the screen when the item was picked.
+
+Where it goes: `screenshots/dream-YYYYMMDD-HHMMSS.png`, in a `screenshots` directory
+beside the executable, created if it is not there. "Beside the executable" is
+`GetModuleFileNameA`'s directory on Windows and `SDL_GetBasePath`'s everywhere else;
+if neither can say, the current directory is used, which is what a run from a
+checkout's own root wants. A second shot inside the same second gets a `-2` after the
+seconds rather than overwriting the first. The menu bar says `saved dream-....png` at
+its right-hand end for four seconds, and the whole path goes into
+[`dream.log`](#when-it-crashes-dreamlog).
+
+The writer is [`png.c`](png.c), about a hundred lines and no new dependency. A PNG's
+image data is a zlib stream and a zlib stream may be nothing but *stored* (literal)
+deflate blocks, so the encoder is the eight-byte signature, `IHDR`, the rows each
+behind a zero filter byte, and `IEND`, with CRC-32 over every chunk and Adler-32 over
+the zlib stream computed in that file. The result is about a third larger than a
+compressed PNG and every viewer reads it.
+
 ## Gallery
 
 A viewer for what the ROM holds and the game never puts on screen, opened from the
@@ -288,17 +317,14 @@ that are unreferenced by construction (`stale`, `filler`, `unknown`, `sprite_fra
 from notes that say so, and from bank `$C1`'s font and picture strips, which
 [docs/data_formats.md](../../docs/data_formats.md) lists as referenced by nothing.
 
-Two pages decode nothing at all. **Sprite frames (live)** makes the game draw the frame
+One page decodes nothing at all. **Sprite frames (live)** makes the game draw the frame
 on a scratch machine and reads the picture back (see "Sprite frames, drawn by the game"
-below), and **Scenes** does the same for a level. A level is not a file: it is several
-tilesets at different VRAM addresses, a metatile map the blitter turns into tilemap
-columns one column a frame as the camera moves, a second static tilemap on another
-layer, a palette row picked per tilemap word, and a scroll register per layer written
-by the mode's own NMI handler. Nothing assembled by hand can be trusted to agree with
-that, so the page does not assemble anything: it boots a second machine (the trick
-`music.c` already uses for the sound driver), walks that machine's camera across the
-level with the game's own code doing every upload, and reads the picture back out of
-the PPU that drew it. See [`scene.h`](scene.h) and "Scenes" below.
+below).
+
+Every page also says where its content comes from, in two lines above the controls: the
+file offsets, the manifest path under `data/` the same bytes extract to, and the routine
+or table that reads them. Where a value is not something the ROM states, the line says
+so.
 
 ### Colour
 
@@ -323,29 +349,40 @@ bytes at those addresses out of your ROM:
   its tiles are referenced with. The title's tiles are 8bpp in BGMODE 3, where the pixel
   byte *is* the CGRAM index, so all 256 title colours apply at once and no row is
   involved.
-- a **sprite frame** page has three sources for its palette and says which it is using.
-  **Observed**: the scene machine runs three of the harness's own input scripts and
+- a **sprite frame** page has four sources for its palette and says which it is using.
+  **Observed**: the scene machine runs five of the harness's own input scripts and
   records, for every frame id an entity is showing while that entity's OAM attribute
   byte is in the OAM the PPU just drew from, the palette bits that byte carries. That is
-  a measurement, not a second derivation. **Derived**: the walk over entity init records
-  and animation scripts that
-  [docs/data_formats.md](../../docs/data_formats.md) 1d sets out, which reaches frames no
-  script ever plays but can only say what the tables allow. **Guess**: for a frame no
-  entity in any scene plays, the eight OBJ palettes of `game_mode` 0, labelled as
-  guesses. Observed pairs come first and are labelled `OBSERVED`; the derived ones
-  follow, labelled `DERIVED`; the guesses come last, labelled `GUESS`. Up and down cycle
-  them and the page names the entity types each belongs to. Over the 1555 live frames the
-  three scripts leave **194 observed, 869 derived only and 492 with neither**: the 492
-  are the frames no animation any of the four scenes' entities can reach, and they say so
-  instead of pretending. What a candidate carries is the whole `entity_flags` word, not
-  just its palette bits: the OBJ tile slot the frame's tiles are DMA'd to and the
-  priority come with it, because a forced render hands the entity that word back. An
-  alternate-format frame is played by nothing at all, so it falls back to the palette its
-  own `{x, y, attr}` records carry.
+  a measurement, not a second derivation. **Observed via script N**: one animation script
+  is played by one entity and an entity's palette is a constant of its init record, so
+  every frame of a script is drawn with the same palette. An observation anywhere in a
+  script is therefore an observation for all of it, and the page says which script it
+  travelled along. **Derived**: the walk over entity init records and animation scripts
+  that [docs/data_formats.md](../../docs/data_formats.md) 1d sets out, which reaches
+  frames no script ever plays but can only say what the tables allow. Several derived
+  candidates are ordered by how much of the tables points at each: the number of
+  animation records that reach the frame through that entity type, and whether the type
+  is one the scene's init table spawns itself rather than one of the three spawn
+  transforms. **Guess**: for a frame no entity in any scene plays, the eight OBJ palettes
+  of `game_mode` 0, ordered by what the nearest frame that does have an entity is given
+  elsewhere. Up and down cycle them and the page names the entity types each belongs to.
+  Over the 1555 live frames the five scripts leave **288 observed, 98 observed via a
+  script, 677 derived only and 492 with neither**: the 492 are the frames no animation
+  any of the four scenes' entities can reach, and they say so instead of pretending.
+  Where an observation and the derivation disagree the observation wins, because it is a
+  measurement; that is **248** frames, and the derived candidate is still listed below
+  the observed one. What a candidate carries is the whole `entity_flags` word, not just
+  its palette bits: the OBJ tile slot the frame's tiles are DMA'd to and the priority
+  come with it, because a forced render hands the entity that word back.
+- a page with **no palette at all** is drawn through a neutral ramp, index 0 transparent
+  and 1-15 an even grey, and says so. That is the alternate sprite frames and the bank
+  `$C1` picture strips: nothing in the ROM reads those bytes, no CGRAM ever holds their
+  colours, and there is nothing to derive one from. The page shows the pixel values
+  rather than a guess at what they were meant to look like.
 - the **picker is still there**, on up/down past the end of the derived list, and every
   page labels it `OVERRIDE picker` and says it is not the palette the game uses. It is
-  the only colour source on the pages that have no other: the unreferenced font and
-  picture strips, the previous build's tiles, and the tile blobs no scene uploads.
+  the only colour source on the pages that have no other: the unreferenced font, the
+  previous build's tiles, and the tile blobs no scene uploads.
 
 ### Controls on a page
 
@@ -353,37 +390,60 @@ The fixed mapping and nothing else: **d-pad or left stick** moves (left/right wa
 the list, up/down walks the palettes a page's current item can be drawn with and then
 the override picker), **L/R** pages or jumps, **B** activates (plays a sample, a song,
 a sound effect) or switches a page's sub-view (Backgrounds: VRAM, the raw set or the
-metatiles; Sprite frames: the game's own render or the file layout; Scenes: which
-layers), **A** closes the page. **Y** walks the four flip combinations on the sprite
-page and zooms on Scenes. On **Scenes** the d-pad scrolls the composed level instead of
-walking a list and **L/R** picks the scene. Moving to a new item returns to that item's own
+metatiles; Sprite frames: the game's own render or the file layout), **A** closes the
+page. **Y** walks the four flip combinations on the sprite page. On **Fonts and picture
+strips** L/R nudge the
+measured tile base by hand, because that base is a measurement and this is how it is
+argued with. Moving to a new item returns to that item's own
 palette: the override is a deliberate act, not a mode. `Escape`, the bar's **Back** item and **Gallery > Close gallery** do the same
 as `A`. Every page prints its own line of controls along the bottom.
 
 ### The pages
 
-- **Scenes**: each `game_mode`'s whole level, and the title screen, composed out of
-  the emulator's own PPU. See "Scenes" below for how, and for what the composed image
-  is and is not.
 - **Sprite frames (live)**: all 1555 frames the frame table at `040000` points at,
   each drawn by the game itself. The page assembles nothing: it puts the frame on one
   entity of a scratch machine already inside a scene and reads the picture out of the
-  PPU that drew it. See "Sprite frames, drawn by the game" below. **B** switches to the
-  file layout, which is the old reconstruction: 16x16 sprites at their OAM positions,
-  the tiles that cannot be placed uniquely spilled into a strip below. **Y** walks the
-  four flip combinations, which are four copies of the emit loop in the ROM and so four
-  pictures the game itself can draw.
-- **Sprite frames (alternate)**: the 113 frames plus the ROM's truncated tail frame
-  in the second format nothing in the ROM reads, with their 8-byte header as hex and
-  their `{x, y, attr}` records counted, drawn with the palette those records' own
-  attribute bytes ask for. The game has no code path for them, so this page keeps the
-  reconstruction: the layout is the documented guess (docs/data_formats.md 1c), one tile
-  per record, in order, the rest spilled, which is why most of a frame ends up in the
-  spill strip. What can be checked is the art. Every live frame's tiles go into one
-  table, 32 bytes to a tile, and every alternate frame's tiles are looked up in it.
-  **No alternate frame shares more than two tiles with any live frame**, so there is no
-  live frame whose placement and palette could be borrowed, and the page says so per
-  frame. The alternate format is separate art, not the live art in another container.
+  PPU that drew it. Nothing of the frame is drawn until that render exists. The box
+  stays empty and says `rendering`, rather than putting up a reconstruction at one size
+  and replacing it with the real thing at another, which moved the image under the eye.
+  The frames either side of the one on screen are drawn in the same idle slices, three
+  each way, so walking the list does not wait. See "Sprite frames, drawn by the game"
+  below. **B** switches to the file layout, which is the old reconstruction. **Y** walks
+  the four flip combinations, which are four copies of the emit loop in the ROM and so
+  four pictures the game itself can draw.
+- **Sprite frames (alternate)**: the 114 frames the manifest lists in the second format
+  nothing in the ROM reads. The layout is no longer a guess. The eight header bytes
+  decode, and they account for each frame's byte length exactly:
+
+      hdr[0]  bit 7   the records carry a third byte, the OAM attribute
+              bits 0-6  n1, the count of 16x16 sprites
+      hdr[1]  n2, 8x8 sprites      hdr[2]  off2, the VRAM tile they start at
+      hdr[3]  n3, 8x8 sprites      hdr[4]  off3, the VRAM tile they start at
+      hdr[5]  nt1, tiles in the first DMA chunk, which lands at VRAM tile 0
+      hdr[6]  vo2, where the second chunk lands   hdr[7]  nt2, its tile count
+
+      length = 8 + (3 or 2) * (n1 + n2 + n3) + 32 * (nt1 + nt2)
+
+  and `nt1 + nt2 = 4 * n1 + n2 + n3` in every frame, which is what a roster of `n1`
+  16x16 sprites and `n2 + n3` 8x8 ones needs. A 16x16 sprite is four tiles in the PPU's
+  own name-table arrangement (`t`, `t+1`, `t+16`, `t+17` across a sixteen-tile VRAM row),
+  and the tile `hdr[2]` names is exactly the next free slot after `n1` of those, in all
+  114. Records are `{x, y}` or `{x, y, attr}`, unsigned, top left, no bias, in file
+  order. There is no spill: every tile the header declares is used by exactly one sprite
+  and none is left over, where the earlier one-tile-per-record reading spilled about two
+  thirds of every frame.
+
+  **107 of the 114 assets the manifest lists have a header that accounts for their whole
+  length**; the other seven carry 7255 bytes beyond it, which is where a further frame
+  starts. The page says so on those frames rather than guessing.
+
+  Colour: none. Nothing references these frames, no CGRAM ever holds their colours, and
+  the attribute byte's palette bits name a row nothing uploads. They are drawn through
+  the neutral ramp and the page says `no palette information in the ROM`. The attribute
+  byte is shown as a fact about the data. The tile-content check is still there: every
+  live frame's tiles go into one table, 32 bytes to a tile, and every alternate frame's
+  tiles are looked up in it. **No alternate frame shares more than two tiles with any
+  live frame.** The alternate format is separate art in a shared container.
 - **Backgrounds**: three views, on **B**. VRAM as a scene's init leaves it is the
   default: all 32 KB, drawn as a tile grid at its VRAM addresses through the scene's
   real CGRAM, with the palette row voted per tile out of the scene's own maps.
@@ -402,35 +462,55 @@ as `A`. Every page prints its own line of controls along the bottom.
   bank `$C1` picture strips, each drawn through its own 32x4 tilemap with its tileset
   below.
 
-  Their tile numbers are VRAM-relative and nothing uploads them, so the base has to
-  come out of the bytes. Each map pads with one index over and over (all three pad with
-  `$044`) and its content runs upward from just above it, so: if the set holds an
-  all-zero tile, that is what the pad means and the base is `pad - (that tile's index)`;
-  if it holds none, the pad is below the set and the base is the lowest content
-  index, which puts the first content tile at tile 0. That gives **`$44`, `$50` and
-  `$43`** (a different base per strip, not the one base for all three the earlier
-  reading assumed), and with them **no word in any of the three maps lands outside its
-  own set**, so nothing spills into the next. The page prints the base, the pad and the
-  count of words outside the set (zero for all three).
+  Their tile numbers are VRAM-relative and nothing uploads them, so the base has to come
+  out of the bytes. The earlier reading took it from a convention: the index the map pads
+  with names an all-zero tile of the set, or failing that the lowest index the map uses.
+  That is right for strips 1 and 3 and wrong for strip 2, whose set holds no all-zero
+  tile at all. The convention put strip 2 ten tiles out and the caption came apart.
 
-  What they say, at those bases: strip 1 reads `STRIKE 1`, strip 2 `TIME` … `OUT`, and
-  strip 3 `HIT BY` … `PITCH`: baseball captions, in a giant-and-bear platformer that
-  has no such screen. Every all-zero tile in a set starts another block of the same
-  shape (strip 1 has four, 312 tiles for a 70-tile caption; strip 3 has three), and
-  re-basing the same map onto strip 1's second block reads as `STRIKE 2`. The later
-  blocks want maps of their own, which are not in the ROM, so they come out mis-tiled;
-  **L/R** walks them and the page says so.
+  So the base is measured. A caption is a picture and a picture's tiles agree along the
+  edges they share, so for every base the map can be read at, the whole map is laid out
+  and the pixels either side of every tile seam are compared. Two scores, because one
+  does not separate every case: a **coarse** one over every seam pixel pair, background
+  included, counting a pair as agreeing when the two indices are within three; and a
+  **fine** one over only the pairs where at least one side has ink, counting a pair when
+  both have ink and are within two. The coarse score picks the base, and where two bases
+  are within half a percent of each other on it the fine score breaks the tie. That gives
 
-  Palette: the maps' words all ask for palette 7 and nothing uploads one, so the page
-  ranks the ROM's own 16-colour rows by how well they suit the art (colour 0 dark and
-  the other fifteen a monotone ramp, which is what a metallic caption needs) and offers
-  the winner as a **guess**, labelled `BEST GUESS`, never as the palette the game uses.
-  Row 7 of the main palette block at `046C48` wins: it is the row the words name, and it
-  is a clean fifteen-step gold ramp. Up and down cycle the runners-up (the title block's
-  row 0, the previous build's row 30, three scene rows) and then the ordinary override
-  picker. The font is 2bpp and only pixel values 0 and 1 ever occur in it, so what
-  matters there is entries 0 and 1: the title palette's row 0 is black then white, and
-  that is the guess it opens on.
+      strip 1   base $44   coarse 95.9%   fine 75.8%
+      strip 2   base $45   coarse 92.7%   fine 82.0%
+      strip 3   base $43   coarse 92.2%   fine 72.6%
+
+  and no map word lands outside its own set at any of them. **L and R nudge the base by
+  hand** and the page prints the one it is using, so the measurement can be argued with.
+
+  The second half is the wrap. These maps are 32 columns of a tilemap, and a tilemap
+  wraps: strip 2's caption sits in columns 21-31 and 0-10, and strip 3's runs off the
+  right and comes back on the left, so both came out cut in half at the screen edge. The
+  rotation is measured the same way: whichever rotation leaves the least ink in the two
+  edge columns, with the inked span centred to break a tie. That is **0, 16 and 16**.
+
+  With the measured base and the measured rotation, strip 1 reads `STRIKE 1`, strip 2
+  `TIME OUT` and strip 3 `HIT BY PITCH`: baseball captions, in a giant-and-bear
+  platformer that has no such screen. The hypothesis that produced all three is one and
+  the same, and the page names it: each map indexes its own tileset, at the base that
+  makes the tile seams agree. The alternatives were tried and rejected. The three sets
+  laid out as one contiguous VRAM block, in file order and in the other orders, and each
+  map read against each of the other two sets, all score worse and none reads as a
+  caption.
+
+  The sets hold more than one caption each. Every all-zero tile in a set starts another
+  block of the same shape: strip 1's set has four and strip 3's has three, while strip
+  2's has none, which is why its base had to be measured rather than read off a blank.
+  Re-basing strip 1's map onto its set's second block reads as `STRIKE 2`. The third and
+  fourth blocks want maps of their own, which are not in the ROM, and come out mis-tiled.
+
+  Colour: none. The maps' words all ask for palette 7 and nothing uploads one, so the
+  strips are drawn through the neutral ramp and the page says `no palette in the ROM`.
+  The named 16-colour rows are still reachable, on up and down, as an explicit override.
+  The font is 2bpp and only pixel values 0 and 1 ever occur in it, so what matters there
+  is entries 0 and 1: the title palette's row 0 is black then white, and that is the
+  guess the font opens on.
 - **Previous build**: the older assembly of the game in the first 32 KB: its 4bpp
   tileset with its *own* palette block at `007AC8` on the picker (508 colours, 32
   rows), that palette as swatches, and its animation-script table at `003000` as a
@@ -444,57 +524,28 @@ as `A`. Every page prints its own line of controls along the bottom.
 - **Stale duplicates**: the 14 stale regions as text, each with the live region its
   note says it shadows.
 
-### Scenes
+### Where a page's content comes from
 
-The level pages are the one part of the gallery that decodes nothing. `scene.c` boots a
-second machine (the same core, the same ROM, from reset, exactly as `music.c` does for
-the sound driver) and replays as much of
-[`recomp/harness/inputs/mode_cycle.txt`](../harness/inputs/mode_cycle.txt) as it takes
-to enter the scene (Start, then one Select per mode) and then holds no button at all,
-because that script keeps advancing the mode every 120 frames and a walk across a level
-runs for thousands. From there it walks the camera along the level and reads the picture
-back out of the PPU.
+Every page carries two lines above its controls saying which bytes of the user's ROM it
+is showing and what the program does with them: the file offsets, the manifest path
+under `data/` the same bytes extract to, and the routine or table that reads them. They
+are drawn in the ROM's own font like everything else. Where a value is not something the
+ROM states, the line says so, the way the palettes already do.
 
-**How the camera is driven.** `camera_follow_player` (`$C0:A1B0`) is a clamp and nothing
-else (`camera_x = clamp(entity_x[0] - $80, 0, level_width_mask)`, and the same for y
-outside `game_mode` 1), so writing the player's position *is* writing the camera's. The
-scene machine installs one CPU hook, at that routine's own entry address, which writes
-the position the walk wants and then returns false so the ROM's own routine runs and
-does the clamping. No instruction is replaced. Everything downstream is the game's:
-`build_metatile_column_580` lays down one tilemap column, `vram_upload_column_580` DMAs
-it, the mode's NMI handler writes the scroll registers. The walk steps 8 pixels a frame
-because that is exactly one column a frame, which is the rate the blitter keeps up with.
-
-**What a screen is.** Every 256 pixels the walk stops the camera for two frames (each
-mode's NMI handler writes the scroll registers from the camera the *previous* frame
-computed, so a frame taken while the camera is still moving is drawn two columns away
-from where `camera_x` says it is), and then renders 224 lines with `ppu_runLine` and
-blits the result at the camera it was taken at. Each screen is rendered once per view:
-once with every layer the mode's TM enables and once with each of those layers on its
-own, so **B** toggles between them without walking the level again.
-
-**What is switched off, and why.** OBJ is off (a level shot with the player standing in
-it is not a level shot), forced blank is off and brightness is 15 (a frame captured
-mid-fade would otherwise be black), and HDMA is off: every register a channel drives is
-put back to the value the mode's init and the mode's scroll handler wrote, rather than the
-channel being switched off. That matters: `game_mode` 1's HDMA switches BG1's tilemap halfway down
-the screen and `game_mode` 3's rewrites TM, so the value left at the end of a frame is
-the last scanline's rather than the scene's. Without the restore, mode 1's level layer
-does not appear at all. What HDMA leaves in CGRAM is still there, so mode 1's
-`$00-$0F` hold the last scanline's colours
-([docs/data_formats.md](../../docs/data_formats.md), "CGRAM after the init").
-
-**What it costs.** One emulated frame per 8 pixels of camera travel, per vertical band:
-`game_mode` 0 is 3840x512 and takes 1904 frames and 45 screens, about nine seconds. It
-is composed on demand, one scene at a time, in 12-millisecond slices while the page
-stays responsive, and cached until another scene is asked for. The page draws a progress
-bar and says what the walk is doing.
-
-**Where it can disagree with the game.** The layer the metatile blitter feeds is
-continuous across the whole composition, so a crop of it at any camera position is the
-frame the game draws there. A parallax layer is not: it moves at its own rate, so it
-steps 256 pixels of *its* travel per screen and can jump at a screen boundary. That is
-what the layer toggle is for, and `--scene-verify` measures both (below).
+    Sprite frames   frame 565: file 0A7581 (frame_0565.bin)
+                    drawn by the game in game_mode 0, type $02 pal 0 (observed)
+    Backgrounds     VRAM as game_mode 0 leaves it: 8 uploads replayed
+                    first 0502C0 -> $1600 (C08314), CGRAM from 046DA8
+    Fonts/strips    bank $C1 leftovers, referenced by nothing
+                    map 012800 (tilemap_strip2.bin), tiles 012900 (tiles_strip2.bin)
+    Previous build  stale image 000000-008000: an older assembly
+                    tiles 004B00, palette 007AC8, anim table 003000
+    Samples         BRR record 12 at 01C480 (sample_12.bin)
+                    decoded here; a song's sample list names it
+    Music           song block 02119F (song_02.bin)
+                    uploaded to SPC $1300 by spc_command(2)
+    Stale           stale region 000000-008000 (prev_build.bin)
+                    the manifest note names the live region it shadows
 
 ### Sprite frames, drawn by the game
 
@@ -502,7 +553,8 @@ The live sprite page used to assemble a picture out of the frame file, and the a
 was a guess: which tile goes where, which palette, which spill. It assembles nothing now.
 It makes the game draw the frame.
 
-**How.** `scene.c` boots a second machine into a scene the way the Scenes page does, and
+**How.** `scene.c` boots a second machine from reset, replays as much of
+[`mode_cycle.txt`](../harness/inputs/mode_cycle.txt) as it takes to enter the scene, and
 from then on writes one entity's record from a hook at `entity_build_oam_frame`'s own
 entry address ($C0:A538). Slot 0 gets the frame id asked for, the flag word asked for
 (palette, priority, the two flip bits and the OBJ tile slot), and a position taken from
@@ -538,12 +590,24 @@ outside the entity's range is pushed to X = 256, which reads as -256 and is past
 widest sprite the PPU has.
 
 Shots are cached by frame, scene and flag word. The first frame asked for in a scene pays
-that scene's boot, about a second, sliced by the same job stepper the Scenes page uses;
+that scene's boot, about a second, sliced by the same job stepper the sprite page uses;
 every one after that costs the handful of NMIs the upload and the OAM build take.
+
+**Nothing is drawn until the render exists.** The page used to put the file-layout
+reconstruction up first and replace it with the game's render when that arrived, which
+moved the image under the eye: the two are different pictures at different sizes. The
+box now stays empty and says `rendering` until the cached render is there. The file
+layout is still reachable, as the explicit **B** sub-mode.
+
+**The neighbours are drawn ahead.** Whenever the frame on screen is in hand and the
+machine is idle, the page asks it for the next frame, then the previous one, then two
+and three either way, in that order, each with the scene and flag word that frame's own
+evidence names. That happens in the same 12 ms slices the page already gives the scene
+machine, so walking the list with left and right does not wait on the machine.
 
 **What it is checked against: `--sprite-verify`.** Two passes.
 
-The first is the gate. The three observation scripts are walked once more and, the first
+The first is the gate. The five observation scripts are walked once more and, the first
 time a frame id has stood still for two builds, that entity is cropped out of the frame
 the game is actually showing. Standing still for two builds matters: the OAM the builder
 assembles in frame N is DMA'd by the next frame's scroll handler and the tiles it queues
@@ -553,14 +617,15 @@ animation changes the game is drawing the previous frame's tiles. Then the same 
 is forced onto a scratch machine with the same scene and the same flag word, and the two
 crops are compared in the entity's own box. As it stands:
 
-    observed frames        194 of 1555 live frames
-    crops taken            182
-    no crop                 12   the game showed the frame for one build only
-    exact, whole sprite    132/182
-    exact where comparable  50   the game's own sprite met a screen edge
+    observed frames        288 of 1555 live frames
+    crops taken            252
+    no crop                 36   the game showed the frame for one build only
+    exact, whole sprite    196/252
+    exact where comparable  56   the game's own sprite met a screen edge
     differ                   0
+    not drawn                0
 
-The 50 are frames the running game only ever showed part of on screen. The part of the
+The 56 are frames the running game only ever showed part of on screen. The part of the
 box both pictures cover is exact for all of them; the part the screen edge cut off is not
 there to compare. Nothing differs.
 
@@ -568,11 +633,23 @@ The second pass renders every live frame once, with the scene and flag word the 
 would use:
 
     every live frame      1555 drawn, 0 refused, of 1555
-                          194 at an observed palette, 869 derived, 492 a guess
+                          288 at an observed palette, 98 observed via a script,
+                          677 derived, 492 a guess
+    derived, ranked       0 of 598 with more than one candidate changed their top
+                          candidate once ranked
+    observation wins      248 frames where an observation and the derivation name
+                          different palettes
 
-And the alternate-format check, which is the tile-content comparison described under
-**Sprite frames (alternate)** above:
+The ranking changed nothing, which is itself the finding: the table walk reaches the
+init table's slots in order and the entity that provides the most animation records is
+already the first one recorded for every frame that has several candidates, so the two
+orders agree. The 248 disagreements are where the observation and the derivation name
+different palettes; the observation wins and the derived candidate is still listed.
 
+And the alternate-format checks:
+
+    alternate headers     107 of 114 account for their asset's length exactly;
+                          7255 bytes beyond, where another frame starts
     alternate frames        0 of 114 have a nearest live frame
                             the most tiles any one shares with a live frame is 2
 
@@ -627,65 +704,19 @@ More exist for the gallery, and are equally not features:
 
     --screenshot FILE       write the 256x224 framebuffer as a binary PPM at exit
     --screenshot-ui FILE    write the whole window, menu bar included, as a PPM
-    --gallery SEC[:NAV]     open a gallery page first (scenes, sprites, alt,
+    --gallery SEC[:NAV]     open a gallery page first (sprites, alt,
                             backgrounds, fonts, prev, music, samples, stale), then
                             apply NAV, one press per character: u d l r for the
                             d-pad, p/n for L/R, b x y and a for the buttons
     --gallery-toggle N,IT   at frame N open the gallery, spend IT iterations walking
                             every section, close it, carry on
-    --scene-dump M[,V]:F    compose scene M (0-3, 4 = the title) and write view V
-                            (0 = every layer, n = BG n alone) as a PPM of its own size
-    --scene-probe M:X:Y:V:F one composed screen at camera (X, Y), as a 256x224 PPM
-    --scene-verify [DIR]    compose every scene and compare it against the running
-                            game, printing the pixel counts; with DIR, write the
-                            pictures it compared
     --sprite-pal-report     run the OAM observation pass and print how the 1555 live
-                            frames come out: observed, derived only, neither
+                            frames come out: observed, observed via a script, derived
+                            only, neither
     --sprite-probe F:M:X:P  draw frame F in game_mode M with entity_flags X (hex)
                             and write the crop as a PPM of its own size
     --sprite-verify         every forced sprite render against the running game,
                             then every live frame once
-
-`--scene-verify` is the gate on the Scenes page. For each scene it composes the level
-the way the page does, boots a second machine the ordinary way (the harness script, no
-walk, no camera hook) and holds it until its camera has stopped moving, renders that
-machine's BG layers through the same PPU with the same masking, and compares that screen
-against the composed image cropped at the camera the second machine is at. As it stands:
-
-    game_mode 0    level layer   57344/57344 exact      all layers   one screen exact
-    game_mode 1    level layer   57344/57344 exact
-    game_mode 2    level layer   57344/57344 exact
-    game_mode 3    level layer   57344/57344 exact      all layers   one screen exact
-    title screen   all layers    57344/57344 exact
-
-The level layer is exact in every scene, both as a single composed screen and as a crop
-out of the stitched image. The all-layers rows differ where the crop straddles two of
-the screens the composition took, because the parallax layers step at their own rate
-between them; in modes 1 and 2 a single screen differs as well, and the difference is
-confined to the band those modes drive with a per-scanline HDMA scroll (mode 1's floor,
-mode 2's horizon), which is what "HDMA off" cannot reconstruct from one frame.
-
-`--scene-verify` also checks the Backgrounds page's metatile view against the same
-composed scenes. A composed level is the game's own blitter output, so every 32x32 cell
-of it should be one of the scene's metatiles as the page draws it. Eight cells a scene,
-near the level start, each compared first against the metatile the level map's own word
-names and then against every metatile the scene has:
-
-    game_mode 0    8 of 8 cells are exactly a metatile, 8 of them the one the map names
-    game_mode 1    8 of 8 cells are exactly a metatile, 7 of them the one the map names
-    game_mode 2    8 of 8 cells are exactly a metatile, 8 of them the one the map names
-    game_mode 3    8 of 8 cells are exactly a metatile, 8 of them the one the map names
-
-Every cell checked is exactly a metatile the view draws, pixel for pixel, and 31 of the
-32 are the one the level map names at that cell. Three cases are excluded from the
-comparison first. Cells are taken near the level start, because the streaming
-descriptors at `$80:B208` re-upload palettes as the camera moves while the page's CGRAM
-is the one the init leaves; a cell whose metatile names a CGRAM row the scene's HDMA
-rewrites is skipped, which is 21 cells in `game_mode` 1 (docs/data_formats.md, "CGRAM
-after the init"); and only the pixels the metatile itself owns are compared, because
-where its tile pixel is zero the picture is the backdrop. `game_mode` 0 and 1 write their
-level layer's vertical scroll one line off the camera the composition blits at, so the
-grid offset is found once per scene from the first cell and held.
 
 The frame line is byte-identical to the one `dream_harness` prints, so:
 

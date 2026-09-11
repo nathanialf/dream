@@ -89,7 +89,7 @@ Full region table (112 regions covering all 2 MiB, with ASCII tile renders and e
 | share | format |
 |-------|--------|
 | 56.1% | sprite frames: `{ptr16, bank, y-bias}` table at `0x040000` (1556 frames); each frame = 8-byte header, `{x,y}` OAM records, raw 4bpp tiles; banks `$CA-$DC` |
-| 9.5%  | alternate sprite-frame format (`{x,y,attr}` records) at `0x1CC6AA-0x1FFEE5`, unreferenced by live code |
+| 9.5%  | 120 sprite frames in the same container with `{x,y,attr}` records at `0x1CC6AA-0x1FFEE5`, unreferenced by live code; visually baseball player sprites, Winning Run leftovers per the maintainer (unverified against that ROM) |
 | ~10%  | level scenes: raw 4bpp BG tilesets (`$C7-$CA`), 4x4-word metatiles, column-major u16 maps with flip bits, 2 KB tilemaps, palettes and HDMA colour tables in `$C4` |
 | title | BG mode 3: 627 raw 8bpp tiles at `0x06002B`, 256-colour palette at `0x06A36B`, INIDISP HDMA table at `0x00C00D`; header text "FRAME 1"/"FRAME 3" is the only ASCII in the image |
 | 3.5%  | 51 BRR samples `{loop, len, data}` at `0x023095-0x035163`, bounds from the SPC pointer table |

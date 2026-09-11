@@ -306,3 +306,10 @@ Scripts used for this pass are not part of the repository (per `docs/LEGAL.md`, 
 extraction tooling tied to a specific ROM copy is committed); they lived under this session's
 scratchpad and are not needed to reproduce the byte-level claims above, which quote offsets and
 lengths directly.
+
+## Maintainer identification (2026-09-11)
+
+With the alternate frames assembled through their decoded headers, the maintainer identified them
+visually as baseball player sprites, consistent with Ken Griffey Jr.'s Winning Run (Rare, 1996) and
+with the STRIKE 1 / TIME OUT / HIT BY PITCH caption strips in bank $C1. The Winning Run ROM is not in
+the library, so this stays a visual identification, not a byte match.

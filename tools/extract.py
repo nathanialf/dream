@@ -4,6 +4,11 @@ then write the named per-asset files listed in config/assets.txt.
 
     python3 tools/extract.py baserom/DREAM.sfc data/
 
+Both halves of the output go under the directory named on the command line. The paths in
+config/assets.txt are written as `data/<kind>/<name>.bin`; the leading `data/` names the
+output directory, so the asset files follow outdir wherever it points instead of always
+landing in the repository's own data/.
+
 Nothing produced here is committed; data/ is gitignored (both the half-bank files, which src/
 still depends on, and the per-asset files under data/<kind-dir>/, which are the phase-3 named
 extraction: config/assets.txt is checked in as derived text, the bytes it names are not).
@@ -16,18 +21,25 @@ import gen_assets
 EXPECTED_SHA1 = '2675d7afe886f20462337aa1ee3aa5c3135fff3a'
 SIZE = 0x200000
 
+def asset_dest(outdir, path):
+    """config/assets.txt paths are `data/<kind>/<name>.bin`. The `data/` prefix is the
+    output directory, not a fixed location in the repository."""
+    rel = path[len('data/'):] if path.startswith('data/') else path
+    return os.path.join(outdir, rel)
+
 def write_asset_files(rom, outdir, assets_path):
     assets = gen_assets.parse_assets_file(assets_path)
     gen_assets.verify_assets(assets)
-    root = os.path.normpath(os.path.join(os.path.dirname(assets_path), '..'))
     for (start, end, kind, path, note) in assets:
-        full = os.path.join(root, path)
+        full = asset_dest(outdir, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, 'wb') as fp:
             fp.write(rom[start:end])
-    print(f'extracted {len(assets)} named assets under data/')
+    print(f'extracted {len(assets)} named assets under {outdir}')
 
 def main():
+    if len(sys.argv) != 3:
+        sys.exit(f'usage: {sys.argv[0]} <rom> <outdir>')
     rom_path, outdir = sys.argv[1], sys.argv[2]
     root = os.path.dirname(os.path.abspath(__file__)) + '/..'
     assets_path = os.path.join(root, 'config', 'assets.txt')

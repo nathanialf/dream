@@ -5,6 +5,11 @@ Standalone, no dependencies.  Usage:
 
     python3 tools/trace_spc700.py [baserom/DREAM.sfc] [spc/]
 
+The ROM is validated by size and SHA-1 first, the way tools/extract.py validates it. The
+block loads below are bytearray slice assignments, so a short ROM would silently shrink
+the 64 KB image instead of failing, and a 512-byte copier header would shift every
+offset in the trace.
+
 Builds the SPC700 RAM image from the two blocks that the 65816 side uploads
 (see out/dream.asm, spc_ipl_upload_loader / spc_upload_driver):
 
@@ -26,6 +31,7 @@ count of 0 (sub_C1803E) which the loader treats as "jump here", so the driver
 entry is $0672.  Nothing in the driver uses tcall/pcall, so the IPL-space
 vectors are irrelevant.
 """
+import hashlib
 import os
 import sys
 
@@ -418,6 +424,24 @@ BLOCKS = [
     (0x20000, 0x88, 0x04D8, 'IPL loader (spc_ipl_upload_loader)'),
     (0x20088, 0x699 * 2, 0x0560, 'main driver (spc_upload_driver, 0x699 words)'),
 ]
+
+
+EXPECTED_SHA1 = '2675d7afe886f20462337aa1ee3aa5c3135fff3a'
+EXPECTED_SIZE = 0x200000
+
+
+def load_rom(path):
+    """The same three checks tools/extract.py makes, in the same order."""
+    with open(path, 'rb') as f:
+        rom = f.read()
+    if len(rom) == EXPECTED_SIZE + 512:           # copier header
+        rom = rom[512:]
+    if len(rom) != EXPECTED_SIZE:
+        sys.exit('%s: expected %d bytes, got %d' % (path, EXPECTED_SIZE, len(rom)))
+    sha1 = hashlib.sha1(rom).hexdigest()
+    if sha1 != EXPECTED_SHA1:
+        sys.exit('%s: sha1 %s does not match %s' % (path, sha1, EXPECTED_SHA1))
+    return rom
 
 
 class Image:
@@ -970,8 +994,7 @@ def emit_map(tr, path):
 def main():
     rom_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), '..', 'baserom', 'DREAM.sfc')
     out_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), '..', 'spc')
-    with open(rom_path, 'rb') as f:
-        rom = f.read()
+    rom = load_rom(rom_path)
     img = Image(rom)
     tr = Tracer(img)
     tr.add_root(0x04D8, 'sub', 'IPL jump target (spc_ipl_upload_loader writes $04D8 to APUIO2)')

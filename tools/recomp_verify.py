@@ -14,6 +14,7 @@ CGRAM, OAM, the SPC700's 64 KB of ARAM, the 128 DSP registers and the SPC
 registers, so one pass proves both.
 
     python3 tools/recomp_verify.py                    # report only, exit 1 on failure
+    python3 tools/recomp_verify.py --check            # the same, plus config/recomp.txt
     python3 tools/recomp_verify.py --spc-hooks off    # the 65816 side alone
     python3 tools/recomp_verify.py --no-cpu           # candidate = the no-cpu machine
     python3 tools/recomp_verify.py --units            # the routine-level gate alone
@@ -27,7 +28,9 @@ comparison one routine at a time: `dream_harness --unit config/recomp_units.txt`
 boots the ROM to a named frame of a named script, seeds the registers and a few
 memory cells, runs the ROM's own code and the C body from that identical state,
 and compares all seven regions, every register and the cycle counts. Each
-routine carries at least four seeds and all of them must pass.
+routine carries at least four seeds and all of them must pass; a routine with
+fewer than four fails the gate rather than being credited, and a missing or
+empty spec file is an error rather than a pass with an empty credit set.
 
 `--no-cpu` runs every script with the candidate machine executing no instructions
 at all on either processor: the C bodies are the program and the scheduler in
@@ -38,6 +41,12 @@ port's dead-code check. The instruction count each script executed is printed
 next to its result. It cannot `--update`: the call counts it reports are the
 scheduler's dispatches, which are fewer than the ordinary run's wherever the ROM
 used to re-enter a routine after a yield.
+
+`--check` runs both gates and then compares the set of routines they credit against
+the names in config/recomp.txt. That file is written only by `--update`, so without
+this nothing notices when a routine is deleted, renamed or made unreachable: the gate
+passes, and tools/progress.py keeps counting its traced bytes towards the `recomp`
+badge. `make recomp-check` runs this mode.
 
 `--update` writes config/recomp.txt (which tools/progress.py credits to the
 `recomp` badge) with the routines that passed by either method: the names are the
@@ -66,6 +75,9 @@ INPUTS = ROOT / 'recomp' / 'harness' / 'inputs'
 RECOMP_TXT = ROOT / 'config' / 'recomp.txt'
 UNITS_TXT = ROOT / 'config' / 'recomp_units.txt'
 DEFAULT_FRAMES = 900
+# recomp/README.md and docs/RECOMP.md both promise at least this many seeded states
+# per routine. Nothing used to hold the data to it.
+MIN_UNIT_SEEDS = 4
 
 HOOK_LINE = re.compile(r'^hook ([0-9A-F]{6}) (\S+)\s+(\d+) calls?$')
 SPC_HOOK_LINE = re.compile(r'^spchook ([0-9A-F]{4}) (\S+)\s+(\d+) calls?$')
@@ -118,7 +130,10 @@ def run_units() -> tuple[bool, dict[str, int], list[str], str]:
     one bad seed withdraws the whole routine rather than being averaged away.
     """
     if not UNITS_TXT.exists():
-        return True, {}, [], f'{UNITS_TXT.name} not present: no routine-level gate'
+        # Not a pass. Without the spec the 42 routines it covers are unverified, and
+        # every one of them keeps its `; unit` credit in config/recomp.txt.
+        return (False, {}, [f'{UNITS_TXT.name} is missing: the routine-level gate '
+                            f'has no spec, so nothing was run'], '')
     cmd = [str(HARNESS), '--unit', str(UNITS_TXT)]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     seeds: dict[str, int] = {}
@@ -141,8 +156,63 @@ def run_units() -> tuple[bool, dict[str, int], list[str], str]:
             summary = line
     if proc.returncode not in (0, 1):
         failures.append(proc.stderr.strip() or 'harness error')
-    passed = {n: k for n, k in seeds.items() if n not in bad}
+    if not seeds and not failures:
+        # A comment-only spec makes the harness print `0 seeds over 0 routines,
+        # 0 failed` and exit 0, which read as a pass with an empty credit set.
+        failures.append(f'{UNITS_TXT.name} yielded no seeds: nothing was compared')
+    short = sorted(n for n, k in seeds.items()
+                   if n not in bad and k < MIN_UNIT_SEEDS)
+    for n in short:
+        failures.append(f'{n} carries {seeds[n]} seeds, fewer than the '
+                        f'{MIN_UNIT_SEEDS} every routine must have')
+    passed = {n: k for n, k in seeds.items()
+              if n not in bad and n not in short}
     return proc.returncode == 0 and not failures, passed, failures, summary
+
+
+def credited_names(text: str) -> set[str]:
+    """The routine names config/recomp.txt credits: one per line, the label before
+    any `; unit (N seeds)` suffix. Comment lines, including the list of uncredited
+    routines at the end, are not credits. tools/progress.py reads the file the same
+    way (tools/progress.py, compute())."""
+    out: set[str] = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(';'):
+            continue
+        out.add(line.split(';', 1)[0].strip())
+    return out
+
+
+def check_recomp_txt(called: dict[str, list[str]],
+                     unit_only: dict[str, list[str]]) -> int:
+    """M4: config/recomp.txt is written only by --update, so a routine that was
+    deleted, renamed or made unreachable by every script keeps its credit and its
+    traced bytes in the `recomp` badge for as long as nobody re-runs --update. This
+    recomputes the credited set from the run that just happened and refuses when the
+    committed file says something else."""
+    if not RECOMP_TXT.exists():
+        print(f'recomp_verify: {RECOMP_TXT.relative_to(ROOT)} is missing; run '
+              f'`python3 tools/recomp_verify.py --update`', file=sys.stderr)
+        return 1
+    want = set()
+    for side in ('65816', 'spc700'):
+        want |= set(called[side]) | set(unit_only[side])
+    have = credited_names(RECOMP_TXT.read_text())
+    stale = sorted(have - want)
+    missing = sorted(want - have)
+    print()
+    if not stale and not missing:
+        print(f'{RECOMP_TXT.relative_to(ROOT)}: {len(have)} routines, all of them '
+              f'credited by this run')
+        return 0
+    print(f'{RECOMP_TXT.relative_to(ROOT)} does not match what the gates just credited:')
+    for n in stale:
+        print(f'  credited in the file, not credited by this run: {n}')
+    for n in missing:
+        print(f'  credited by this run, absent from the file:      {n}')
+    print('Re-run `python3 tools/recomp_verify.py --update` and commit the result.')
+    return 1
 
 
 def main() -> int:
@@ -150,6 +220,9 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--update', action='store_true',
                     help='rewrite config/recomp.txt from the result')
+    ap.add_argument('--check', action='store_true',
+                    help='run both gates, then refuse if the routines they credit '
+                         'are not the ones config/recomp.txt names')
     ap.add_argument('--frames', type=int, default=None,
                     help='override the frame count for every script')
     ap.add_argument('--only', default=None,
@@ -164,15 +237,25 @@ def main() -> int:
                          'instead of the input scripts')
     args = ap.parse_args()
 
-    if args.update and args.spc_hooks == 'off':
-        print('recomp_verify: --update needs --spc-hooks on, or the SPC routines '
-              'would be written out as unverified', file=sys.stderr)
+    if args.update and args.check:
+        print('recomp_verify: --update rewrites config/recomp.txt, --check compares '
+              'against it; pick one', file=sys.stderr)
         return 2
 
-    if args.update and args.no_cpu:
-        print('recomp_verify: --update writes config/recomp.txt from the ordinary '
-              'run, not the --no-cpu one, whose call counts are the scheduler\'s '
-              'dispatches', file=sys.stderr)
+    if (args.update or args.check) and args.spc_hooks == 'off':
+        print('recomp_verify: --update and --check need --spc-hooks on, or the SPC '
+              'routines would all look unverified', file=sys.stderr)
+        return 2
+
+    if (args.update or args.check) and args.no_cpu:
+        print('recomp_verify: --update and --check read config/recomp.txt against the '
+              'ordinary run, not the --no-cpu one, whose call counts are the '
+              'scheduler\'s dispatches', file=sys.stderr)
+        return 2
+
+    if args.frames is not None and args.frames < 1:
+        print('recomp_verify: --frames needs a positive count; 0 used to fall back to '
+              'the script header without saying so', file=sys.stderr)
         return 2
 
     if args.no_cpu and args.only:
@@ -187,9 +270,9 @@ def main() -> int:
 
     if args.units:
         # the routine-level gate on its own: no scripts, nothing to update
-        if args.update:
-            print('recomp_verify: --update runs both gates by itself; drop --units',
-                  file=sys.stderr)
+        if args.update or args.check:
+            print('recomp_verify: --update and --check run both gates by themselves; '
+                  'drop --units', file=sys.stderr)
             return 2
         ok, passed, unit_failures, summary = run_units()
         for name in sorted(passed):
@@ -262,12 +345,13 @@ def main() -> int:
         print('FAILED: ' + ', '.join(failures))
         return 1
 
-    if not args.update:
+    if not (args.update or args.check):
         return 0
 
     # The second gate: the routines no script can reach, each proved against the
     # ROM from a seeded state instead (config/recomp_units.txt). It runs here so
-    # that --update credits by either method and says which.
+    # that --update credits by either method and says which, and so that --check
+    # compares against the same two-gate result the file was written from.
     unit_ok, unit_seeds, unit_failures, unit_summary = run_units()
     print()
     if unit_summary:
@@ -330,10 +414,14 @@ def main() -> int:
             '; reaches them, or a seed spec, before they can count:',
         ]
         lines += [f';   {n}' for n in sorted(uncalled[side])]
-    RECOMP_TXT.write_text('\n'.join(lines) + '\n')
     total_called = len(called['65816']) + len(called['spc700'])
     total_unit = len(unit_only['65816']) + len(unit_only['spc700'])
     total_uncalled = len(uncalled['65816']) + len(uncalled['spc700'])
+
+    if args.check:
+        return check_recomp_txt(called, unit_only)
+
+    RECOMP_TXT.write_text('\n'.join(lines) + '\n')
     print(f'updated {RECOMP_TXT.relative_to(ROOT)} with {total_called + total_unit} routines'
           f' ({total_called} by script, {total_unit} by unit lockstep)'
           + (f', {total_uncalled} unverified' if total_uncalled else ', 0 unverified'))

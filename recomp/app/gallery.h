@@ -20,8 +20,7 @@
 
 /* Sections, in menu order. */
 enum {
-  GALLERY_SEC_SCENES = 0,    /* the levels, composed out of the game's own PPU */
-  GALLERY_SEC_SPRITES,       /* live sprite frames */
+  GALLERY_SEC_SPRITES = 0,   /* live sprite frames */
   GALLERY_SEC_SPRITES_ALT,   /* alternate-format frames, unread by the game */
   GALLERY_SEC_BACKGROUNDS,   /* tilesets, with a palette picker */
   GALLERY_SEC_FONTS,         /* the unreferenced font and the bank $C1 picture strips */
@@ -44,12 +43,12 @@ typedef struct Gallery Gallery;
 /* `rom` must stay alive and unmodified for the gallery's lifetime; it is only read. */
 Gallery* gallery_create(const uint8_t* rom, size_t romLen);
 
-/* The scene composer (scene.c), which owns a machine of its own and so cannot
+/* The scene machine (scene.c), which owns an emulator of its own and so cannot
  * live in here: main.c creates it when a page that needs it is opened and steps
  * it while the page is up. NULL means "not available yet". */
 struct Scenes;
 void gallery_set_scenes(Gallery* g, struct Scenes* sc);
-/* True while an open page still wants the composer stepped. */
+/* True while an open page still wants that machine stepped. */
 bool gallery_wants_scenes(const Gallery* g);
 
 /* How the live sprite frames come out: seen in OAM by the scene machine, derived
@@ -60,8 +59,20 @@ bool gallery_wants_scenes(const Gallery* g);
  * entity array holds, the scene, and the entity flag word (OBJ tile slot,
  * palette, priority). `source` says where the palette came from. */
 #define GALLERY_PAL_OBSERVED 0
-#define GALLERY_PAL_DERIVED  1
-#define GALLERY_PAL_GUESS    2
+#define GALLERY_PAL_SCRIPT   1
+#define GALLERY_PAL_DERIVED  2
+#define GALLERY_PAL_GUESS    3
+
+/* How the 1555 live frames come out. `viaScript` is the frames the machine never
+ * saw itself but that share an animation script with one it did; `reordered` is
+ * how many of the frames whose best evidence is the derivation had more than one
+ * derived candidate and came out on a different one once they were ranked;
+ * `disagree` is where an observation and the derivation name different palettes,
+ * which the observation wins. */
+typedef struct {
+  int observed, viaScript, derived, guess;
+  int multi, reordered, disagree;
+} GalleryPalTally;
 typedef struct {
   uint16_t frameId;
   uint16_t flags;
@@ -69,24 +80,14 @@ typedef struct {
   uint8_t source;
 } GalleryFramePlan;
 int gallery_live_count(const Gallery* g);
-uint16_t gallery_cgram_entry(const Gallery* g, int mode, int entry);
-unsigned gallery_metatile_rows(const Gallery* g, int mode, int index);
 bool gallery_frame_plan(const Gallery* g, int item, GalleryFramePlan* out);
 /* Alternate-format frames, and how many of them a live frame shares tiles with. */
 void gallery_alt_counts(const Gallery* g, int* total, int* withNearest, int* sharedTiles);
+/* How many alternate frames the decoded header accounts for exactly. */
+void gallery_alt_header_fit(Gallery* g, int* exact, int* total, int* beyond);
 
-/* One 32x32 metatile of a scene, composed through the VRAM and CGRAM that
- * scene's init leaves, into `out` (32*32 pixels, 0xRRGGBBXX). `flip` carries the
- * level map word's bits 14 and 15. `opaque`, when given, is 32*32 bytes and gets
- * 1 where the tile pixel was not the transparent value: everywhere else the
- * picture is the backdrop, which the metatile does not own. */
-#define GALLERY_META_PX 32
-int gallery_metatile_count(const Gallery* g, int mode);
-bool gallery_metatile(const Gallery* g, int mode, int index, unsigned flip, uint32_t* out,
-                      uint8_t* opaque);
-
-void gallery_frame_pal_counts(const Gallery* g, int* observed, int* derived,
-                              int* unknown, int* firstObserved);
+void gallery_frame_pal_counts(const Gallery* g, GalleryPalTally* out,
+                              int* firstObserved);
 void gallery_destroy(Gallery* g);
 
 const char* gallery_section_name(int section);

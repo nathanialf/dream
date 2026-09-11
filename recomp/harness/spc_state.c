@@ -340,7 +340,7 @@ static bool sps_in_ipl(const SpcState* sp, uint16_t pc) {
 
 static void sps_nocpu_no_body(SpcState* sp, uint16_t pc) {
   fprintf(stderr,
-          "dream_harness: --no-cpu: no SPC700 C body at %04X, %d bod%s in flight\n",
+          "recomp: no-cpu: no SPC700 C body at %04X, %d bod%s in flight\n",
           pc, sp->depth, sp->depth == 1 ? "y" : "ies");
   exit(3);
 }
@@ -395,7 +395,7 @@ static bool sps_nocpu_hook(void* ctx, Spc* spc, uint16_t pc) {
   }
   const bool resume = sp->suspended && sp->suspendPc == pc;
   if(sp->suspended && !resume) {
-    fprintf(stderr, "dream_harness: --no-cpu: the SPC700 stopped at %04X but is "
+    fprintf(stderr, "recomp: no-cpu: the SPC700 stopped at %04X but is "
                     "being asked to run %04X\n", sp->suspendPc, pc);
     exit(2);
   }

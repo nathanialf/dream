@@ -74,6 +74,7 @@ add_executable(dream
   gallery.c
   menubar.c
   music.c
+  png.c
   scene.c
   ${GALLERY_TABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/../harness/snes_state.c
