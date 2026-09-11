@@ -755,7 +755,7 @@ static int scene_probe(const uint8_t* rom, size_t romLen, const char* spec) {
  * says the view draws what the game draws; a cell that is exactly the metatile
  * the map names says the map reading is right as well.
  *
- * Two things are taken out first. The cells are near the level start, because
+ * Two cases are excluded first. The cells are near the level start, because
  * the streaming descriptors at $80:B208 re-upload palettes as the camera moves
  * while the page's CGRAM is the one the init leaves; and a cell whose metatile
  * names a CGRAM row the scene's HDMA rewrites is skipped, because what the

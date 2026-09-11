@@ -677,7 +677,7 @@ names and then against every metatile the scene has:
     game_mode 3    8 of 8 cells are exactly a metatile, 8 of them the one the map names
 
 Every cell checked is exactly a metatile the view draws, pixel for pixel, and 31 of the
-32 are the one the level map names at that cell. Three things are taken out of the
+32 are the one the level map names at that cell. Three cases are excluded from the
 comparison first. Cells are taken near the level start, because the streaming
 descriptors at `$80:B208` re-upload palettes as the camera moves while the page's CGRAM
 is the one the init leaves; a cell whose metatile names a CGRAM row the scene's HDMA

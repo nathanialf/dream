@@ -642,8 +642,8 @@ static void build_frame_palettes(Gallery* g) {
  * An all-zero tile is not evidence of anything and is left out of the table.
  * What the check finds in this ROM is below, in the README: no alternate frame
  * shares more than two tiles with any live one, so no placement is borrowed and
- * the reconstruction stands on its own. The mechanism stays because it is the
- * thing that says so.
+ * the reconstruction stands on its own. The comparison stays because it is
+ * what proves that.
  * -------------------------------------------------------------------------- */
 
 /* How many tiles an alternate frame has to share with a live one before the
