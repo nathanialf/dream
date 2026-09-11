@@ -17,9 +17,16 @@
  *
  *   --frames N --input FILE     run a harness script and print the frame line
  *   --screenshot FILE           dump the 256x224 framebuffer as a binary PPM
+ *   --screenshot-ui FILE        dump the whole window, menu bar included
  *   --gallery SEC[:NAV]         open a gallery page (for the screenshot)
  *   --gallery-toggle N,ITERS    open the gallery mid-run and close it again, so a
  *                               run with the toggle can be diffed against one without
+ *   --scene-dump M[,V]:FILE     compose a level and write it as a PPM of its own size
+ *   --scene-probe M:X:Y:V:FILE  one composed screen at a camera position
+ *   --scene-verify [DIR]        every composed scene against the running game
+ *   --sprite-pal-report         how the 1555 live frames' palettes come out
+ *   --sprite-probe F:M:FLAGS:FILE  one sprite frame, drawn by the game
+ *   --sprite-verify             every forced sprite render against the game
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
@@ -54,6 +61,7 @@
 #include "sha1.h"
 #include "dream_cycles.h"   /* generated from config/recomp_cycles.txt by CMake */
 #include "gallery.h"
+#include "romfont.h"
 #include "menubar.h"
 #include "music.h"
 #include "scene.h"
@@ -436,6 +444,23 @@ static uint16_t read_keyboard(void) {
 /* The first connected pad is player 1, the second is player 2 (same fixed
  * mapping, docs/RECOMP.md); a third is ignored until one of the first two
  * goes. */
+/* Player 2 drives the first enemy (the game reads pad 2 in check_pending_player_attack),
+ * so a second device that is really the first one seen twice (XInput next to
+ * DirectInput, a Steam virtual pad next to the physical one) would move enemies with
+ * the player. A candidate only becomes player 2 when it is a different device: a
+ * different path, or a different serial when the path is unknown. */
+static bool same_device(SDL_Gamepad* a, SDL_Gamepad* b) {
+  const char* pa = SDL_GetGamepadPath(a);
+  const char* pb = SDL_GetGamepadPath(b);
+  if(pa != NULL && pb != NULL) return strcmp(pa, pb) == 0;
+  const char* sa = SDL_GetGamepadSerial(a);
+  const char* sb = SDL_GetGamepadSerial(b);
+  if(sa != NULL && sb != NULL && sa[0] != 0 && sb[0] != 0) return strcmp(sa, sb) == 0;
+  return SDL_GetGamepadVendor(a) == SDL_GetGamepadVendor(b) &&
+         SDL_GetGamepadProduct(a) == SDL_GetGamepadProduct(b) &&
+         SDL_GetGamepadType(a) != SDL_GetGamepadType(b);   /* same pad, two drivers */
+}
+
 static void open_gamepads(SDL_Gamepad** pad1, SDL_Gamepad** pad2) {
   int count = 0;
   SDL_JoystickID* ids = SDL_GetGamepads(&count);
@@ -445,7 +470,18 @@ static void open_gamepads(SDL_Gamepad** pad1, SDL_Gamepad** pad2) {
     for(int i = 0; i < count && *pad2 == NULL; i++) {
       SDL_Gamepad* p = SDL_OpenGamepad(ids[i]);
       if(p == NULL) continue;
-      if(*pad1 == NULL) *pad1 = p; else *pad2 = p;
+      dlog("input: device %d: \"%s\" path=%s serial=%s vendor=%04x product=%04x type=%d", i,
+           SDL_GetGamepadName(p) ? SDL_GetGamepadName(p) : "?",
+           SDL_GetGamepadPath(p) ? SDL_GetGamepadPath(p) : "?",
+           SDL_GetGamepadSerial(p) ? SDL_GetGamepadSerial(p) : "?",
+           SDL_GetGamepadVendor(p), SDL_GetGamepadProduct(p), (int) SDL_GetGamepadType(p));
+      if(*pad1 == NULL) { *pad1 = p; continue; }
+      if(same_device(*pad1, p)) {
+        dlog("input: device %d is the player 1 pad seen again; not assigned to player 2", i);
+        SDL_CloseGamepad(p);
+        continue;
+      }
+      *pad2 = p;
     }
     SDL_free(ids);
   }
@@ -706,6 +742,144 @@ static int scene_probe(const uint8_t* rom, size_t romLen, const char* spec) {
   return 0;
 }
 
+
+/* Metatiles against the composed scene.
+ *
+ * The Backgrounds page's third view draws a scene's metatile table, each 32x32
+ * metatile composed out of the VRAM and CGRAM that scene's init leaves. The
+ * composed scene is the same picture assembled by the game's own blitter, so
+ * every 32x32 cell of it should be one of those metatiles, pixel for pixel.
+ * That is what this measures: eight cells a scene, each compared first against
+ * the metatile the level map's own word names and then, if that is not it,
+ * against every metatile the scene has. A cell that is exactly some metatile
+ * says the view draws what the game draws; a cell that is exactly the metatile
+ * the map names says the map reading is right as well.
+ *
+ * Two things are taken out first. The cells are near the level start, because
+ * the streaming descriptors at $80:B208 re-upload palettes as the camera moves
+ * while the page's CGRAM is the one the init leaves; and a cell whose metatile
+ * names a CGRAM row the scene's HDMA rewrites is skipped, because what the
+ * composition drew it with is the last scanline's colours (docs/data_formats.md,
+ * "CGRAM after the init"). Only the pixels the metatile itself owns are
+ * compared: where its tile pixel is zero the picture is the backdrop.
+ *
+ * The metatile grid and the composed picture do not share an origin in every
+ * scene: game_mode 0 and 1 write their level layer's vertical scroll one line
+ * off the camera the composition blits at. That is the composition's business,
+ * and `--scene-verify` above is the gate on it, so the offset is found once per
+ * scene from the first cell and held for the rest.
+ */
+#define META_RGB(v) ((v) & 0xFFFFFF00u)
+#define META_N (GALLERY_META_PX * GALLERY_META_PX)
+
+/* How many of the metatile's own pixels the picture at (qx, qy) agrees with, and
+ * how many there are. */
+static void meta_cmp(const uint32_t* meta, const uint8_t* opaque, const uint32_t* img,
+                     int w, int qx, int qy, int* eq, int* tot) {
+  *eq = 0;
+  *tot = 0;
+  for(int y = 0; y < GALLERY_META_PX; y++)
+    for(int x = 0; x < GALLERY_META_PX; x++) {
+      if(!opaque[y * GALLERY_META_PX + x]) continue;
+      (*tot)++;
+      if(META_RGB(meta[y * GALLERY_META_PX + x]) ==
+         META_RGB(img[(size_t) (qy + y) * w + qx + x])) (*eq)++;
+    }
+}
+
+static int metatile_verify(const uint8_t* rom, size_t romLen, Scenes* sc) {
+  Gallery* gal = gallery_create(rom, romLen);
+  if(gal == NULL) return 0;
+  uint32_t meta[META_N];
+  uint8_t opaque[META_N];
+  int bad = 0;
+  printf("metatile-verify: the metatile view against the composed scene\n");
+  for(int mode = 0; mode < 4; mode++) {
+    scenes_request(sc, mode);
+    while(scenes_step(sc, 1000)) { }
+    SceneInfo info;
+    int w = 0, h = 0;
+    const uint32_t* img = NULL;
+    if(scenes_info(sc, &info) && info.levelBg >= 1)
+      img = scenes_image(sc, info.levelBg, &w, &h);
+    if(img == NULL) {
+      printf("  %-14s no level layer to compare against\n", scenes_mode_name(mode));
+      bad++;
+      continue;
+    }
+    uint16_t cg[256];
+    bool haveCg = scenes_cgram(sc, cg);
+    int count = gallery_metatile_count(gal, mode);
+    int checked = 0, isMeta = 0, isNamed = 0, skipped = 0, offY = 0;
+    bool aligned = false;
+    int rstep = info.rows / 3 > 0 ? info.rows / 3 : 1;
+    for(int c = 1; c < info.cols && checked < 8; c++)
+      for(int r = 0; r < info.rows && checked < 8; r += rstep) {
+        int px = c * GALLERY_META_PX, py = r * GALLERY_META_PX;
+        if(px + GALLERY_META_PX > w || py + GALLERY_META_PX + 2 > h) continue;
+        uint32_t at = info.mapAddr + (uint32_t) (2 * (c * info.rows + r));
+        if(at + 1u >= romLen) continue;
+        unsigned word = (unsigned) rom[at] | ((unsigned) rom[at + 1] << 8);
+        int named = (int) (word & 0x3FFFu);
+        if(named >= count) continue;
+
+        bool blank = true;
+        for(int y = 0; y < GALLERY_META_PX && blank; y++)
+          for(int x = 0; x < GALLERY_META_PX && blank; x++)
+            if(META_RGB(img[(size_t) (py + y) * w + px + x]) != META_RGB(img[0]))
+              blank = false;
+        if(blank) continue;      /* the sweep never reached this cell */
+
+        unsigned rows = gallery_metatile_rows(gal, mode, named);
+        bool known = true;
+        for(int row = 0; row < 8 && known && haveCg; row++) {
+          if(((rows >> row) & 1u) == 0) continue;
+          for(int k = 0; k < 16; k++)
+            if(cg[row * 16 + k] != gallery_cgram_entry(gal, mode, row * 16 + k)) known = false;
+        }
+        if(!known) { skipped++; continue; }
+
+        /* the scene's own vertical alignment, found once */
+        if(!aligned && gallery_metatile(gal, mode, named, word & 0xC000u, meta, opaque)) {
+          for(int oy = -2; oy <= 2 && !aligned; oy++) {
+            int qy = py + oy, eq = 0, tot = 0;
+            if(qy < 0 || qy + GALLERY_META_PX > h) continue;
+            meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
+            if(tot > 0 && eq == tot) { offY = oy; aligned = true; }
+          }
+        }
+        if(!aligned) continue;      /* the first cell that lines up sets the offset */
+        int qy = py + offY;
+        if(qy < 0 || qy + GALLERY_META_PX > h) continue;
+
+        checked++;
+        int eq = 0, tot = 0;
+        if(gallery_metatile(gal, mode, named, word & 0xC000u, meta, opaque))
+          meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
+        if(tot > 0 && eq == tot) { isNamed++; isMeta++; continue; }
+        /* not the metatile the map names: is it any of them? */
+        bool found = false;
+        for(int i = 0; i < count && !found; i++)
+          for(unsigned fl = 0; fl < 4 && !found; fl++) {
+            if(!gallery_metatile(gal, mode, i, fl << 14, meta, opaque)) continue;
+            meta_cmp(meta, opaque, img, w, px, qy, &eq, &tot);
+            if(tot > 0 && eq == tot) found = true;
+          }
+        if(found) isMeta++;
+      }
+    printf("  %-14s %d of %d cells are exactly a metatile, %d of them the one the"
+           " map names\n", scenes_mode_name(mode), isMeta, checked, isNamed);
+    if(skipped > 0 || offY != 0)
+      printf("                 %d skipped (CGRAM this scene's HDMA rewrites),"
+             " grid offset %d\n", skipped, offY);
+    if(isMeta != checked || checked == 0) bad++;
+  }
+  gallery_destroy(gal);
+  printf("metatile-verify: %s\n",
+         bad == 0 ? "every cell checked is exactly a metatile" : "SOME DIFFER");
+  return bad;
+}
+
 static int scene_verify(const uint8_t* rom, size_t romLen, const char* dir) {
   const int N = SCENE_SCREEN_W * SCENE_SCREEN_H;
   uint32_t* ref = malloc((size_t) N * sizeof(uint32_t));
@@ -777,12 +951,201 @@ static int scene_verify(const uint8_t* rom, size_t romLen, const char* dir) {
       if(mode == SCENE_MODE_TITLE) break;   /* one screen, no level layer */
     }
   }
+  bad += metatile_verify(rom, romLen, a);
   scenes_destroy(a);
   scenes_destroy(b);
   free(ref);
   free(crop);
   printf("scene-verify: %s\n", bad == 0 ? "all level layers exact" : "SOME DIFFER");
   return bad == 0 ? 0 : 1;
+}
+
+
+/* --sprite-probe FID:MODE:FLAGS:FILE: one sprite frame, drawn by the game.
+ *
+ * How the forced render is looked at without a display. FID is the frame id the
+ * gallery numbers frames with (entity_frame_id / 4), FLAGS the entity flag word
+ * in hex. */
+static int sprite_probe(const uint8_t* rom, size_t romLen, const char* spec) {
+  unsigned fid = 0, mode = 0, flags = 0;
+  char path[256] = "";
+  if(sscanf(spec, "%u:%u:%x:%255s", &fid, &mode, &flags, path) < 4) return 2;
+  Scenes* sc = scenes_create(rom, romLen);
+  if(sc == NULL) return 2;
+  SpriteShot shot;
+  bool ok = scenes_sprite_shot(sc, (int) mode, (uint16_t) (fid * 4), (uint16_t) flags, &shot);
+  if(!ok || shot.w == 0) {
+    printf("sprite %u: nothing drawn (%s)\n", fid, ok ? shot.why : scenes_status(sc));
+    scenes_destroy(sc);
+    return 1;
+  }
+  printf("sprite %u in %s: %d sprites, %dx%d at (%d,%d)%s -> %s\n", fid,
+         scenes_mode_name(shot.mode), shot.sprites, shot.w, shot.h, shot.x0, shot.y0,
+         shot.clipped ? ", clipped" : "", path);
+  write_ppm_size(path, shot.px, shot.w, shot.h);
+  sprite_shot_free(&shot);
+  scenes_destroy(sc);
+  return 0;
+}
+
+
+/* --sprite-verify: the forced sprite render against the running game.
+ *
+ * Two passes, and the second is the wider one.
+ *
+ * The first is the gate. For every frame id the observation scripts show in OAM,
+ * the running game's own crop of that entity is taken at the frame it was seen
+ * at, and the same frame id is then forced onto a scratch machine with the same
+ * entity flag word and the same scene. The two pictures have to be the same
+ * picture: same size, same pixels. The sprite sits somewhere else on the screen
+ * in each, which is what cropping to the entity's own OAM entries takes out.
+ *
+ * The second renders every live frame once, with the scene and flag word the
+ * page would use, and counts what came out: a picture, or a reason there is not
+ * one. */
+typedef struct {
+  SpriteShot shot;
+  bool have;
+} SpriteRef;
+
+typedef struct {
+  SpriteRef* ref;      /* by frame id / 4 */
+  int n;
+} SpriteRefSet;
+
+static void sprite_ref_cb(void* ctx, const SpriteShot* shot) {
+  SpriteRefSet* set = (SpriteRefSet*) ctx;
+  unsigned i = shot->frameId / 4u;
+  if(i >= (unsigned) set->n || set->ref[i].have) return;
+  if(!sprite_shot_copy(&set->ref[i].shot, shot)) return;
+  set->ref[i].have = true;
+}
+
+/* The two crops are the same sprite drawn in two places, so they are compared in
+ * the entity's own box rather than in screen coordinates. A crop the screen edge
+ * cut short covers only part of that box; the overlap is what can be compared,
+ * and `whole` says whether the whole box was. */
+static bool shot_same(const SpriteShot* a, const SpriteShot* b, bool* whole) {
+  *whole = false;
+  if(a->w == 0 || b->w == 0) return false;
+  if(a->uw != b->uw || a->uh != b->uh) return false;
+  int ax = a->x0 - a->ux0, ay = a->y0 - a->uy0;
+  int bx = b->x0 - b->ux0, by = b->y0 - b->uy0;
+  int x0 = ax > bx ? ax : bx, y0 = ay > by ? ay : by;
+  int x1 = (ax + a->w < bx + b->w) ? ax + a->w : bx + b->w;
+  int y1 = (ay + a->h < by + b->h) ? ay + a->h : by + b->h;
+  if(x1 <= x0 || y1 <= y0) return false;
+  for(int y = y0; y < y1; y++)
+    for(int x = x0; x < x1; x++)
+      if(a->px[(y - ay) * a->w + (x - ax)] != b->px[(y - by) * b->w + (x - bx)])
+        return false;
+  *whole = (x1 - x0) == a->uw && (y1 - y0) == a->uh;
+  return true;
+}
+
+#define SPRITE_FRAME_IDS 1558
+
+/* One line per distinct reason the game gave for drawing nothing. */
+typedef struct { char why[40]; int n; } WhyCount;
+
+static void why_add(WhyCount* w, int cap, int* used, const char* why) {
+  for(int i = 0; i < *used; i++)
+    if(strcmp(w[i].why, why) == 0) { w[i].n++; return; }
+  if(*used >= cap) return;
+  snprintf(w[*used].why, sizeof(w[*used].why), "%s", why);
+  w[*used].n = 1;
+  (*used)++;
+}
+
+static int sprite_verify(const uint8_t* rom, size_t romLen) {
+  Gallery* gal = gallery_create(rom, romLen);
+  Scenes* sc = scenes_create(rom, romLen);
+  SpriteRefSet set = { NULL, SPRITE_FRAME_IDS };
+  set.ref = calloc(SPRITE_FRAME_IDS, sizeof(SpriteRef));
+  if(gal == NULL || sc == NULL || set.ref == NULL) return 2;
+  gallery_set_scenes(gal, sc);
+
+  printf("sprite-verify: the game's own render against the game itself\n");
+  scenes_observe_request(sc);
+  while(scenes_step(sc, 1000)) { }
+  int observed = 0, derived = 0, unknown = 0, firstObs = 0;
+  gallery_frame_pal_counts(gal, &observed, &derived, &unknown, &firstObs);
+
+  scenes_sprite_walk_observed(sc, sprite_ref_cb, &set);
+  int refs = 0;
+  for(int i = 0; i < SPRITE_FRAME_IDS; i++) if(set.ref[i].have) refs++;
+
+  /* Forced renders, grouped by scene so the machine is booted four times and
+   * not once per frame. */
+  int match = 0, partial = 0, differ = 0, noshot = 0;
+  for(int mode = 0; mode < 4; mode++) {
+    for(int i = 0; i < SPRITE_FRAME_IDS; i++) {
+      if(!set.ref[i].have || set.ref[i].shot.mode != mode) continue;
+      const SpriteShot* ref = &set.ref[i].shot;
+      SpriteShot got;
+      if(!scenes_sprite_shot(sc, mode, ref->frameId, ref->flags, &got)) { noshot++; continue; }
+      bool whole = false;
+      if(got.w == 0) noshot++;
+      else if(!shot_same(ref, &got, &whole)) differ++;
+      else if(whole) match++;
+      else partial++;
+      sprite_shot_free(&got);
+    }
+  }
+  printf("  observed frames        %d of %d live frames\n", observed, observed + derived + unknown);
+  printf("  crops taken            %d (the running game, OBJ layer only, HDMA restored)\n", refs);
+  printf("  no crop                %d (the game showed the frame for one build, where\n"
+         "                         its own tiles are still the previous frame's)\n",
+         observed - refs);
+  printf("  exact, whole sprite    %d/%d\n", match, refs);
+  printf("  exact where comparable %d (the game's own sprite met a screen edge)\n", partial);
+  printf("  differ                 %d\n", differ);
+  printf("  not drawn              %d\n", noshot);
+
+  /* Every live frame once, with the scene and the flag word the page uses. */
+  WhyCount why[16];
+  int nwhy = 0, drawn = 0, empty = 0;
+  int bySource[3] = { 0, 0, 0 };
+  int n = gallery_live_count(gal);
+  for(int mode = 0; mode < 4; mode++) {
+    for(int i = 0; i < n; i++) {
+      GalleryFramePlan plan;
+      if(!gallery_frame_plan(gal, i, &plan) || plan.mode != mode) continue;
+      SpriteShot got;
+      if(!scenes_sprite_shot(sc, plan.mode, plan.frameId, plan.flags, &got)) {
+        empty++;
+        why_add(why, 16, &nwhy, "no machine");
+        continue;
+      }
+      if(got.w > 0) { drawn++; bySource[plan.source & 3]++; }
+      else {
+        empty++;
+        why_add(why, 16, &nwhy, got.why[0] ? got.why : "no reason given");
+        printf("    refused: frame %u in %s, flags %04X: %s\n",
+               (unsigned) (plan.frameId / 4), scenes_mode_name(plan.mode), plan.flags,
+               got.why);
+      }
+      sprite_shot_free(&got);
+    }
+  }
+  printf("  every live frame       %d drawn, %d refused, of %d\n", drawn, empty, n);
+  printf("                         %d at an observed palette, %d derived, %d a guess\n",
+         bySource[0], bySource[1], bySource[2]);
+  for(int i = 0; i < nwhy; i++) printf("    refused: %-34s %d\n", why[i].why, why[i].n);
+
+  int altTotal = 0, altNear = 0, altShared = 0;
+  gallery_alt_counts(gal, &altTotal, &altNear, &altShared);
+  printf("  alternate frames       %d of %d have a nearest live frame;"
+         " the most tiles any one\n"
+         "                         shares with a live frame is %d\n",
+         altNear, altTotal, altShared);
+
+  for(int i = 0; i < SPRITE_FRAME_IDS; i++) sprite_shot_free(&set.ref[i].shot);
+  free(set.ref);
+  scenes_destroy(sc);
+  gallery_destroy(gal);
+  printf("sprite-verify: %s\n", differ == 0 ? "every observed frame is exact" : "SOME DIFFER");
+  return differ == 0 ? 0 : 1;
 }
 
 /* --gallery SEC:NAV takes one gallery press per character. */
@@ -796,6 +1159,8 @@ static void gallery_nav(Gallery* gal, const char* moves) {
       case 'p': gallery_press(gal, 1u << GALLERY_BTN_L); break;
       case 'n': gallery_press(gal, 1u << GALLERY_BTN_R); break;
       case 'b': gallery_press(gal, 1u << GALLERY_BTN_B); break;
+      case 'x': gallery_press(gal, 1u << GALLERY_BTN_X); break;
+      case 'y': gallery_press(gal, 1u << GALLERY_BTN_Y); break;
       case 'a': gallery_press(gal, 1u << GALLERY_BTN_A); break;
       default: break;
     }
@@ -844,6 +1209,10 @@ int main(int argc, char** argv) {
   const char* sceneSpec = NULL;
   const char* sceneVerify = NULL;
   const char* sceneProbe = NULL;
+  const char* spriteProbe = NULL;
+  bool wantSpriteVerify = false;
+  const char* uiShotPath = NULL;
+  bool palReport = false;
   bool wantSceneVerify = false;
   int frames = 0;                 /* 0 = run until the user quits */
   int toggleFrame = -1, toggleIters = 0;
@@ -854,9 +1223,13 @@ int main(int argc, char** argv) {
     if(strcmp(a, "--frames") == 0 && hasNext) frames = atoi(argv[++i]);
     else if(strcmp(a, "--input") == 0 && hasNext) inputPath = argv[++i];
     else if(strcmp(a, "--screenshot") == 0 && hasNext) shotPath = argv[++i];
+    else if(strcmp(a, "--screenshot-ui") == 0 && hasNext) uiShotPath = argv[++i];
+    else if(strcmp(a, "--sprite-pal-report") == 0) palReport = true;
     else if(strcmp(a, "--gallery") == 0 && hasNext) gallerySpec = argv[++i];
     else if(strcmp(a, "--scene-dump") == 0 && hasNext) sceneSpec = argv[++i];
     else if(strcmp(a, "--scene-probe") == 0 && hasNext) sceneProbe = argv[++i];
+    else if(strcmp(a, "--sprite-probe") == 0 && hasNext) spriteProbe = argv[++i];
+    else if(strcmp(a, "--sprite-verify") == 0) wantSpriteVerify = true;
     else if(strcmp(a, "--scene-verify") == 0) {
       wantSceneVerify = true;
       if(hasNext && argv[i + 1][0] != '-') sceneVerify = argv[++i];
@@ -912,6 +1285,20 @@ int main(int argc, char** argv) {
     return rc;
   }
 
+  if(spriteProbe != NULL) {
+    int rc = sprite_probe(rom, romLen, spriteProbe);
+    free(rom);
+    dlog_close();
+    return rc;
+  }
+
+  if(wantSpriteVerify) {
+    int rc = sprite_verify(rom, romLen);
+    free(rom);
+    dlog_close();
+    return rc;
+  }
+
   if(wantSceneVerify) {
     int rc = scene_verify(rom, romLen, sceneVerify);
     free(rom);
@@ -924,6 +1311,15 @@ int main(int argc, char** argv) {
     free(rom);
     dlog_close();
     return rc;
+  }
+
+  /* Every glyph the app draws comes out of the image just verified: the ROM has
+   * one font and the UI uses it (recomp/app/romfont.h). Nothing is drawn before
+   * this point: a missing or wrong ROM leaves through the two returns above. */
+  if(!romfont_load(rom, romLen)) {
+    fprintf(stderr, "dream: %s has no font at %06X\n", romPath, ROMFONT_OFF);
+    free(rom);
+    return 2;
   }
 
   InputScript script = { NULL, 0 };
@@ -1126,7 +1522,11 @@ int main(int argc, char** argv) {
           break;
         case SDL_EVENT_GAMEPAD_ADDED:
           if(pad == NULL) pad = SDL_OpenGamepad(ev.gdevice.which);
-          else if(pad2 == NULL) pad2 = SDL_OpenGamepad(ev.gdevice.which);
+          else if(pad2 == NULL) {
+            SDL_Gamepad* p = SDL_OpenGamepad(ev.gdevice.which);
+            if(p != NULL && same_device(pad, p)) { dlog("input: hot-plugged device is the player 1 pad seen again; ignored"); SDL_CloseGamepad(p); }
+            else pad2 = p;
+          }
           break;
         case SDL_EVENT_GAMEPAD_REMOVED:
           if((pad != NULL && SDL_GetGamepadID(pad) == ev.gdevice.which) ||
@@ -1293,23 +1693,75 @@ int main(int argc, char** argv) {
     } else {
       dlog_stage("gallery: opening section '%s' (--gallery)", spec);
       gallery_open(gal, sec);
-      if(colon != NULL) gallery_nav(gal, colon + 1);
       /* A page that needs the scene machine gets it run to completion here: the
        * screenshot flag exists to look at a finished page, not at a progress
        * bar. Interactively the same work is spread over the paused iterations. */
-      if(gallery_wants_scenes(gal)) {
-        if(scenes == NULL) {
-          scenes = scenes_create(rom, romLen);
-          gallery_set_scenes(gal, scenes);
+      if(gallery_wants_scenes(gal) && scenes == NULL) {
+        scenes = scenes_create(rom, romLen);
+        gallery_set_scenes(gal, scenes);
+      }
+      /* Compose, then apply the moves, then compose whatever they asked for: a
+       * move can pick another scene, and a layer toggle only has views to walk
+       * once the first composition has produced them. */
+      for(int pass = 0; pass < 2; pass++) {
+        if(gallery_wants_scenes(gal) && scenes != NULL) {
+          if(gallery_section(gal) == GALLERY_SEC_SPRITES) scenes_observe_request(scenes);
+          gallery_render(gal, fb);    /* the page says which scene it wants */
+          while(scenes_step(scenes, 1000)) { }
         }
-        if(gallery_section(gal) == GALLERY_SEC_SPRITES) scenes_observe_request(scenes);
-        gallery_render(gal, fb);      /* the page says which scene it wants */
-        while(scenes_step(scenes, 1000)) { }
+        if(pass == 0 && colon != NULL) gallery_nav(gal, colon + 1);
       }
       gallery_render(gal, fb);
     }
   }
+  /* --sprite-pal-report: how the 1555 live frames come out once the observation
+   * pass has run. A number for the record, not a feature. */
+  if(palReport) {
+    if(scenes == NULL) { scenes = scenes_create(rom, romLen); gallery_set_scenes(gal, scenes); }
+    scenes_observe_request(scenes);
+    while(scenes_step(scenes, 1000)) { }
+    int o = 0, d = 0, u = 0, first = 0, seen = 0, nobs = 0;
+    gallery_frame_pal_counts(gal, &o, &d, &u, &first);
+    scenes_obs_stats(scenes, &seen, &nobs);
+    printf("sprite palettes: %d observed, %d derived only, %d unknown, of %d live frames\n",
+           o, d, u, o + d + u);
+    printf("sprite palettes: %d {scene, frame} cells seen, %d entity-frame observations,"
+           " first observed frame is item %d\n", seen, nobs, first);
+  }
+
   if(shotPath != NULL) write_ppm(shotPath, fb);
+  /* --screenshot-ui: the window as the user sees it, menu bar included. The bar is
+   * drawn with SDL primitives rather than into the framebuffer, so it is the only
+   * way to look at it without a display. */
+  if(uiShotPath != NULL) {
+    SDL_UpdateTexture(texture, NULL, fb, FB_W * (int) sizeof(uint32_t));
+    int outW = 0, outH = 0;
+    SDL_GetRenderOutputSize(renderer, &outW, &outH);
+    int barH = menubar_height(outW);
+    SDL_FRect dst = view_rect(&view, outW, outH, barH);
+    MenuModel model = { view.scaleMode, view.aspect, view.fullscreen,
+                        gallery_is_open(gal), gallery_section(gal) };
+    SDL_SetRenderDrawColor(renderer, 0x0A, 0x0C, 0x10, 255);
+    SDL_RenderClear(renderer);
+    SDL_RenderTexture(renderer, texture, NULL, &dst);
+    menubar_draw(bar, renderer, outW, &model);
+    SDL_Surface* surf = SDL_RenderReadPixels(renderer, NULL);
+    if(surf == NULL) {
+      fprintf(stderr, "dream: cannot read the window back: %s\n", SDL_GetError());
+    } else {
+      SDL_Surface* rgb = SDL_ConvertSurface(surf, SDL_PIXELFORMAT_RGB24);
+      FILE* f = rgb != NULL ? fopen(uiShotPath, "wb") : NULL;
+      if(f != NULL) {
+        fprintf(f, "P6\n%d %d\n255\n", rgb->w, rgb->h);
+        for(int yy = 0; yy < rgb->h; yy++)
+          fwrite((const uint8_t*) rgb->pixels + (size_t) yy * (size_t) rgb->pitch,
+                 1, (size_t) rgb->w * 3u, f);
+        fclose(f);
+      }
+      if(rgb != NULL) SDL_DestroySurface(rgb);
+      SDL_DestroySurface(surf);
+    }
+  }
 
   dlog_stage("run: leaving the frame loop after %d frame(s); tearing down", frame);
   if(music != NULL) music_destroy(music);

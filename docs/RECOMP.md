@@ -55,15 +55,34 @@ Mouse-driven, with a keyboard fallback (Alt/F10, arrows, Enter, Escape).
   the page in the viewport; closing resumes exactly. It shows the ROM's content that the
   game itself never displays:
 
+- each `game_mode`'s whole level and the title screen, composed out of the game's own
+  code and the emulator's own PPU rather than assembled by the viewer;
+- VRAM as each scene's init leaves it, with the palette row its maps give each tile;
 - the 113 alternate-format sprite frames and the 1555 live frames, with their palettes;
 - the unreferenced font and the three picture strips in bank `$C1`;
 - the previous build's tileset, palette block and animation-script table in the first 32 KB;
 - every BRR sample (playable), with the four the songs never use marked;
 - the stale duplicate regions, listed with what live data they shadow.
 
-Everything is decoded from the user's ROM in C at runtime using the same formats the
-Python codecs in `tools/assetcodec.py` implement; the list of what to show comes from the
-committed manifest `config/assets.txt`. Nothing from the ROM is shipped.
+Everything but the level pages is decoded from the user's ROM in C at runtime using the
+same formats the Python codecs in `tools/assetcodec.py` implement; the list of what to
+show comes from the committed manifest `config/assets.txt`. Nothing from the ROM is
+shipped.
+
+A level is the exception, because it is not a file: several tilesets at different VRAM
+addresses, a metatile map the blitter turns into tilemap columns one column a frame as
+the camera moves, a static tilemap on another layer, a palette row per tilemap word and
+a scroll register per layer written by the mode's own NMI handler. Nothing assembled by
+hand can be trusted to agree with that, so the viewer assembles nothing: a second
+machine is booted from reset (the trick the Music page already uses for the sound
+driver), its camera is walked along the level with the game's own code doing every
+upload, and the picture is read back out of the PPU that drew it. `dream --scene-verify`
+is the gate on that: a composed screen and a frame of the running game, compared pixel
+for pixel with sprites masked.
+
+The app's own lettering is the ROM's too — the 96-glyph 2bpp font at `014FE0` that no
+code in the game ever uploads. There is no other font in the binary: nothing is drawn
+before the ROM is read and its SHA-1 checked.
 
 ## Out of scope
 

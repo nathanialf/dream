@@ -70,7 +70,7 @@ add_executable(dream
   main.c
   dlog.c
   sha1.c
-  font5x7.c
+  romfont.c
   gallery.c
   menubar.c
   music.c

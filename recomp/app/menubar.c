@@ -1,26 +1,31 @@
 /* menubar: see menubar.h.
  *
- * Everything is laid out in "logical" units (the same units the 5x7 font is drawn in)
+ * Everything is laid out in "logical" units (the units the ROM's own font is drawn in)
  * and multiplied by an integer UI scale that follows the window width, so the bar looks
  * the same at every window size and hit-testing is one division away from the layout.
+ *
+ * The lettering is the game's: romfont.c decodes the 2bpp font at 014FE0 out of the
+ * loaded image, and the whole 96-glyph set goes into one texture at startup, drawn
+ * with a colour modulation per string. Spacing is proportional (romfont_advance), so
+ * the widths below are measured rather than counted.
  */
 #include "menubar.h"
 
 #include <string.h>
 
-#include "font5x7.h"
+#include "romfont.h"
 #include "gallery.h"
 
 /* logical metrics */
-#define L_BAR_H     13
+#define L_BAR_H     14
 #define L_TITLE_PAD 6
-#define L_ITEM_H    10
+#define L_ITEM_H    11
 #define L_ITEM_PAD  4
 #define L_CHECK_W   10
 #define L_SEP_H     4
 
-#define ATLAS_GLYPHS 95
-#define ATLAS_CELL   6
+#define ATLAS_GLYPHS ROMFONT_GLYPHS
+#define ATLAS_CELL   8
 
 typedef enum { CHK_NONE = 0, CHK_SCALE, CHK_FIT, CHK_ASPECT, CHK_FULL, CHK_SECTION } CheckKind;
 
@@ -90,13 +95,13 @@ struct Menubar {
 /* ---- text ---------------------------------------------------------------------- */
 
 static SDL_Texture* build_atlas(SDL_Renderer* renderer) {
-  const int w = ATLAS_GLYPHS * ATLAS_CELL, h = FONT5X7_H + 1;
+  const int w = ATLAS_GLYPHS * ATLAS_CELL, h = ROMFONT_H;
   uint32_t* px = SDL_calloc((size_t) w * (size_t) h, sizeof(uint32_t));
   if(px == NULL) return NULL;
   for(int gi = 0; gi < ATLAS_GLYPHS; gi++)
-    for(int y = 0; y < FONT5X7_H; y++)
-      for(int x = 0; x < FONT5X7_W; x++)
-        if(font5x7_pixel((char) (0x20 + gi), x, y))
+    for(int y = 0; y < ROMFONT_H; y++)
+      for(int x = 0; x < ATLAS_CELL; x++)
+        if(romfont_pixel(0x20u + (unsigned) gi, x, y))
           px[y * w + gi * ATLAS_CELL + x] = 0xFFFFFFFFu;
   SDL_Texture* t = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
                                      SDL_TEXTUREACCESS_STATIC, w, h);
@@ -110,7 +115,7 @@ static SDL_Texture* build_atlas(SDL_Renderer* renderer) {
 }
 
 static int text_w(const char* s) {
-  return (int) strlen(s) * FONT5X7_ADVANCE;
+  return romfont_text_w(s);
 }
 
 static void draw_text(Menubar* mb, SDL_Renderer* r, int s, float x, float y,
@@ -119,13 +124,14 @@ static void draw_text(Menubar* mb, SDL_Renderer* r, int s, float x, float y,
   SDL_SetTextureColorMod(mb->atlas, cr, cg, cb);
   for(const char* p = str; *p != 0; p++) {
     unsigned c = (unsigned char) *p;
-    if(c >= 0x20 && c < 0x20 + ATLAS_GLYPHS) {
+    int gw = romfont_glyph_w(c);
+    if(gw > 0) {
       SDL_FRect src = { (float) ((int) (c - 0x20) * ATLAS_CELL), 0.0f,
-                        (float) FONT5X7_W, (float) FONT5X7_H };
-      SDL_FRect dst = { x, y, (float) (FONT5X7_W * s), (float) (FONT5X7_H * s) };
+                        (float) gw, (float) ROMFONT_H };
+      SDL_FRect dst = { x, y, (float) (gw * s), (float) (ROMFONT_H * s) };
       SDL_RenderTexture(r, mb->atlas, &src, &dst);
     }
-    x += (float) (FONT5X7_ADVANCE * s);
+    x += (float) (romfont_advance(c) * s);
   }
 }
 

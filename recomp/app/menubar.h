@@ -1,7 +1,7 @@
 /* menubar: the desktop-style menu bar drawn across the top of the window.
  *
  * SDL3 has no native menus, so the bar is drawn by the app with render primitives and
- * the app's own 5x7 font (font5x7.c), above the game viewport. Mouse-driven, with a
+ * the ROM's own font (romfont.c), above the game viewport. Mouse-driven, with a
  * keyboard fallback: Alt or F10 focuses the bar, arrows move, Enter selects, Escape
  * closes. It never touches emulator state; every item it can produce is an action the
  * caller performs.

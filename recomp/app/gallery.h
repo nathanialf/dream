@@ -51,6 +51,42 @@ struct Scenes;
 void gallery_set_scenes(Gallery* g, struct Scenes* sc);
 /* True while an open page still wants the composer stepped. */
 bool gallery_wants_scenes(const Gallery* g);
+
+/* How the live sprite frames come out: seen in OAM by the scene machine, derived
+ * from the entity/animation tables only, or neither. `firstObserved` is the
+ * 1-based position of the first observed frame in the page's own list, which is
+ * what --gallery sprites:NAV counts in. Counts are 0 until the pass has run. */
+/* What the Sprite frames page draws live frame `item` with: the frame id the
+ * entity array holds, the scene, and the entity flag word (OBJ tile slot,
+ * palette, priority). `source` says where the palette came from. */
+#define GALLERY_PAL_OBSERVED 0
+#define GALLERY_PAL_DERIVED  1
+#define GALLERY_PAL_GUESS    2
+typedef struct {
+  uint16_t frameId;
+  uint16_t flags;
+  uint8_t mode;
+  uint8_t source;
+} GalleryFramePlan;
+int gallery_live_count(const Gallery* g);
+uint16_t gallery_cgram_entry(const Gallery* g, int mode, int entry);
+unsigned gallery_metatile_rows(const Gallery* g, int mode, int index);
+bool gallery_frame_plan(const Gallery* g, int item, GalleryFramePlan* out);
+/* Alternate-format frames, and how many of them a live frame shares tiles with. */
+void gallery_alt_counts(const Gallery* g, int* total, int* withNearest, int* sharedTiles);
+
+/* One 32x32 metatile of a scene, composed through the VRAM and CGRAM that
+ * scene's init leaves, into `out` (32*32 pixels, 0xRRGGBBXX). `flip` carries the
+ * level map word's bits 14 and 15. `opaque`, when given, is 32*32 bytes and gets
+ * 1 where the tile pixel was not the transparent value: everywhere else the
+ * picture is the backdrop, which the metatile does not own. */
+#define GALLERY_META_PX 32
+int gallery_metatile_count(const Gallery* g, int mode);
+bool gallery_metatile(const Gallery* g, int mode, int index, unsigned flip, uint32_t* out,
+                      uint8_t* opaque);
+
+void gallery_frame_pal_counts(const Gallery* g, int* observed, int* derived,
+                              int* unknown, int* firstObserved);
 void gallery_destroy(Gallery* g);
 
 const char* gallery_section_name(int section);

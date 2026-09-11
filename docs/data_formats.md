@@ -144,31 +144,31 @@ format that no traced code reads (no table anywhere in the ROM points at it): 8-
 then `n` x 3-byte `{x, y, attr}` OAM records, then 4bpp tiles. With no frame table and no traced
 emitter to follow, boundaries were recovered purely from the bytes: `attr` only ever takes
 values in a narrow band (0x1C-0x22 cleanly, with 0x1D/0x1F appearing 6 times total out of 2539
-records -- almost certainly tile bytes that coincidentally land in that band right after a real
+records, almost certainly tile bytes that coincidentally land in that band right after a real
 run ends), so a maximal run of >= 8 consecutive records with `attr` in that band is a strong,
-essentially unmistakable signal of "real OAM records here." `tools/gen_assets.py`'s
+unmistakable signal of "real OAM records here." `tools/gen_assets.py`'s
 `parse_sprite_frame_alt_region` chain-walks each region on exactly that signal: the 8 bytes
 before a qualifying run are that frame's header, and the frame runs up to the next qualifying
 run's header (folding in its own tile data and, when the byte count left over is not a multiple
-of 32, a short undecoded trailer -- same convention as the live format's trailer). This
+of 32, a short undecoded trailer, same convention as the live format's trailer). This
 reproduces exactly 82 + 31 frames, matching the manual header-scan estimate already in section 1
 (68 strict / 113 relaxed hits) with no fudging. A 283-byte partial frame at `1FFEE5-200000` is
-simply this same shape cut off by the end of the ROM (5 records, 8 whole tiles, a few leftover
-bytes) -- not a separate "no structure" region.
+this same shape cut off by the end of the ROM (5 records, 8 whole tiles, a few leftover
+bytes), not a separate "no structure" region.
 
 Byte 3 of the header is 0x00 in every frame; the remaining bytes correlate loosely with the
 record/tile counts but not through one invertible formula (e.g. two frames with byte-identical
 headers can have different record counts), so the header is carried through as an opaque 8-byte
-blob rather than decoded into named fields -- nothing is lost, since the codec never needs to
+blob rather than decoded into named fields: nothing is lost, since the codec never needs to
 parse it to find the records (their own `attr` band identifies them).
 
 `attr` decodes losslessly as a standard SNES OBJ low-attribute byte, `vhppp p N` bit for bit:
 bit 7 v-flip, bit 6 h-flip, bits 5-4 priority, bits 3-1 palette, bit 0 tile-index bit 8. Across
 all 113 frames the *only* values that appear outside the 6 likely-noise records above are 0x1E
-and 0x20 (2062 + 471 of 2539 records) -- i.e. v-flip and h-flip are 0 in every real record (no
+and 0x20 (2062 + 471 of 2539 records): v-flip and h-flip are 0 in every real record (no
 frame is ever mirrored), while priority and palette do vary (0x1E = priority 1, palette 6; 0x20
 = priority 2, palette 0). There is no dedicated "size" bit in this byte; SNES OBJ size comes from
-a separate high-table bit per pair of sprites, which this format does not carry at all -- see
+a separate high-table bit per pair of sprites, which this format does not carry at all: see
 below for what the tile counts imply about size instead of the header.
 
 Unlike the live format there is no known VRAM-upload code to say how records map to tiles, so
@@ -178,8 +178,8 @@ tiles), which rules out the live format's 4-tiles/16x16-sprite rule outright (th
 per record minimum, i.e. >=88 for 22 records) and is consistent with 8x8, 1-tile sprites instead,
 so each record claims one tile in sequence and unclaimed tiles spill below the canvas exactly
 like the live decoder's spill strip. Most tiles end up spilling (median 33 of ~50 tiles per
-frame, versus 16% for the live format), so this guess is honestly a weak reconstruction of
-*layout* -- but it does not weaken round-trip exactness (the sidecar's `tiles` array is
+frame, versus 16% for the live format), so this guess is a weak reconstruction of
+*layout*, but it does not weaken round-trip exactness (the sidecar's `tiles` array is
 authoritative regardless, exactly as for the live format), and the tile art itself, once
 rendered, is unambiguously more sprite tiles in the same house style as the live frames (see the
 render below): mid-size 4bpp character/creature fragments, same tile size and similar palette
@@ -201,8 +201,8 @@ measured against the running game with `dream_harness --dump-cgram/--dump-oam`.
 `dma_upload_to_cgram` (`sub_C0A483`) takes `A` = source address in bank `$C4`, `X` =
 byte count / 8 and `Y` = `CGADD`, so one call writes `X * 4` colours starting at CGRAM
 entry `Y`. Each scene issues four of them, in a fixed order, and a later narrower call
-overwrites part of an earlier wide one — which is the whole mechanism by which two scenes
-give the same sprite two different palettes.
+overwrites part of an earlier wide one, so two scenes can give the same sprite two different
+palettes.
 
 | scene | order | CGADD | colours | source | call site |
 |---|---|---|---|---|---|
@@ -233,7 +233,7 @@ Replaying those in order gives the CGRAM each scene runs with:
 | 1 | `046EA8` | `$80-$9F` `046C48`; `$A0-$AF` `046D08`; `$B0-$BF` `046D88`; `$C0-$FF` `046C48` + `$40` colours (= `046CC8`), except `$E1` from `008791` |
 | 2 | `046FE3` | `$80-$BF` `046C48`; then `$C0-$FF` `046C48` again, so rows 4-7 repeat rows 0-3; then `$E0-$EF` `046CC8` on top |
 | 3 | `047343` | `$80-$BF` `046C48`; then `$C0-$FF` `046C48` again (rows 4-7 repeat rows 0-3); then `$A0-$AF` `047443` on top |
-| title | `06A36B`, all 256 entries; BGMODE 3's BG1 is 8bpp, so the pixel byte *is* the CGRAM index and the tilemap's palette field does not apply | — (no OBJ on the title's `TM $01`) |
+| title | `06A36B`, all 256 entries; BGMODE 3's BG1 is 8bpp, so the pixel byte *is* the CGRAM index and the tilemap's palette field does not apply | none (no OBJ on the title's `TM $01`) |
 
 Per OBJ palette that is:
 
@@ -250,7 +250,7 @@ drawn with palette 0 in mode 0 and palette 4 in mode 2 comes out in the same col
 
 #### CGRAM after the init
 
-Four things rewrite CGRAM once the scene is running, so a capture of the live game need
+Four sources rewrite CGRAM once the scene is running, so a capture of the live game need
 not agree with the table above everywhere:
 
 - mode 1's HDMA channel 1 (`DMAP1 $03`, `BBAD1 $21` = `CGADD`/`CGDATA`, armed at
@@ -266,8 +266,8 @@ not agree with the table above everywhere:
 - the streaming descriptors at `00B208` re-upload a 32-byte palette to CGRAM `$70`.
   There are two runs, both selected by `sub_C09C62` for the only caller it has,
   `mode0_weather_zone_update`, so both belong to `game_mode` 0: the first ends with
-  `046E88`, which is `046DA8` + `$70` colours — the sixteen colours the init already put
-  there, so it restores rather than changes — and the second with `0470E3`, sixteen
+  `046E88`, which is `046DA8` + `$70` colours (the sixteen colours the init already put
+  there, so it restores rather than changes) and the second with `0470E3`, sixteen
   colours that are genuinely different. No script under `recomp/harness/inputs/` reaches
   the second zone; in every mode-0 capture CGRAM `$70-$7F` holds the init's values.
 
@@ -286,7 +286,7 @@ byte is `BG12NBA`/`BG1SC` and the high byte `BG34NBA`/`BG2SC`:
 | 1 | 1 | `$52` (BG1 `$2000`, BG2 `$5000`) | `$05` | `$79` -> `$7800` | `$70` -> `$7000` | `$74` -> `$7400` |
 | 2 | 1 | `$26` (BG1 `$6000`, BG2 `$2000`) | `$06` | `$5A` -> `$5800` | `$79` -> `$7800` | `$74` -> `$7400` |
 | 3 | 9 | `$26` (BG1 `$6000`, BG2 `$2000`) | `$06` | `$58` -> `$5800` | `$79` -> `$7800` | `$5C` -> `$5C00` |
-| title | 3 | `$00` (BG1 chars `$0000`) | — | `$60` -> `$6000` | — | — |
+| title | 3 | `$00` (BG1 chars `$0000`) | - | `$60` -> `$6000` | - | - |
 
 In every scene the metatile blitter (`build_metatile_column_580`/`_500` and their
 `vram_upload_column_*` partners) writes its columns and rows to VRAM `$7800`, which the
@@ -307,17 +307,17 @@ of the set it is paired with.
 | 2 | BG1 | `$6000` | `07DF82` (`bg2_tiles_mode2.bin`) | 207 | `0B1000` (`$5800`) | 206 | **0** (686 of 1024) |
 | 3 | BG2 | `$2000` | `080000` (`bg1_tiles_mode3.bin`) | 854 | `0A37A0` metatiles_mode3 | 853 | **3** (761 of 2144) |
 | 3 | BG1 | `$6000` | `095AC0` (`bg2_tiles_mode3.bin`) | 384 | `0B3800` (`$5800`) | 383 | **0** (717 of 1024) |
-| title | BG1 | `$0000` (`stz BG12NBA`) | `06002B` 8bpp, DMA'd to VRAM `$0600` | 627 | — (8bpp: no palette field) | — | — |
+| title | BG1 | `$0000` (`stz BG12NBA`) | `06002B` 8bpp, DMA'd to VRAM `$0600` | 627 | none (8bpp: no palette field) | - | - |
 
 The title's tiles land at VRAM `$0600` with a character base of `$0000`; 8bpp tiles are
-32 words each, so the first of them is tile index `$0600 / $20` = 48 — which is exactly
+32 words each, so the first of them is tile index `$0600 / $20` = 48, exactly
 the `+$0030` the init adds to every word of its four tilemaps at `$BC66` onward.
 
 Two notes on the names. The manifest's `bg1_`/`bg2_` file names were assigned from the
 upload order, not from the registers, so in modes 0, 2 and 3 they are the other way round
 from the PPU's BG numbers; the table above uses the registers. And mode 1's `050000`
-(32 2bpp tiles, DMA'd to VRAM `$1E00`) cannot be BG3 chars under `BG34NBA $05` — `$1E00`
-is below that base and inside the OBJ tile area the sprite-frame DMAs use — so the
+(32 2bpp tiles, DMA'd to VRAM `$1E00`) cannot be BG3 chars under `BG34NBA $05` (`$1E00`
+is below that base and inside the OBJ tile area the sprite-frame DMAs use), so the
 manifest's "game_mode 1 BG3" note on it is not supported by the registers; left open.
 
 A bare tileset page has no tilemap word to take a row from, so "the row most of its tiles
@@ -328,12 +328,12 @@ word's own bits 12-10 pick the row and nothing is guessed.
 #### Sprites: which OBJ palette a frame is drawn with
 
 `entity_build_oam_frame` loads `entity_flags` (`$0788,Y`) into `$18` and `$1A` at
-`$C0A5BE` as a 16-bit store. The six emitters then work on `$1A` in 8-bit mode only —
-`lda $1E ; adc $18 ; sta $1A` builds the tile number — and write the pair back to OAM
+`$C0A5BE` as a 16-bit store. The six emitters then work on `$1A` in 8-bit mode only
+(`lda $1E ; adc $18 ; sta $1A` builds the tile number) and write the pair back to OAM
 with a 16-bit `sta $02,X`. So the high half, `$1B`, is untouched from `$C0A5BE` onward
 and **every sprite of the frame carries `entity_flags >> 8` as its OAM attribute byte**.
-That byte is the standard OBJ low-attribute layout section 1c decodes — bit 7 v-flip,
-bit 6 h-flip, bits 5-4 priority, bits 3-1 palette, bit 0 tile-index bit 8 — so the OBJ
+That byte is the standard OBJ low-attribute layout section 1c decodes (bit 7 v-flip,
+bit 6 h-flip, bits 5-4 priority, bits 3-1 palette, bit 0 tile-index bit 8), so the OBJ
 palette is `(entity_flags >> 9) & 7`.
 
 `entity_flags` is written by `entity_init_from_table` (`$C09D6A`) from byte +12 of the
@@ -342,7 +342,7 @@ palette is `(entity_flags >> 9) & 7`.
 
 | site | operation | bits it can change |
 |---|---|---|
-| `$C0996A` | `and #$BFFF ; ora facing_flag_table,Y` | 14 (h-flip) — the table holds only `$0000`/`$4000` |
+| `$C0996A` | `and #$BFFF ; ora facing_flag_table,Y` | 14 (h-flip): the table holds only `$0000`/`$4000` |
 | `$C0B1CD` | the same pair, from `sub_C0B1B1` | 14 |
 | `$C09AD5` | `eor`/`and #$7000`/`eor` (copy from parent) | 12-14 |
 | `$C09BA6` | the same, `#$7000` | 12-14 |
@@ -374,19 +374,19 @@ state machine can put an entity in any of the twelve even states `$00`-`$16`
 ever ORs `$0002`/`$0012` into the low bits), so a type's reachable animations are that
 whole row. Three types take theirs from another entity instead:
 
-- `$00` — `entity_init_from_table`'s own special case: `entity_anim_id` is the record's
+- `$00`: `entity_init_from_table`'s own special case: `entity_anim_id` is the record's
   second word verbatim, not a table lookup;
-- `$04` (`entity_spawn_transform_a`) — parent's animation + 2 (`$C09AE4`);
-- `$06` (`entity_spawn_transform_b`) — parent's + 4 (`$C09B3F`), except that `game_mode` 1
+- `$04` (`entity_spawn_transform_a`): parent's animation + 2 (`$C09AE4`);
+- `$06` (`entity_spawn_transform_b`): parent's + 4 (`$C09B3F`), except that `game_mode` 1
   forces `$0158` (`$C09B77`) and `game_mode` 2 returns before touching the animation at
   all (`$C09B0B`), which is why mode 2's slot 2 never shows a frame;
-- `$0A` (`entity_spawn_transform_c`) — parent's + 4 + `$0BB6` (`$C09BC0`/`$C09BC3`), and
+- `$0A` (`entity_spawn_transform_c`): parent's + 4 + `$0BB6` (`$C09BC0`/`$C09BC3`), and
   `$0BB6` cycles 2 -> 4 -> 0 at `$C081DB`; at 0 the entity is not drawn, so the reachable
   set is parent + 6 and parent + 8.
 
 From animation to frames: each id indexes `data_C41858` (174 words, 96 distinct scripts);
 a script is 8-byte `{callback, mode, duration, frame}` records running to whichever comes
-first — a `duration` of `$FFFE` (loop), a `duration` of `$FFFF` (switch to the animation
+first: a `duration` of `$FFFE` (loop), a `duration` of `$FFFF` (switch to the animation
 id in `frame`, followed here as a link), or the next script's offset. Every `frame` field
 is a byte index into the frame table at `040000`, whose entry gives the frame's bank and
 pointer.
@@ -417,7 +417,7 @@ The 114 alternate-format frames (section 1c) have no frame-table entry at all, s
 animation can name them; their nearest evidence is internal. Their 3-byte `{x, y, attr}`
 records carry an OBJ attribute byte of their own, and across all of them only `$1E`
 (priority 1, palette 6) and `$20` (priority 2, palette 0) occur, so each frame's own
-records give it a palette index — read off the frame, not inferred from anything else.
+records give it a palette index, read off the frame, not inferred from anything else.
 
 The one OBJ tileset the game uploads as tiles rather than as a frame, `0502C0` (96 tiles
 to VRAM `$1600` in mode 0), is the particle set: `mode1_reset_particles_and_oam` builds
@@ -430,7 +430,7 @@ random priority.
 after every frame, out of the same snapshot the frame line hashes.
 
 CGRAM. The table built from the uploads above equals the capture on **all 256 entries the
-init writes** for the title (`mode_cycle.txt` frame 100 — the fade-in finishes at frame 76
+init writes** for the title (`mode_cycle.txt` frame 100, the fade-in finishes at frame 76
 and it matches from there to the end of the title), `game_mode` 0 (`level_walk_jump.txt`
 frame 400 and `mode_cycle.txt` frame 250), `game_mode` 2 (frame 490) and `game_mode` 3
 (frame 610). `game_mode` 1 (frame 370) differs on **11 of 256**, and they are exactly the
@@ -453,12 +453,69 @@ bytes read, for example: mode 0 frame 400 `$20` x14, `$22` x11, `$84` x10, `$3F`
 `$17` x2; mode 2 frame 490 `$6A` x14, `$2F` x12, `$68` x10, `$29` x2; mode 3 frame 610
 `$2A` x14, `$28` x13, `$8C` x9.
 
-One thing the sampling has to respect: `game_mode` (`$A4`) changes about 46 frames before
+Observed, at run time. `recomp/app/scene.c` does the same comparison inside the app,
+on a machine of its own, and keeps the result: over `mode_cycle.txt` (700 frames),
+`level_walk_jump.txt` (620) and `level_attack_enemy.txt` (620) it records, for every
+frame id an entity is showing while that entity's `entity_flags >> 8` is one of the
+attribute bytes in the OAM the PPU just drew from, the palette bits that byte carries.
+**4583 entity-frame observations** over those 1940 frames name **194 of the 1555 live
+frames**, each in exactly one scene; 869 more have a derived palette and no observation,
+and 492 have neither. Every observation agrees with the derivation. Adding
+`p2_enemy_attack.txt` as a fourth script (game_mode 2, with player 2 attacking) raises
+the observation count to 5887 and the frame count not at all: the scripts loop over a
+small set of animations, and that is the honest ceiling of what watching the game can
+say.
+
+One point the sampling has to respect: `game_mode` (`$A4`) changes about 46 frames before
 `entity_init_from_table` repopulates the entity arrays, because the Select mode-advance
 sets the mode and then fades out before the re-init runs. In `mode_cycle.txt` the mode
 changes at frames 257, 377, 497 and 617 and the roster matches the new mode's init records
 from frames 304, 423, 543 and 684. Sampling inside that gap compares the *old* scene's
 entities against the *new* scene's number and looks like a contradiction; it is not one.
+
+### 1e. The bank `$C1` picture strips: tile base and what they say
+
+`010000`, `012800` and `013300` are 32x4 tilemaps (128 words each) with a 4bpp tileset
+behind each of them, and nothing in the ROM uploads any of it, so the base a tile number
+counts from has to come out of the bytes rather than off a `VMADDL` write.
+
+Each map pads with one index over and over (all three pad with `$044`) and its content
+runs upward from just above it. If the set holds an all-zero tile, that is the tile the
+pad means, so the base is `pad - (that tile's index)`; if the set holds none, the pad is
+below the set and the base is the lowest content index, which puts the first
+content tile at tile 0. That gives a **different base per strip**:
+
+| strip | map | tileset | tiles | pad | content | all-zero tiles | base | words outside the set |
+|---|---|---|---:|---|---|---|---|---:|
+| 1 | `010000` | `010100-012800` | 312 | `$044` x56 | `$045`-`$089` | 0, 78, 158, 218 | `$44` | 0 |
+| 2 | `012800` | `012900-013300` | 80 | `$044` x42 | `$050`-`$095` | none | `$50` | 0 |
+| 3 | `013300` | `013400-014FE0` | 223 | `$044` x19 | `$045`-`$0A0` | 1, 102, 145 | `$43` | 0 |
+
+With those bases **no word in any of the three maps lands outside its own set**: nothing
+spills into the next region, which the single `$44` the earlier reading used could not
+say (it left strip 2's two highest words out of range and drew strip 2's and strip 3's
+padding as real tiles: the dotted band and the striped band in the old render).
+
+Rendered at those bases the three read as baseball captions: strip 1 `STRIKE 1`, strip 2
+`TIME` … `OUT` (two blocks of eleven columns with a gap between them), strip 3 `HIT BY`
+… `PITCH`, the caption starting in the right half of row 0 and continuing on rows 2-3.
+
+The sets are larger than one caption needs (strip 1 is 312 tiles for a 70-tile caption),
+and every all-zero tile in a set starts another block of the same shape, four in strip
+1 and three in strip 3. Re-basing the *same* map onto strip 1's second block (base
+`$44 - 78`) reads as `STRIKE 2`; the later blocks want maps of their own, which are not
+in the ROM, so they come out mis-tiled. Strip 1's first 256 bytes repeat at `+$9C0`,
+exactly 78 tiles on, which is the same block spacing.
+
+Palette: every word of all three maps carries palette 7 and priority 1, and nothing
+uploads a palette 7 for them, so there is no answer, only a best guess. Ranking the
+ROM's own 16-colour rows by what the art needs (colour 0 dark and the other fifteen a
+monotone ramp, since the tiles use all sixteen values with 52% of pixels at 0) puts row
+7 of the main palette block (`046C48 + 7*32` = `046D28`) first: it is the row the words
+name, and it is a clean fifteen-step gold ramp. The runners-up are `046EA8` row 2, the
+previous build's `007AC8` row 30, and `046FE3` row 7. The 2bpp font at `014FE0` is a
+separate case: only pixel values 0 and 1 ever occur in it, so only entries 0 and 1
+matter, and the title palette's row 0 (`06A36B`: black, then white) is the best of them.
 
 ## 2. Sample tile renders (ASCII, 4bpp/8bpp pixel value -> ` .:-=+*#%@ABCDEF`, 2bpp -> ` .:#`)
 
@@ -600,8 +657,8 @@ sub-boundaries:
   the file, folding in the 2-40 byte undecoded trailer bytes documented in 1b. Result: 1555
   `data/sprites/frame_NNNN.bin` assets, globally numbered in file order, with zero overlaps
   and gap sizes matching the documented trailer range exactly. The two alternate-format
-  regions (`1CC6AA-1F0000`, `1F2E14-1FFEE5`) are not code-referenced by any table -- there is no
-  table at all -- so their boundaries instead come from `parse_sprite_frame_alt_region`'s
+  regions (`1CC6AA-1F0000`, `1F2E14-1FFEE5`) are not code-referenced by any table (there is no
+  table at all), so their boundaries instead come from `parse_sprite_frame_alt_region`'s
   header/record-run chain walk (section 1c): 82 + 31 = 113 `data/sprites/frame_alt_NNNN.bin`
   assets of kind `sprite_frame_alt`, plus the 283-byte partial trailing frame which keeps its
   existing `sprite_frame_tail.bin` path (there is nothing to split it into). Splitting these
@@ -631,8 +688,8 @@ sub-boundaries:
 Every other regions.txt row becomes a single asset; its `kind` follows the regions.txt `class`
 plus a note-keyword check for the finer distinctions the manifest makes that regions.txt does
 not (tile bit depth from `8bpp`/`2bpp` in the note; `maps` rows split into `hdma`, `tilemap`,
-`metatiles`, or the `map` fallback for the handful of level-scene tables -- wave/parallax/scroll
-curves, per-mode parameter tables -- that are code-referenced but not literally a tilemap,
+`metatiles`, or the `map` fallback for the handful of level-scene tables (wave/parallax/scroll
+curves, per-mode parameter tables) that are code-referenced but not literally a tilemap,
 metatile set, level map, or HDMA table; `music` rows split into `sfx_bank`, the `filler` sfx
 bank 2 placeholder run, and `spc_table` for the rest). `code` covers `main_program.bin`
 (`0x008000-0x00C00D`) and `sound_iface.bin` (`0x018000-0x01841A`) under `data/misc/`, plus the
@@ -672,7 +729,7 @@ palette word's bit 15, a sprite frame's trailer, a BRR record's pad bytes) rathe
 It decodes each asset of a codec-carrying kind into `build/assets/<same subpath as data/>`,
 re-encodes, and compares with `data/`. `--update` rewrites `config/roundtrip.txt` with exactly
 the kinds at **100%** pass; `tools/progress.py` reads that file to decide which data bytes count
-as matched. Nothing here is committed -- `build/` is gitignored like `data/` (docs/LEGAL.md 1).
+as matched. Nothing here is committed: `build/` is gitignored like `data/` (docs/LEGAL.md 1).
 
 | kind | primary editable form | sidecar | notes |
 |---|---|---|---|
@@ -702,8 +759,8 @@ sprite owns tiles `t, t+1, t+16, t+17`. Group 1's `ntiles1` tiles land at grid s
 The PNG is that assembly: sprites drawn at their OAM `(x, y)`, canvas cropped to their bounding
 box (`canvas.origin_x` / `origin_y` record the crop). Sprite positions are not 8-pixel aligned,
 so ownership is tracked per *pixel*: the first tile to claim a pixel keeps it, and any VRAM tile
-that could not be placed uniquely -- overlapped by an earlier sprite, or never referenced by one
--- is appended to a spill strip below the canvas, 16 tiles per row. The `tiles` array in the
+that could not be placed uniquely (overlapped by an earlier sprite, or never referenced by one)
+is appended to a spill strip below the canvas, 16 tiles per row. The `tiles` array in the
 sidecar gives the authoritative 8x8 source rect of every VRAM tile, and `encode` reads tiles from
 those rects, so the round trip is exact regardless of how the frame assembles. Across the 1555
 live frames, 84% of the 35242 VRAM tiles sit in the assembled canvas and 279 frames assemble with
@@ -712,7 +769,7 @@ no spill at all. Editing a tile that the canvas draws twice only takes effect at
 
 Caveats worth knowing: frame ids `< 4` are emitted by `oam_emit_frame_1row` with a 5-byte header,
 so for those one or two frames the OAM list in the sidecar is shifted (the bytes still round-trip,
-since the extra header bytes simply parse as OAM records).
+since the extra header bytes parse as OAM records).
 
 ### Alternate sprite frames
 
@@ -720,7 +777,7 @@ since the extra header bytes simply parse as OAM records).
 partial frame, now split one-frame-per-asset. `decode_sprite_frame_alt` re-runs the same
 attr-in-0x1C-0x22 record-run scan used to find the frame's own boundary (a pure function of the
 frame's own bytes, so it always reproduces the same record count `n` the asset was split on),
-giving header (8 bytes, kept as an opaque hex blob -- see 1c for why), `n` OAM records, and
+giving header (8 bytes, kept as an opaque hex blob: see 1c for why), `n` OAM records, and
 whatever whole 32-byte tiles are left (plus a 0-31 byte `tile_trailer` when that does not divide
 evenly). Each OAM record's `attr` byte is decoded losslessly into `vflip`/`hflip`/`priority`/
 `palette`/`name_bit` (the 5 fields partition all 8 bits, so `encode` reconstructs `attr` from
@@ -729,12 +786,12 @@ them, or from a raw `attr` field if present, with no loss for any byte value).
 The PNG assembles one 8x8 tile per OAM record, in record order, at that record's `(x, y)`; the
 canvas crop and spill strip work exactly like the live decoder (first tile to claim a pixel keeps
 it, everything else spills 16-wide below). This tile-per-record assignment is a **documented
-guess**, not a derivation -- no live code drives this format, so there is no emitter to confirm
+guess**, not a derivation: no live code drives this format, so there is no emitter to confirm
 it against, and the live format's own 4-tiles/16x16-sprite rule cannot apply here (it would need
 >=4 tiles per record; these frames average ~2.4). It also does not assemble as cleanly as the
 live format: a median of 33 of ~50 tiles spill per frame, versus 16% for the live format. None of
-that affects round-trip exactness -- the sidecar's `tiles` array is authoritative regardless of
-how the canvas assembles, exactly as for `sprite_frame` -- but the assembled PNG should be read
+that affects round-trip exactness (the sidecar's `tiles` array is authoritative regardless of
+how the canvas assembles, exactly as for `sprite_frame`), but the assembled PNG should be read
 as "these are more 4bpp sprite tiles, laid out somewhere in this frame" rather than a confirmed
 picture of the frame as the game would have drawn it.
 
@@ -763,8 +820,8 @@ from each channel/sfx pointer and from every jump/call target, using the opcode 
 `spc/spc_map.txt` with the event lengths read off the `mov $00,#$nn` (`tmp0` = total event length)
 in each handler of `spc/driver.asm`; note events are 1 byte when a note length is latched
 (seq cmd `$06`) and 2 otherwise (3 with the stale gate mode). Each event re-encodes to its own
-bytes -- notes as `{note, operands}`, commands as `{cmd, code, operands}`, control transfers as
-`{cmd, code, target}` (plus `count` for `$04`) -- so anything the walk does not reach stays a
+bytes: notes as `{note, operands}`, commands as `{cmd, code, operands}`, control transfers as
+`{cmd, code, target}` (plus `count` for `$04`), so anything the walk does not reach stays a
 `raw` hex run and exactness never depends on the parse being semantically right. In practice the
 three real songs parse to 1829 / 1116 / 207 events with 32 / 31 / 27 bytes left raw, and
 `sfx_bank1`'s 21 sequences parse to 222 events with none. The small pointer/count assets
@@ -785,7 +842,7 @@ already count as matched in `tools/progress.py` for exactly that reason. `entity
 codec-carrying kinds, so all 17 are in `config/roundtrip.txt`: `anim_script`, `anim_table`, `brr`,
 `hdma`, `map`, `metatiles`, `palette`, `sfx_bank`, `song`, `spc_table`, `sprite_frame`,
 `sprite_frame_alt`, `sprite_table`, `tilemap`, `tileset_2bpp`, `tileset_4bpp`, `tileset_8bpp`.
-That is 1833792 bytes, 87.4% of the 2 MiB image (unchanged from before -- the alternate-format
+That is 1833792 bytes, 87.4% of the 2 MiB image (unchanged from before: the alternate-format
 bytes were already counted as matched, just via the `format: "raw"` escape hatch), now reachable
 as editable files (3625 files, 10808425 bytes under `build/assets/`). No asset decodes to
 `format: "raw"` any more: every codec-carrying kind has real recovered structure.
